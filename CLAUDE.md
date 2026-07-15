@@ -14,11 +14,12 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 - **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
 - **Memory**: local Postgres (`ultron` database), native LangGraph checkpointing (`@langchain/langgraph-checkpoint-postgres`). Single persistent thread (`ultron-main`) for now.
 - **Interface**: terminal in v0.1, Telegram is next (grammY planned).
-- **Language**: the project (code, console output, docs, agent responses) is in English.
+- **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [SOUL.md](SOUL.md) and reinforced in the system prompt in `src/agent/graph.ts`. Do not let it default to English regardless of input language.
 - **Security intentionally minimal**: the user explicitly asked for **no Docker, no hardened secret management, full bypass of manual permissions/confirmations**. This is NOT an oversight — do not reintroduce sandboxing or confirmation gates without an explicit request.
 - **Logs**: explicitly not required by the user for now. Do not add a logging/audit system without being asked.
 - **Stop**: Ctrl+C must interrupt the loop at any time, including mid LLM call (AbortController).
 - **No sub-agents for coding this project**: the user explicitly asked not to use the Agent/sub-agent tool to develop ULTRON. Work directly.
+- **Docs stay current**: update PLAN.md / README.md / CLAUDE.md whenever a change makes them stale (new tool, new phase started, a decision changes) — don't let them drift from the actual code state.
 
 ## Known roadmap (do not build ahead of a request)
 
