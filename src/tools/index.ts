@@ -1,7 +1,8 @@
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { runShellCommand } from "./shell.js";
 import { readFile, writeFile, editFile, listDirectory, searchFiles } from "./fs.js";
-import { fetchUrl } from "./web.js";
+import { fetchUrl, httpRequest, webSearch } from "./web.js";
+import { listProcesses, killProcess } from "./process.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -13,6 +14,10 @@ export const tools: StructuredToolInterface[] = [
   listDirectory,
   searchFiles,
   fetchUrl,
+  httpRequest,
+  webSearch,
+  listProcesses,
+  killProcess,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -25,4 +30,8 @@ export const toolScopes: Record<string, ToolScope> = {
   list_directory: "read",
   search_files: "read",
   fetch_url: "read",
+  http_request: "write",
+  web_search: "read",
+  list_processes: "read",
+  kill_process: "destructive",
 };
