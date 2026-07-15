@@ -8,6 +8,5 @@ export function createNemotronModel(): ChatOpenAI {
     configuration: {
       baseURL: config.nemotronBaseUrl,
     },
-    streaming: true,
   });
 }

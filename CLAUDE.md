@@ -1,37 +1,38 @@
 # CLAUDE.md — ULTRON
 
-Instructions pour toute session Claude Code travaillant sur ce repo.
+Instructions for any Claude Code session working on this repo.
 
-## Contexte du projet
+## Project context
 
-ULTRON est un agent IA personnel construit sur mesure par l'utilisateur, en remplacement d'OpenClaw et Hermes Agent. Raison du choix : perte de controle ressentie avec ces frameworks (cf. cas documente ou un agent OpenClaw a supprime des centaines d'emails malgre une consigne d'attendre une approbation — aucun checkpoint technique ne bloquait l'action).
+ULTRON is a personal AI agent built from scratch by the user, replacing OpenClaw and Hermes Agent. Reason for the switch: loss of control felt with those frameworks (see documented case where an OpenClaw agent deleted hundreds of emails despite being instructed to wait for approval — no technical checkpoint blocked the action).
 
-Le contexte complet des recherches (derniers modeles IA, comparatif OpenClaw vs Hermes Agent, failles de securite/architecture a eviter, idees de use-cases vie perso) est dans [docs/agent-ia-personnel.md](docs/agent-ia-personnel.md). A lire avant toute decision d'architecture qui s'ecarte du plan initial.
+The full research context (latest AI models, OpenClaw vs Hermes Agent comparison, security/architecture pitfalls to avoid, personal-life use case ideas) lives in [docs/agent-ia-personnel.md](docs/agent-ia-personnel.md) — written in French, kept as-is as a historical research artifact. Read it before any architecture decision that departs from the original plan.
 
-## Decisions d'architecture actees
+## Architecture decisions already made
 
-- **Modele** : Nemotron (API NVIDIA) exclusivement pour l'instant — pas de multi-provider.
-- **Orchestrateur** : LangGraph.js — l'utilisateur possede la boucle et le state, pas un framework "boite noire".
-- **Memoire** : Postgres local (base `ultron`), checkpointing LangGraph natif (`@langchain/langgraph-checkpoint-postgres`). Un seul thread persistant (`ultron-main`) pour l'instant.
-- **Interface** : terminal en v0.1, Telegram viendra ensuite (grammY prevu).
-- **Securite volontairement allegee** : l'utilisateur a explicitement demande **pas de Docker, pas de gestion de secrets renforcee, bypass complet des permissions/confirmations manuelles**. Ce n'est PAS un oubli — ne pas reintroduire de sandboxing ou de garde-fous de confirmation sans demande explicite.
-- **Logs** : explicitement non requis par l'utilisateur pour l'instant. Ne pas ajouter de systeme de logging/audit sans qu'il le demande.
-- **Arret** : Ctrl+C doit pouvoir interrompre la boucle a tout moment, y compris pendant un appel LLM en cours (AbortController).
-- **Pas de sous-agents pour coder ce projet** : l'utilisateur a explicitement demande de ne pas utiliser l'outil Agent/sous-agents pour developper ULTRON. Travailler directement.
+- **Model**: Nemotron (NVIDIA API) exclusively for now — no multi-provider setup.
+- **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
+- **Memory**: local Postgres (`ultron` database), native LangGraph checkpointing (`@langchain/langgraph-checkpoint-postgres`). Single persistent thread (`ultron-main`) for now.
+- **Interface**: terminal in v0.1, Telegram is next (grammY planned).
+- **Language**: the project (code, console output, docs, agent responses) is in English.
+- **Security intentionally minimal**: the user explicitly asked for **no Docker, no hardened secret management, full bypass of manual permissions/confirmations**. This is NOT an oversight — do not reintroduce sandboxing or confirmation gates without an explicit request.
+- **Logs**: explicitly not required by the user for now. Do not add a logging/audit system without being asked.
+- **Stop**: Ctrl+C must interrupt the loop at any time, including mid LLM call (AbortController).
+- **No sub-agents for coding this project**: the user explicitly asked not to use the Agent/sub-agent tool to develop ULTRON. Work directly.
 
-## Roadmap connue (a ne pas anticiper sans demande)
+## Known roadmap (do not build ahead of a request)
 
-1. Boucle + memoire (etape actuelle)
-2. Interface Telegram
-3. Outils avec scopes (read / write / destructive) — meme si les confirmations manuelles sont desactivees par choix utilisateur, garder les scopes déclarés dans le code pour lisibilite
-4. Application separee style "Codex" pour le vibe coding, avec une conversation principale qui orchestre des sous-agents en arriere-plan pour gerer des projets. Ne pas commencer cette partie sans demande explicite — elle a ete volontairement mise de cote lors de la conception initiale.
+1. Loop + memory (current stage, done)
+2. Telegram interface
+3. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity
+4. Separate "Codex-style" app for vibe coding, with a main conversation orchestrating background sub-agents to manage projects. Do not start this without an explicit request — it was deliberately deferred during initial design.
 
 ## Stack
 
-TypeScript (Node 24+) / pnpm / LangGraph.js / Postgres / `@langchain/openai` (client compatible OpenAI pointe vers l'API NVIDIA).
+TypeScript (Node 24+) / pnpm / LangGraph.js / Postgres / `@langchain/openai` (OpenAI-compatible client pointed at the NVIDIA API).
 
-## Conventions Git
+## Git conventions
 
-- `main` : stable
-- `develop` : travail courant
-- Commit + push a chaque modification du code (demande explicite de l'utilisateur — ne pas grouper plusieurs changements en un seul commit differe).
+- `main`: stable
+- `develop`: current work
+- Commit + push on every code change (explicit user request — do not batch multiple changes into one deferred commit).

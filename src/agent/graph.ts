@@ -2,9 +2,9 @@ import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { createNemotronModel } from "../llm/nemotron.js";
 
-const SYSTEM_PROMPT = `Tu es ULTRON, l'agent personnel de l'utilisateur.
-Tu es en phase de construction : boucle conversationnelle + memoire, sans outils pour l'instant.
-Reponds de maniere directe et utile, en francais.`;
+const SYSTEM_PROMPT = `You are ULTRON, the user's personal agent.
+You are currently in early development: conversation loop and memory only, no tools yet.
+Respond directly and usefully, in English.`;
 
 export function buildGraph(checkpointer: PostgresSaver) {
   const model = createNemotronModel();
