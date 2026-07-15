@@ -5,7 +5,7 @@ import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { AIMessage } from "@langchain/core/messages";
 import type { BaseMessageLike } from "@langchain/core/messages";
-import type { Runnable, RunnableConfig } from "@langchain/core/runnables";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import type { ZodObject, ZodRawShape } from "zod";
 import { createNemotronModel } from "../llm/nemotron.js";
@@ -36,30 +36,7 @@ function routeAfterAgent(state: typeof MessagesAnnotation.State) {
 // request limit reached") that the OpenAI SDK's own retry logic doesn't
 // catch, since it only covers the initial request, not stream errors.
 const RETRYABLE_ERROR = /resourceexhausted|rate.?limit/i;
-const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 1000;
-
-async function invokeWithRetry(
-  model: Runnable<BaseMessageLike[], AIMessage>,
-  messages: BaseMessageLike[],
-  runConfig: RunnableConfig,
-) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await model.invoke(messages, runConfig);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const retryable = RETRYABLE_ERROR.test(message);
-      if (!retryable || attempt >= MAX_ATTEMPTS || runConfig.signal?.aborted) throw err;
-
-      const delay = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
-      console.error(
-        `[ultron] transient API error, retrying in ${delay}ms (attempt ${attempt}/${MAX_ATTEMPTS}): ${message}`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-}
 
 // Nemotron occasionally "calls" a tool by writing its JSON arguments as
 // plain reply text instead of using the real tool_calls mechanism — no
@@ -90,7 +67,11 @@ function looksLikeFakeToolCall(content: unknown): boolean {
   return toolArgKeySets.some((argKeys) => keys.every((k) => argKeys.has(k)));
 }
 
-const MAX_FAKE_TOOL_CALL_RETRIES = 5;
+// Shared across both retry reasons (transient API error, fake tool call) so
+// a bad run can't multiply the two into a combined worst case of a dozen-plus
+// sequential API calls — that's what was actually causing multi-minute
+// replies, not any single retry path on its own.
+const MAX_ATTEMPTS = 4;
 
 // Once a fake tool call has been generated it lives on in persisted history
 // (the checkpointer keeps every past turn on the single "ultron-main"
@@ -116,36 +97,53 @@ export function buildGraph(checkpointer: PostgresSaver) {
         { role: "system" as const, content: SYSTEM_PROMPT },
         ...sanitizeHistory(state.messages),
       ];
-      // Forward runConfig so LangGraph's callback manager can intercept
-      // per-token chunks for streamMode "messages".
-      let response = await invokeWithRetry(model, messages, runConfig);
 
-      let attempt = 1;
-      while (
-        !response.tool_calls?.length &&
-        looksLikeFakeToolCall(response.content) &&
-        attempt < MAX_FAKE_TOOL_CALL_RETRIES
-      ) {
-        attempt++;
+      // Only the first attempt streams live — runConfig carries the
+      // callback manager LangGraph uses to forward per-token chunks to the
+      // outer streamMode "messages" consumer. A retry that reused it would
+      // stream its own output live right on top of whatever the discarded
+      // attempt already sent — duplicate text on screen, verified live: a
+      // "Salut !" reply came back from a transient-error retry with the
+      // exact same wording (it's a SOUL.md example) and printed twice.
+      // Retries run "silent" instead — no live callback forwarding — and
+      // whichever attempt is finally accepted becomes the turn's message.
+      const silentConfig: RunnableConfig = { ...runConfig, callbacks: undefined };
+
+      let response: AIMessage | undefined;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const invokeConfig = attempt === 1 ? runConfig : silentConfig;
+        try {
+          response = await model.invoke(messages, invokeConfig);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (!RETRYABLE_ERROR.test(message) || attempt === MAX_ATTEMPTS || runConfig.signal?.aborted) throw err;
+          const delay = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+          console.error(
+            `[ultron] transient API error, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_ATTEMPTS}): ${message}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        if (response.tool_calls?.length || !looksLikeFakeToolCall(response.content)) break;
+
+        if (attempt === MAX_ATTEMPTS) break;
         console.error(
-          `[ultron] model wrote a tool call as plain text instead of using it — discarding and retrying (attempt ${attempt}/${MAX_FAKE_TOOL_CALL_RETRIES})`,
+          `[ultron] model wrote a tool call as plain text instead of using it — discarding and retrying (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
         );
-        response = await invokeWithRetry(model, messages, runConfig);
       }
 
       // Never surface a fabricated tool call/result as if it were a real
       // answer — after exhausting retries, replace it with an explicit
       // failure notice instead of passing fiction through as fact.
-      if (!response.tool_calls?.length && looksLikeFakeToolCall(response.content)) {
-        console.error(
-          `[ultron] gave up after ${MAX_FAKE_TOOL_CALL_RETRIES} attempts — the model never issued a real tool call for this turn.`,
-        );
+      if (response && !response.tool_calls?.length && looksLikeFakeToolCall(response.content)) {
+        console.error(`[ultron] gave up after ${MAX_ATTEMPTS} attempts — the model never issued a real tool call for this turn.`);
         response = new AIMessage(
           "[ultron] Tool call failed to register after several attempts — I'm not going to guess at the answer. Ask again.",
         );
       }
 
-      return { messages: [response] };
+      return { messages: [response as AIMessage] };
     })
     .addNode("tools", new ToolNode(tools))
     .addEdge(START, "agent")

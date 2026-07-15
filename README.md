@@ -10,7 +10,7 @@ Personal AI agent. Built from scratch (not OpenClaw, not Hermes Agent) to keep f
 - Eleven tools wired in, `src/tools/`: `run_shell_command`, `read_file`, `write_file`, `edit_file`, `list_directory`, `search_files`, `fetch_url`, `http_request`, `web_search`, `list_processes`, `kill_process` — registered with declared scopes (read / write / destructive) in `src/tools/index.ts`. The web/process tools are modeled on [OpenClaw](https://github.com/openclaw/openclaw)'s own tool categories (`exec`, `web_search`, `web_fetch`, `process`), read directly from its GitHub docs rather than installed.
 - System prompt is split across two files: [SOUL.md](SOUL.md) (personality only) and [AGENT.md](AGENT.md) (tool-use protocol and every other operational rule) — see the note at the top of each
 - Full visibility into tool activity in the terminal: tool calls and their raw results are printed inline as they happen, not hidden
-- Automatic retry with backoff on transient NVIDIA API errors (e.g. mid-stream `ResourceExhausted`) — see `invokeWithRetry` in `src/agent/graph.ts`
+- Unified retry loop (transient API errors + fake tool calls share one budget, max 4 attempts) — see the `agent` node in `src/agent/graph.ts`. Only the first attempt streams live; retries run with callbacks stripped so a retried response can never print a duplicate of text already shown (this actually happened: a retried "Salut !" reply reused a SOUL.md example verbatim and printed twice before the fix).
 - Guardrail against fake tool calls (see below) — see `looksLikeFakeToolCall` / `sanitizeHistory` in `src/agent/graph.ts`
 - No sandboxing (Docker), no manual per-action confirmation — a deliberate choice by the user
 
@@ -28,8 +28,8 @@ Mitigated in `src/agent/graph.ts`:
 - `looksLikeFakeToolCall` detects a plain-text reply shaped like a real
   tool's arguments (derived from each tool's own zod schema, so it
   generalizes to new tools).
-- On detection, the turn is silently retried (up to 5 attempts) rather than
-  accepted.
+- On detection, the turn is silently retried (sharing the same 4-attempt
+  budget as transient-error retries — see above) rather than accepted.
 - `sanitizeHistory` strips any such fake messages already sitting in
   persisted history out of the prompt on every turn, so old pollution can't
   keep re-poisoning new generations.
