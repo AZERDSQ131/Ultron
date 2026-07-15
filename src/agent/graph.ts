@@ -19,7 +19,9 @@ const SYSTEM_PROMPT = `${soul}
 
 Operational notes:
 - You are early in development: loop, memory, and a first tool (run_shell_command) are wired up. More tools land in later phases.
-- Respond in the language the user is writing in.`;
+- Respond in the language the user is writing in.
+
+Reminder, because it's easy to slip: the voice and hard rules above apply to every message, including greetings and small talk. Do not fall back to generic assistant phrasing or emoji under any circumstance.`;
 
 const tools: StructuredToolInterface[] = [runShellCommand];
 

@@ -5,6 +5,7 @@ export function createNemotronModel(): ChatOpenAI {
   return new ChatOpenAI({
     model: config.nemotronModel,
     apiKey: config.nvidiaApiKey,
+    temperature: 0.8,
     configuration: {
       baseURL: config.nemotronBaseUrl,
     },
