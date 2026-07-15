@@ -26,6 +26,9 @@ importers:
       pg:
         specifier: ^8.13.1
         version: 8.22.0
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^22.13.1

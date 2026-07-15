@@ -58,11 +58,19 @@ async function main() {
           },
         );
 
-        stdout.write("ultron ‣ ");
+        let wrotePrefix = false;
         for await (const [chunk] of stream) {
-          if (typeof chunk.content === "string") {
-            stdout.write(chunk.content);
+          // Only stream the agent's own reply text — tool_call chunks carry
+          // no content, and tool result messages (type "tool") are raw
+          // output, not something to print inline as if ULTRON said it.
+          if (chunk.getType() !== "ai" || typeof chunk.content !== "string" || !chunk.content) {
+            continue;
           }
+          if (!wrotePrefix) {
+            stdout.write("ultron ‣ ");
+            wrotePrefix = true;
+          }
+          stdout.write(chunk.content);
         }
         stdout.write("\n\n");
       } catch (err) {

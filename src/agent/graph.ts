@@ -1,17 +1,27 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import type { AIMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { createNemotronModel } from "../llm/nemotron.js";
+import { runShellCommand } from "../tools/shell.js";
 
-const SYSTEM_PROMPT = `You are ULTRON, the user's personal agent.
-You are currently in early development: conversation loop and memory only, no tools yet.
-Respond directly and usefully, in English.`;
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Phase 3 will populate this. Kept empty for now so the agentic loop
-// (agent <-> tools) is already wired and ready to receive real tools.
-const tools: StructuredToolInterface[] = [];
+const soul = readFileSync(join(__dirname, "..", "..", "SOUL.md"), "utf-8");
+
+const SYSTEM_PROMPT = `${soul}
+
+---
+
+Operational notes:
+- You are early in development: loop, memory, and a first tool (run_shell_command) are wired up. More tools land in later phases.
+- Respond in the language the user is writing in.`;
+
+const tools: StructuredToolInterface[] = [runShellCommand];
 
 function routeAfterAgent(state: typeof MessagesAnnotation.State) {
   const last = state.messages.at(-1) as AIMessage;
