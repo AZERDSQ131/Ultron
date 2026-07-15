@@ -59,12 +59,52 @@ async function main() {
         );
 
         let wrotePrefix = false;
+        let inToolCall = false;
+        const announcedToolCalls = new Set<string | number>();
+
         for await (const [chunk] of stream) {
-          // Only stream the agent's own reply text — tool_call chunks carry
-          // no content, and tool result messages (type "tool") are raw
-          // output, not something to print inline as if ULTRON said it.
-          if (chunk.getType() !== "ai" || typeof chunk.content !== "string" || !chunk.content) {
+          const type = chunk.getType();
+
+          if (type === "tool") {
+            if (inToolCall) {
+              stdout.write("\n");
+              inToolCall = false;
+            }
+            const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
+            stdout.write(`[tool result · ${toolName}]\n${chunk.content}\n\n`);
             continue;
+          }
+
+          if (type !== "ai") continue;
+
+          const toolCallChunks = (
+            chunk as unknown as {
+              tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[];
+            }
+          ).tool_call_chunks;
+
+          if (toolCallChunks?.length) {
+            for (const tc of toolCallChunks) {
+              const key = tc.index ?? tc.id ?? tc.name ?? 0;
+              if (tc.name && !announcedToolCalls.has(key)) {
+                if (wrotePrefix) {
+                  stdout.write("\n\n");
+                  wrotePrefix = false;
+                }
+                stdout.write(`[tool call · ${tc.name}] `);
+                announcedToolCalls.add(key);
+              }
+              if (tc.args) stdout.write(tc.args);
+            }
+            inToolCall = true;
+            continue;
+          }
+
+          if (typeof chunk.content !== "string" || !chunk.content) continue;
+
+          if (inToolCall) {
+            stdout.write("\n\n");
+            inToolCall = false;
           }
           if (!wrotePrefix) {
             stdout.write("ultron ‣ ");

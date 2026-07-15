@@ -7,8 +7,22 @@ Personal AI agent. Built from scratch (not OpenClaw, not Hermes Agent) to keep f
 - Conversation loop in the terminal (Telegram comes later)
 - Model: Nemotron (NVIDIA API) via the OpenAI-compatible endpoint
 - Persistent memory via LangGraph + Postgres (checkpointing, thread `ultron-main`)
-- No tools wired in yet — loop and memory only
+- First tool wired in: `run_shell_command` (see `src/tools/shell.ts`)
+- Full visibility into tool activity in the terminal: tool calls and their raw results are printed inline as they happen, not hidden
+- Automatic retry with backoff on transient NVIDIA API errors (e.g. mid-stream `ResourceExhausted`) — see `invokeWithRetry` in `src/agent/graph.ts`
 - No sandboxing (Docker), no manual per-action confirmation — a deliberate choice by the user
+
+### Known issue — unreliable tool calling
+
+The NVIDIA-hosted Nemotron model does not consistently use proper structured
+function-calling when a tool is available. Roughly half the time (observed
+empirically) it instead writes a plausible-looking JSON blob as normal reply
+text — or fabricates an entire fake tool call *and* fake result, presented as
+if it had actually run something. No real command executes in that case; the
+"output" is hallucinated. This is not caught or hidden — the visibility work
+above makes it show up directly in the terminal so it's obvious when it
+happens. Not yet fixed; flagged here as a known limitation of this model on
+this endpoint, not a bug in the loop itself.
 
 ## Setup
 
