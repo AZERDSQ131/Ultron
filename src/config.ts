@@ -13,8 +13,8 @@ export const config = {
   nemotronModel: process.env.NEMOTRON_MODEL ?? "nvidia/nemotron-3-super-120b-a12b",
   nemotronBaseUrl: process.env.NEMOTRON_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
   databaseUrl: process.env.DATABASE_URL ?? "postgresql://localhost:5432/ultron",
-  // Reference point for the context gauge in the CLI. Confirmed via NVIDIA's
-  // own NIM API docs (docs.api.nvidia.com) and model card: nemotron-3-super
-  // supports up to 1M tokens of context.
-  contextWindowTokens: Number(process.env.CONTEXT_WINDOW_TOKENS ?? 1_000_000),
+  // Reference point for the context gauge in the CLI: 262,144 tokens
+  // (~262k), per the user directly — the "up to 1M" figure surfaced by web
+  // search was wrong for this served model, trust the correction over that.
+  contextWindowTokens: Number(process.env.CONTEXT_WINDOW_TOKENS ?? 262_144),
 };
