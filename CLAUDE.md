@@ -14,7 +14,8 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 - **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
 - **Memory**: local Postgres (`ultron` database), native LangGraph checkpointing (`@langchain/langgraph-checkpoint-postgres`). Single persistent thread (`ultron-main`) for now.
 - **Interface**: terminal in v0.1, Telegram is next (grammY planned).
-- **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [SOUL.md](SOUL.md) and reinforced in the system prompt in `src/agent/graph.ts`. Do not let it default to English regardless of input language.
+- **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [AGENT.md](AGENT.md). Do not let it default to English regardless of input language.
+- **System prompt split**: [SOUL.md](SOUL.md) is personality only (voice, tone, examples). [AGENT.md](AGENT.md) is everything else — tool-use protocol, language matching, other operational rules. Don't fold one into the other; `src/agent/graph.ts` concatenates both at startup.
 - **Security intentionally minimal**: the user explicitly asked for **no Docker, no hardened secret management, full bypass of manual permissions/confirmations**. This is NOT an oversight — do not reintroduce sandboxing or confirmation gates without an explicit request.
 - **Logs**: explicitly not required by the user for now. Do not add a logging/audit system without being asked.
 - **Stop**: Ctrl+C must interrupt the loop at any time, including mid LLM call (AbortController).
@@ -25,7 +26,7 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 
 1. Loop + memory (current stage, done)
 2. Telegram interface
-3. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity
+3. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity. In progress: shell + filesystem tools done (`src/tools/`), mail/calendar still pending (need OAuth).
 4. Separate "Codex-style" app for vibe coding, with a main conversation orchestrating background sub-agents to manage projects. Do not start this without an explicit request — it was deliberately deferred during initial design.
 
 ## Stack

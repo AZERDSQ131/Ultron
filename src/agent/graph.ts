@@ -6,29 +6,24 @@ import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { AIMessage } from "@langchain/core/messages";
 import type { BaseMessageLike } from "@langchain/core/messages";
 import type { Runnable, RunnableConfig } from "@langchain/core/runnables";
-import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import type { ZodObject, ZodRawShape } from "zod";
 import { createNemotronModel } from "../llm/nemotron.js";
-import { runShellCommand } from "../tools/shell.js";
+import { tools } from "../tools/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const soul = readFileSync(join(__dirname, "..", "..", "SOUL.md"), "utf-8");
+const agentNotes = readFileSync(join(__dirname, "..", "..", "AGENT.md"), "utf-8");
 
+// SOUL.md is personality only; AGENT.md carries the tool-use protocol and
+// every other operational rule. Keep that split — don't fold either back
+// into this file or into the other .md.
 const SYSTEM_PROMPT = `${soul}
 
 ---
 
-Operational notes:
-- You are early in development: loop, memory, and a first tool (run_shell_command) are wired up. More tools land in later phases.
-- Respond in the language the user is writing in.
-
-Reminder, because it's easy to slip: the voice and hard rules above apply to every message, including greetings and small talk. Do not fall back to generic assistant phrasing or emoji under any circumstance.
-
-Language, one more time because it's the easiest rule to drop under pressure: match the language of the user's most recent message, exactly, every time — regardless of which language any example above happens to use. If the user just wrote in French, reply in French even if the closest example in this prompt was in English.`;
-
-const tools: StructuredToolInterface[] = [runShellCommand];
+${agentNotes}`;
 
 function routeAfterAgent(state: typeof MessagesAnnotation.State) {
   const last = state.messages.at(-1) as AIMessage;

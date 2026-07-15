@@ -7,7 +7,8 @@ Personal AI agent. Built from scratch (not OpenClaw, not Hermes Agent) to keep f
 - Conversation loop in the terminal (Telegram comes later)
 - Model: Nemotron (NVIDIA API) via the OpenAI-compatible endpoint
 - Persistent memory via LangGraph + Postgres (checkpointing, thread `ultron-main`)
-- First tool wired in: `run_shell_command` (see `src/tools/shell.ts`)
+- Seven tools wired in, `src/tools/`: `run_shell_command`, `read_file`, `write_file`, `edit_file`, `list_directory`, `search_files`, `fetch_url` — registered with declared scopes (read / write / destructive) in `src/tools/index.ts`
+- System prompt is split across two files: [SOUL.md](SOUL.md) (personality only) and [AGENT.md](AGENT.md) (tool-use protocol and every other operational rule) — see the note at the top of each
 - Full visibility into tool activity in the terminal: tool calls and their raw results are printed inline as they happen, not hidden
 - Automatic retry with backoff on transient NVIDIA API errors (e.g. mid-stream `ResourceExhausted`) — see `invokeWithRetry` in `src/agent/graph.ts`
 - Guardrail against fake tool calls (see below) — see `looksLikeFakeToolCall` / `sanitizeHistory` in `src/agent/graph.ts`
@@ -61,5 +62,5 @@ See [docs/agent-ia-personnel.md](docs/agent-ia-personnel.md) (French) for the fu
 
 1. ~~Loop + memory~~ (done)
 2. Telegram interface (replaces/complements the terminal)
-3. Tools (with read / write / destructive scopes)
+3. Tools (with read / write / destructive scopes) — filesystem and shell tools done; mail/calendar still to come, they need OAuth setup
 4. Separate "vibe coding" app, Codex-style, with background sub-agents orchestrated from a main conversation
