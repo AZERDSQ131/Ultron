@@ -22,10 +22,17 @@ function rule(): string {
   return chalk.dim("─".repeat(ruleWidth()));
 }
 
+function contextBarColor(ratio: number): (text: string) => string {
+  if (ratio < 0.5) return chalk.greenBright;
+  if (ratio < 0.8) return chalk.yellowBright;
+  return chalk.redBright;
+}
+
 function renderContextBar(usedTokens: number, maxTokens: number): string {
   const ratio = Math.min(usedTokens / maxTokens, 1);
   const filled = Math.round(ratio * CONTEXT_BAR_WIDTH);
-  const bar = chalk.redBright("█".repeat(filled)) + chalk.dim("░".repeat(CONTEXT_BAR_WIDTH - filled));
+  const fillColor = contextBarColor(ratio);
+  const bar = fillColor("█".repeat(filled)) + chalk.dim("░".repeat(CONTEXT_BAR_WIDTH - filled));
   const pct = Math.round(ratio * 100);
   const maxLabel =
     maxTokens >= 1_000_000
@@ -33,7 +40,7 @@ function renderContextBar(usedTokens: number, maxTokens: number): string {
       : maxTokens >= 1000
         ? `${Math.round(maxTokens / 1000)}k`
         : String(maxTokens);
-  return `${chalk.dim("context")}  ${bar}  ${usedTokens.toLocaleString()} / ${maxLabel} tokens (${pct}%)`;
+  return `${chalk.dim("context")}  ${bar}  ${usedTokens.toLocaleString()} / ${maxLabel} tokens (${fillColor(`${pct}%`)})`;
 }
 
 function printBanner() {
