@@ -27,13 +27,18 @@ function renderContextBar(usedTokens: number, maxTokens: number): string {
   const filled = Math.round(ratio * CONTEXT_BAR_WIDTH);
   const bar = chalk.redBright("█".repeat(filled)) + chalk.dim("░".repeat(CONTEXT_BAR_WIDTH - filled));
   const pct = Math.round(ratio * 100);
-  const maxLabel = maxTokens >= 1000 ? `${Math.round(maxTokens / 1000)}k` : String(maxTokens);
+  const maxLabel =
+    maxTokens >= 1_000_000
+      ? `${maxTokens / 1_000_000}M`
+      : maxTokens >= 1000
+        ? `${Math.round(maxTokens / 1000)}k`
+        : String(maxTokens);
   return `${chalk.dim("context")}  ${bar}  ${usedTokens.toLocaleString()} / ${maxLabel} tokens (${pct}%)`;
 }
 
 function printBanner() {
   const art = readFileSync(join(__dirname, "ascii-art.txt"), "utf-8").trimEnd();
-  console.log(chalk.redBright(art));
+  console.log(art);
   console.log();
   console.log(`  ${chalk.dim("model")}    ${config.nemotronModel}`);
   console.log(`  ${chalk.dim("memory")}   connected · thread ${THREAD_ID}`);
