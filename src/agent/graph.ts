@@ -10,9 +10,11 @@ export function buildGraph(checkpointer: PostgresSaver) {
   const model = createNemotronModel();
 
   const graph = new StateGraph(MessagesAnnotation)
-    .addNode("agent", async (state) => {
+    .addNode("agent", async (state, runConfig) => {
       const messages = [{ role: "system" as const, content: SYSTEM_PROMPT }, ...state.messages];
-      const response = await model.invoke(messages);
+      // Forward runConfig so LangGraph's callback manager can intercept
+      // per-token chunks for streamMode "messages".
+      const response = await model.invoke(messages, runConfig);
       return { messages: [response] };
     })
     .addEdge(START, "agent")

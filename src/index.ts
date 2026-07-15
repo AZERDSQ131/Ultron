@@ -49,17 +49,27 @@ async function main() {
 
       abortController = new AbortController();
       try {
-        const result = await graph.invoke(
+        const stream = await graph.stream(
           { messages: [new HumanMessage(input)] },
           {
             configurable: { thread_id: THREAD_ID },
             signal: abortController.signal,
+            streamMode: "messages",
           },
         );
-        const last = result.messages.at(-1);
-        console.log(`ultron ‣ ${last?.content}\n`);
+
+        stdout.write("ultron ‣ ");
+        for await (const [chunk] of stream) {
+          if (typeof chunk.content === "string") {
+            stdout.write(chunk.content);
+          }
+        }
+        stdout.write("\n\n");
       } catch (err) {
-        if (abortController.signal.aborted) break;
+        if (abortController.signal.aborted) {
+          stdout.write("\n\n");
+          break;
+        }
         console.error("[ultron] error:", err);
       }
     }
