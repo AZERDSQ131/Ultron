@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { AIMessage } from "@langchain/core/messages";
-import type { BaseMessageLike } from "@langchain/core/messages";
+import type { BaseMessage, BaseMessageLike } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import type { ZodObject, ZodRawShape } from "zod";
@@ -24,6 +24,34 @@ const SYSTEM_PROMPT = `${soul}
 ---
 
 ${agentNotes}`;
+
+// Nemotron's NVIDIA endpoint doesn't return usage in the stream (see
+// nemotron.ts), so there's no exact token count to show. This is a rough
+// chars/4 estimate — good enough to render a context gauge, not a billing
+// figure. Exported so index.ts can use the same estimate for both the
+// per-turn "tokens generated" line and the overall context bar.
+export function estimateTokens(text: string): number {
+  return Math.max(1, Math.round(text.length / 4));
+}
+
+const SYSTEM_PROMPT_TOKENS = estimateTokens(SYSTEM_PROMPT);
+
+function messageTokens(message: BaseMessage): number {
+  const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+  return estimateTokens(content);
+}
+
+// Reads the persisted thread's current message list back out (no extra
+// model call) and estimates total context size — system prompt included —
+// so index.ts can render a "how full is the context window" gauge.
+export async function estimateContextUsage(
+  graph: { getState(config: RunnableConfig): Promise<{ values: { messages?: BaseMessage[] } }> },
+  threadId: string,
+): Promise<number> {
+  const state = await graph.getState({ configurable: { thread_id: threadId } });
+  const messages = state.values.messages ?? [];
+  return SYSTEM_PROMPT_TOKENS + messages.reduce((sum, m) => sum + messageTokens(m), 0);
+}
 
 function routeAfterAgent(state: typeof MessagesAnnotation.State) {
   const last = state.messages.at(-1) as AIMessage;

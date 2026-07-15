@@ -4,7 +4,7 @@ Personal AI agent. Built from scratch (not OpenClaw, not Hermes Agent) to keep f
 
 ## Current state (v0.1)
 
-- Conversation loop in the terminal (Telegram comes later)
+- Conversation loop in the terminal (Telegram comes later), styled with `chalk` — colored role labels, dim tool activity, a per-turn stats line (elapsed time + estimated tokens generated), and a context-usage gauge after every exchange
 - Model: Nemotron (NVIDIA API) via the OpenAI-compatible endpoint
 - Persistent memory via LangGraph + Postgres (checkpointing, thread `ultron-main`)
 - Eleven tools wired in, `src/tools/`: `run_shell_command`, `read_file`, `write_file`, `edit_file`, `list_directory`, `search_files`, `fetch_url`, `http_request`, `web_search`, `list_processes`, `kill_process` — registered with declared scopes (read / write / destructive) in `src/tools/index.ts`. The web/process tools are modeled on [OpenClaw](https://github.com/openclaw/openclaw)'s own tool categories (`exec`, `web_search`, `web_fetch`, `process`), read directly from its GitHub docs rather than installed.
