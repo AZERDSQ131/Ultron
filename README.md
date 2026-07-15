@@ -10,19 +10,34 @@ Personal AI agent. Built from scratch (not OpenClaw, not Hermes Agent) to keep f
 - First tool wired in: `run_shell_command` (see `src/tools/shell.ts`)
 - Full visibility into tool activity in the terminal: tool calls and their raw results are printed inline as they happen, not hidden
 - Automatic retry with backoff on transient NVIDIA API errors (e.g. mid-stream `ResourceExhausted`) — see `invokeWithRetry` in `src/agent/graph.ts`
+- Guardrail against fake tool calls (see below) — see `looksLikeFakeToolCall` / `sanitizeHistory` in `src/agent/graph.ts`
 - No sandboxing (Docker), no manual per-action confirmation — a deliberate choice by the user
 
-### Known issue — unreliable tool calling
+### Known issue — unreliable tool calling (mitigated)
 
-The NVIDIA-hosted Nemotron model does not consistently use proper structured
-function-calling when a tool is available. Roughly half the time (observed
-empirically) it instead writes a plausible-looking JSON blob as normal reply
-text — or fabricates an entire fake tool call *and* fake result, presented as
-if it had actually run something. No real command executes in that case; the
-"output" is hallucinated. This is not caught or hidden — the visibility work
-above makes it show up directly in the terminal so it's obvious when it
-happens. Not yet fixed; flagged here as a known limitation of this model on
-this endpoint, not a bug in the loop itself.
+Nemotron itself supports real structured tool-calling fine — confirmed
+empirically at 100% reliability on isolated, single-turn calls, with or
+without streaming, with or without the full system prompt. The problem only
+shows up in the long-running, persistent `ultron-main` thread: once the
+model writes a tool call as plain JSON text instead of a real `tool_calls`
+entry, that fake exchange used to get saved to history, and the model would
+imitate its own past bad behavior on later turns — a self-reinforcing loop.
+
+Mitigated in `src/agent/graph.ts`:
+- `looksLikeFakeToolCall` detects a plain-text reply shaped like a real
+  tool's arguments (derived from each tool's own zod schema, so it
+  generalizes to new tools).
+- On detection, the turn is silently retried (up to 5 attempts) rather than
+  accepted.
+- `sanitizeHistory` strips any such fake messages already sitting in
+  persisted history out of the prompt on every turn, so old pollution can't
+  keep re-poisoning new generations.
+- If every retry still fails, ULTRON returns an explicit failure notice
+  instead of ever presenting a fabricated tool result as fact.
+
+Verified end to end against the real, already-polluted `ultron-main`
+thread: real tool calls now go through reliably (occasionally after one
+internal retry, invisible to the conversation content, logged to stderr).
 
 ## Setup
 

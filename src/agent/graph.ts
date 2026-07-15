@@ -3,10 +3,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
-import type { AIMessage, BaseMessageLike } from "@langchain/core/messages";
+import { AIMessage } from "@langchain/core/messages";
+import type { BaseMessageLike } from "@langchain/core/messages";
 import type { Runnable, RunnableConfig } from "@langchain/core/runnables";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
+import type { ZodObject, ZodRawShape } from "zod";
 import { createNemotronModel } from "../llm/nemotron.js";
 import { runShellCommand } from "../tools/shell.js";
 
@@ -64,16 +66,90 @@ async function invokeWithRetry(
   }
 }
 
+// Nemotron occasionally "calls" a tool by writing its JSON arguments as
+// plain reply text instead of using the real tool_calls mechanism — no
+// tool actually runs, and (worse) that fake exchange gets saved to
+// persistent history, where the model tends to imitate its own past
+// behavior on later turns. Detect the pattern from each tool's own zod
+// schema (so it generalizes as tools are added) and force a fresh retry
+// rather than ever accepting or persisting a malformed "call".
+const toolArgKeySets = tools.map(
+  (t) => new Set(Object.keys((t.schema as ZodObject<ZodRawShape>).shape)),
+);
+
+function looksLikeFakeToolCall(content: unknown): boolean {
+  if (typeof content !== "string") return false;
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+
+  const keys = Object.keys(parsed);
+  if (keys.length === 0) return false;
+  return toolArgKeySets.some((argKeys) => keys.every((k) => argKeys.has(k)));
+}
+
+const MAX_FAKE_TOOL_CALL_RETRIES = 5;
+
+// Once a fake tool call has been generated it lives on in persisted history
+// (the checkpointer keeps every past turn on the single "ultron-main"
+// thread), and the model tends to imitate its own recent bad behavior —
+// the retry above alone isn't enough once a few of these have accumulated.
+// Scrub qualifying messages out of the prompt on every turn so old
+// pollution can't keep re-poisoning new generations.
+function sanitizeHistory(messages: BaseMessageLike[]): BaseMessageLike[] {
+  return messages.filter((m) => {
+    if (!(m instanceof AIMessage)) return true;
+    if (m.tool_calls?.length) return true;
+    return !looksLikeFakeToolCall(m.content);
+  });
+}
+
 export function buildGraph(checkpointer: PostgresSaver) {
   const baseModel = createNemotronModel();
   const model = tools.length > 0 ? baseModel.bindTools(tools) : baseModel;
 
   const graph = new StateGraph(MessagesAnnotation)
     .addNode("agent", async (state, runConfig) => {
-      const messages = [{ role: "system" as const, content: SYSTEM_PROMPT }, ...state.messages];
+      const messages = [
+        { role: "system" as const, content: SYSTEM_PROMPT },
+        ...sanitizeHistory(state.messages),
+      ];
       // Forward runConfig so LangGraph's callback manager can intercept
       // per-token chunks for streamMode "messages".
-      const response = await invokeWithRetry(model, messages, runConfig);
+      let response = await invokeWithRetry(model, messages, runConfig);
+
+      let attempt = 1;
+      while (
+        !response.tool_calls?.length &&
+        looksLikeFakeToolCall(response.content) &&
+        attempt < MAX_FAKE_TOOL_CALL_RETRIES
+      ) {
+        attempt++;
+        console.error(
+          `[ultron] model wrote a tool call as plain text instead of using it — discarding and retrying (attempt ${attempt}/${MAX_FAKE_TOOL_CALL_RETRIES})`,
+        );
+        response = await invokeWithRetry(model, messages, runConfig);
+      }
+
+      // Never surface a fabricated tool call/result as if it were a real
+      // answer — after exhausting retries, replace it with an explicit
+      // failure notice instead of passing fiction through as fact.
+      if (!response.tool_calls?.length && looksLikeFakeToolCall(response.content)) {
+        console.error(
+          `[ultron] gave up after ${MAX_FAKE_TOOL_CALL_RETRIES} attempts — the model never issued a real tool call for this turn.`,
+        );
+        response = new AIMessage(
+          "[ultron] Tool call failed to register after several attempts — I'm not going to guess at the answer. Ask again.",
+        );
+      }
+
       return { messages: [response] };
     })
     .addNode("tools", new ToolNode(tools))
