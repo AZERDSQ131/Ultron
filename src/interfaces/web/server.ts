@@ -24,6 +24,7 @@ import { AgentRegistry } from "../../core/memory/agents.js";
 import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { abortRun, isRunning, subscribeToRun } from "../../core/runs.js";
+import { withThreadLock } from "../../core/threadLock.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
@@ -174,72 +175,78 @@ async function streamGraphTurn(
   const turnStarted = Date.now();
 
   try {
-    const stream = await graph.stream(input, {
-      configurable: { thread_id: chatId, thinking: thinkingMode },
-      signal: abortController.signal,
-      streamMode: "messages",
+    // Serialized per chatId (see threadLock.ts) so this can never run
+    // concurrently with, e.g., a spawn_agent wake-up note (tools/agents.ts)
+    // landing on the same chat mid-stream — that race was corrupting live
+    // replies with stray tool/report text from the other run.
+    await withThreadLock(chatId, async () => {
+      const stream = await graph.stream(input, {
+        configurable: { thread_id: chatId, thinking: thinkingMode },
+        signal: abortController.signal,
+        streamMode: "messages",
+      });
+
+      let generatedChars = 0;
+      let outputTokens: number | undefined;
+      const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
+
+      for await (const [chunk] of stream) {
+        const type = chunk.getType();
+
+        if (type === "tool") {
+          const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
+          debugLog(`tool result chat=${chatId} name=${toolName} content=${JSON.stringify(String(chunk.content).slice(0, 500))}`);
+          const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
+          if (pending) {
+            sseWrite(res, "tool_call", { name: pending.name, summary: summarizeToolCall(pending.name, pending.args) });
+            const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
+            if (key !== undefined) pendingToolCalls.delete(key);
+          }
+          sseWrite(res, "tool_result", { name: toolName, content: String(chunk.content) });
+          continue;
+        }
+
+        if (type !== "ai") continue;
+
+        const toolCallChunks = (
+          chunk as unknown as { tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[] }
+        ).tool_call_chunks;
+
+        if (toolCallChunks?.length) {
+          debugLog(`tool call chunks chat=${chatId} chunks=${JSON.stringify(toolCallChunks)}`);
+          for (const tc of toolCallChunks) {
+            const key = tc.index ?? tc.id ?? tc.name ?? 0;
+            const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
+            pending.name = tc.name ?? pending.name;
+            pending.args += tc.args ?? "";
+            pendingToolCalls.set(key, pending);
+            if (tc.args) generatedChars += tc.args.length;
+          }
+          continue;
+        }
+
+        const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
+        if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+
+        if (typeof chunk.content !== "string" || !chunk.content) continue;
+        generatedChars += chunk.content.length;
+        sseWrite(res, "text", { delta: chunk.content });
+      }
+
+      const pendingApproval = await getPendingApproval(graph, chatId);
+      if (pendingApproval) {
+        debugLog(`approval required chat=${chatId} calls=${JSON.stringify(pendingApproval.calls.map((c) => c.name))}`);
+        sseWrite(res, "approval_required", { calls: pendingApproval.calls });
+      } else {
+        const elapsedSeconds = (Date.now() - turnStarted) / 1000;
+        // Nemotron's endpoint returns real usage on the stream's final chunk
+        // (see nemotron.ts); fall back to the chars/4 estimate only if a turn
+        // was interrupted before that chunk arrived.
+        const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
+        const contextTokens = await estimateContextUsage(graph, chatId);
+        sseWrite(res, "done", { elapsedSeconds, generatedTokens, contextTokens, maxTokens: config.contextWindowTokens });
+      }
     });
-
-    let generatedChars = 0;
-    let outputTokens: number | undefined;
-    const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
-
-    for await (const [chunk] of stream) {
-      const type = chunk.getType();
-
-      if (type === "tool") {
-        const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
-        debugLog(`tool result chat=${chatId} name=${toolName} content=${JSON.stringify(String(chunk.content).slice(0, 500))}`);
-        const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
-        if (pending) {
-          sseWrite(res, "tool_call", { name: pending.name, summary: summarizeToolCall(pending.name, pending.args) });
-          const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
-          if (key !== undefined) pendingToolCalls.delete(key);
-        }
-        sseWrite(res, "tool_result", { name: toolName, content: String(chunk.content) });
-        continue;
-      }
-
-      if (type !== "ai") continue;
-
-      const toolCallChunks = (
-        chunk as unknown as { tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[] }
-      ).tool_call_chunks;
-
-      if (toolCallChunks?.length) {
-        debugLog(`tool call chunks chat=${chatId} chunks=${JSON.stringify(toolCallChunks)}`);
-        for (const tc of toolCallChunks) {
-          const key = tc.index ?? tc.id ?? tc.name ?? 0;
-          const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
-          pending.name = tc.name ?? pending.name;
-          pending.args += tc.args ?? "";
-          pendingToolCalls.set(key, pending);
-          if (tc.args) generatedChars += tc.args.length;
-        }
-        continue;
-      }
-
-      const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
-      if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
-
-      if (typeof chunk.content !== "string" || !chunk.content) continue;
-      generatedChars += chunk.content.length;
-      sseWrite(res, "text", { delta: chunk.content });
-    }
-
-    const pendingApproval = await getPendingApproval(graph, chatId);
-    if (pendingApproval) {
-      debugLog(`approval required chat=${chatId} calls=${JSON.stringify(pendingApproval.calls.map((c) => c.name))}`);
-      sseWrite(res, "approval_required", { calls: pendingApproval.calls });
-    } else {
-      const elapsedSeconds = (Date.now() - turnStarted) / 1000;
-      // Nemotron's endpoint returns real usage on the stream's final chunk
-      // (see nemotron.ts); fall back to the chars/4 estimate only if a turn
-      // was interrupted before that chunk arrived.
-      const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
-      const contextTokens = await estimateContextUsage(graph, chatId);
-      sseWrite(res, "done", { elapsedSeconds, generatedTokens, contextTokens, maxTokens: config.contextWindowTokens });
-    }
   } catch (err) {
     debugLog(`turn error chat=${chatId} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`);
     if (abortController.signal.aborted) {
@@ -477,7 +484,7 @@ async function runDueSchedules(): Promise<void> {
     // buildAgentSystemPrompt in graph.ts), which also keeps this execution
     // out of ULTRON's own SOUL.md persona and memory.
     const prompt = `This is a scheduled task. Execute it now and report exactly what happened.\n\nTask: ${task.instruction}`;
-    try { await graph.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: execution.id, thinking: "low" } }); }
+    try { await withThreadLock(execution.id, () => graph.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: execution.id, thinking: "low" } })); }
     catch (err) { debugLog(`scheduled task failed name=${task.name} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`); }
   }
 }

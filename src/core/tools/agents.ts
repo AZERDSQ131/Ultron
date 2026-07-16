@@ -12,6 +12,7 @@ import { AgentRegistry } from "../memory/agents.js";
 // import() would dodge the cycle too, but there is nothing to dodge here.
 import { buildGraph, getPendingApproval } from "../graph.js";
 import { beginRun } from "../runs.js";
+import { withThreadLock } from "../threadLock.js";
 import { summarizeToolCall } from "./summarize.js";
 
 const agentsRegistry = new AgentRegistry(config.databasePath);
@@ -145,9 +146,17 @@ async function runSpawnedAgent(opts: {
 
   try {
     console.error(`[ultron] spawn_agent waking parent thread=${opts.parentThreadId} agent=${opts.ownerName}`);
-    await graph.invoke(
-      { messages: [new SystemMessage(note)] },
-      { configurable: { thread_id: opts.parentThreadId, thinking: opts.thinking } },
+    // Serialized per parentThreadId (see threadLock.ts) — without this, a
+    // sub-agent finishing while the user's own turn on that same chat was
+    // still streaming (server.ts's streamGraphTurn, same lock) would race
+    // it: two concurrent Pregel runs on one checkpoint thread, which is
+    // exactly what produced stray tool/report text bleeding into the live
+    // reply. This call now simply waits its turn instead.
+    await withThreadLock(opts.parentThreadId, () =>
+      graph.invoke(
+        { messages: [new SystemMessage(note)] },
+        { configurable: { thread_id: opts.parentThreadId, thinking: opts.thinking } },
+      ),
     );
     chats.touch(opts.parentThreadId);
   } catch (err) {

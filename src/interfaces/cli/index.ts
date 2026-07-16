@@ -18,6 +18,7 @@ import {
   type PendingToolCall,
   type ToolApprovalDecision,
 } from "../../core/graph.js";
+import { withThreadLock } from "../../core/threadLock.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
@@ -666,10 +667,11 @@ async function main() {
       chats.touch(currentChatId);
 
       abortController = new AbortController();
+      const controller = abortController;
       const turnStarted = Date.now();
       generationInput = "";
       generationCursor = 0;
-      const disarmStopCommand = armStopCommand(abortController, contextLine);
+      const disarmStopCommand = armStopCommand(controller, contextLine);
 
       try {
         let nextInput: { messages: HumanMessage[] } | Command = {
@@ -688,75 +690,85 @@ async function main() {
         // Command carrying the user's decision, same as the web UI's
         // /api/approve round trip.
         for (;;) {
-          const stream = await graph.stream(nextInput, {
-            configurable: { thread_id: currentChatId, thinking: thinkingMode },
-            signal: abortController.signal,
-            streamMode: "messages",
-          });
+          // Serialized per currentChatId (see threadLock.ts), released
+          // again as soon as this iteration's stream finishes — not held
+          // across the human-approval prompt below, so a spawn_agent
+          // wake-up note (tools/agents.ts) targeting this same chat isn't
+          // stuck behind the user thinking about a y/n. Without this lock,
+          // that wake-up racing a still-live stream on the same checkpoint
+          // thread was exactly what let stray tool/report text bleed into
+          // an unrelated reply.
+          await withThreadLock(currentChatId, async () => {
+            const stream = await graph.stream(nextInput, {
+              configurable: { thread_id: currentChatId, thinking: thinkingMode },
+              signal: controller.signal,
+              streamMode: "messages",
+            });
 
-          for await (const [chunk] of stream) {
-            const type = chunk.getType();
+            for await (const [chunk] of stream) {
+              const type = chunk.getType();
 
-            if (type === "tool") {
+              if (type === "tool") {
+                if (inToolCall) {
+                  writeLive("\n", contextLine);
+                  inToolCall = false;
+                }
+                const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
+                const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
+                if (pending) {
+                  writeLive(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`), contextLine);
+                  const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
+                  if (key !== undefined) pendingToolCalls.delete(key);
+                }
+                writeLive(chalk.dim(`[tool result · ${toolName}]\n${chunk.content}\n\n`), contextLine);
+                continue;
+              }
+
+              if (type !== "ai") continue;
+
+              const toolCallChunks = (
+                chunk as unknown as {
+                  tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[];
+                }
+              ).tool_call_chunks;
+
+              if (toolCallChunks?.length) {
+                for (const tc of toolCallChunks) {
+                  const key = tc.index ?? tc.id ?? tc.name ?? 0;
+                  const isNewToolCall = !pendingToolCalls.has(key);
+                  const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
+                  pending.name = tc.name ?? pending.name;
+                  pending.args += tc.args ?? "";
+                  pendingToolCalls.set(key, pending);
+                  if (tc.name && isNewToolCall) {
+                    if (wrotePrefix) {
+                      writeLive("\n\n", contextLine);
+                      wrotePrefix = false;
+                    }
+                  }
+                  if (tc.args) generatedChars += tc.args.length;
+                }
+                inToolCall = true;
+                continue;
+              }
+
+              const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
+              if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+
+              if (typeof chunk.content !== "string" || !chunk.content) continue;
+
               if (inToolCall) {
-                writeLive("\n", contextLine);
+                writeLive("\n\n", contextLine);
                 inToolCall = false;
               }
-              const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
-              const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
-              if (pending) {
-                writeLive(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`), contextLine);
-                const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
-                if (key !== undefined) pendingToolCalls.delete(key);
+              if (!wrotePrefix) {
+                writeLive(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `, contextLine);
+                wrotePrefix = true;
               }
-              writeLive(chalk.dim(`[tool result · ${toolName}]\n${chunk.content}\n\n`), contextLine);
-              continue;
+              writeLive(markdown.push(chunk.content), contextLine);
+              generatedChars += chunk.content.length;
             }
-
-            if (type !== "ai") continue;
-
-            const toolCallChunks = (
-              chunk as unknown as {
-                tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[];
-              }
-            ).tool_call_chunks;
-
-            if (toolCallChunks?.length) {
-              for (const tc of toolCallChunks) {
-                const key = tc.index ?? tc.id ?? tc.name ?? 0;
-                const isNewToolCall = !pendingToolCalls.has(key);
-                const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
-                pending.name = tc.name ?? pending.name;
-                pending.args += tc.args ?? "";
-                pendingToolCalls.set(key, pending);
-                if (tc.name && isNewToolCall) {
-                  if (wrotePrefix) {
-                    writeLive("\n\n", contextLine);
-                    wrotePrefix = false;
-                  }
-                }
-                if (tc.args) generatedChars += tc.args.length;
-              }
-              inToolCall = true;
-              continue;
-            }
-
-            const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
-            if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
-
-            if (typeof chunk.content !== "string" || !chunk.content) continue;
-
-            if (inToolCall) {
-              writeLive("\n\n", contextLine);
-              inToolCall = false;
-            }
-            if (!wrotePrefix) {
-              writeLive(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `, contextLine);
-              wrotePrefix = true;
-            }
-            writeLive(markdown.push(chunk.content), contextLine);
-            generatedChars += chunk.content.length;
-          }
+          });
 
           const pendingApproval = await getPendingApproval(graph, currentChatId);
           if (!pendingApproval) break;
