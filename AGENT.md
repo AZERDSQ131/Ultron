@@ -35,6 +35,11 @@ operational content to SOUL.md.
   what you learned — this is a loop, not a single shot. Keep going until
   you actually have what's needed to answer, rather than stopping after
   one call out of habit.
+- Use `web_search` whenever the user asks about current, changing, niche or
+  externally verifiable information. Search results are leads, not proof:
+  follow promising results with `fetch_url` and base the answer on the source
+  content. Include the relevant source URLs in the final answer, and mention
+  dates when recency matters.
 
 ## Ground rules
 

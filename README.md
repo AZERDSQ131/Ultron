@@ -21,10 +21,17 @@ The current version provides a terminal conversation loop with:
 - basic terminal Markdown styling, including `**bold**` text;
 - local slash commands for stopping, retrying, compacting and tuning reasoning;
 - resumable text archives through `/archive` and `/resume`;
-- twelve tools for shell commands, files, HTTP/web requests, processes and the current date/time;
+- thirteen tools for shell commands, files, HTTP/web requests, processes,
+  schedules and the current date/time;
 - declared tool scopes (`read`, `write`, `destructive`) for architectural clarity;
 - retry handling for transient API errors and malformed plain-text tool calls;
 - clean Ctrl+C interruption, including during an in-flight model request.
+
+Web search is available through `web_search` and `fetch_url`. The search
+provider is selected with `WEB_SEARCH_PROVIDER=auto` by default: Tavily is
+used when `TAVILY_API_KEY` is set, otherwise DuckDuckGo provides a no-key
+fallback. Tavily returns ranked snippets and metadata optimized for agent
+research; DuckDuckGo keeps the feature usable with zero additional setup.
 
 A local web interface (`pnpm web`) is also available: same LangGraph core,
 same streaming and tool-call behavior, served over HTTP with a vanilla
@@ -105,6 +112,8 @@ Available configuration:
 | `CONTEXT_WINDOW_TOKENS` | `262144` | CLI context-gauge reference |
 | `WEB_PORT` | `4173` | Local web interface port |
 | `DATABASE_PATH` | `ultron-state.sqlite3` | Shared checkpoint database (CLI + web) |
+| `WEB_SEARCH_PROVIDER` | `auto` | `auto`, `tavily` or `duckduckgo` |
+| `TAVILY_API_KEY` | empty | Optional Tavily API key; required when the provider is `tavily` |
 
 ## Run and verify
 
@@ -119,7 +128,7 @@ pnpm start:web    # run the compiled web interface
 
 There are currently no automated tests or lint script. The first tests should
 cover graph routing, retry and fake-tool-call handling, tool behavior,
-interruption and classic file memory.
+interruption, web search providers and classic file memory.
 
 ## Local commands
 
@@ -157,6 +166,7 @@ src/core/                            shared engine — knows nothing about any i
   memory/checkpointer.ts             SQLite checkpoint saver shared by every interface
   memory/chats.ts                    chat registry (list/create/rename/delete) shared by every interface
   tools/                             shell, filesystem, web and process tools
+    search.ts                        DuckDuckGo/Tavily provider abstraction
 src/interfaces/                      presentation layers — import from core, never the reverse
   cli/index.ts                       terminal interface and streaming
   cli/markdown.ts                    terminal markdown rendering
