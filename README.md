@@ -16,6 +16,7 @@ The current version provides a terminal conversation loop with:
 - Nemotron through NVIDIA's OpenAI-compatible API;
 - persistent LangGraph checkpoints in a local PostgreSQL database;
 - one persistent thread, `ultron-main`;
+- a human-readable `MEMORY.md` for durable facts, preferences and context;
 - token streaming, elapsed-time statistics and an estimated context gauge;
 - basic terminal Markdown styling, including `**bold**` text;
 - eleven tools for shell commands, files, HTTP/web requests and processes;
@@ -95,6 +96,7 @@ src/index.ts                 terminal interface and streaming
 src/agent/graph.ts           LangGraph loop and tool routing
 src/llm/nemotron.ts          NVIDIA/Nemotron client
 src/memory/checkpointer.ts   PostgreSQL checkpoint setup
+MEMORY.md                    durable human-readable memory loaded each turn
 src/tools/                   shell, filesystem, web and process tools
 AGENT.md                     operational rules injected into the prompt
 SOUL.md                      personality rules injected into the prompt
@@ -103,7 +105,7 @@ PLAN.md                      project roadmap and scope
 
 ## Roadmap
 
-1. ~~Terminal loop and persistent memory~~ — done.
+1. ~~Terminal loop, checkpoint history and classic file memory~~ — done.
 2. Telegram interface with grammY.
 3. Mail and calendar tools with OAuth.
 4. Background scheduled tasks once the core loop is trusted.

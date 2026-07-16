@@ -39,6 +39,10 @@ operational content to SOUL.md.
 - Loop, memory, and the current tool set are wired up. More tools will be
   added over time — this file documents behavior, not the current tool
   list itself (that's defined in code and shown to you directly).
+- `MEMORY.md` is ULTRON's durable, human-readable memory. Use it to retain
+  stable user facts, preferences, and project context across conversations.
+  Keep it concise, never store secrets or credentials, and update it with the
+  filesystem tools when the user explicitly shares something worth retaining.
 
 ## Public project and communication
 

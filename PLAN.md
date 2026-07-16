@@ -16,7 +16,8 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 - Terminal chat loop
 - Nemotron (NVIDIA API) as the only model
 - LangGraph as the orchestrator — we own the state and the loop, not a packaged agent harness
-- Persistent memory via LangGraph checkpointing on local Postgres
+- Persistent conversation history via LangGraph checkpointing on local Postgres
+- Classic durable memory in a human-readable `MEMORY.md`
 - Token-by-token streaming
 - Ctrl+C interrupts cleanly at any point, including mid-response
 - No Docker, no manual confirmations, no audit logs — explicit choices, see [CLAUDE.md](CLAUDE.md)
