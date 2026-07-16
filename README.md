@@ -1,66 +1,122 @@
 # ULTRON
 
-Personal AI agent. Built from scratch (not OpenClaw, not Hermes Agent) to keep full control over architecture, permissions, and memory.
+ULTRON is a personal AI agent built from scratch with TypeScript, LangGraph,
+Nemotron and PostgreSQL. The goal is simple: keep ownership of the loop, the
+state, the memory and the tools instead of hiding them behind an opaque agent
+framework.
 
-## Current state (v0.1)
+This repository is public from the beginning. It is an evolving experiment,
+not a finished autonomous assistant. The architecture is intentionally small
+enough to inspect, change and understand.
 
-- Conversation loop in the terminal (Telegram comes later), styled with `chalk` — colored role labels, dim tool activity, a per-turn stats line (elapsed time + estimated tokens generated), and a context-usage gauge after every exchange
-- Model: Nemotron (NVIDIA API) via the OpenAI-compatible endpoint
-- Persistent memory via LangGraph + Postgres (checkpointing, thread `ultron-main`)
-- Eleven tools wired in, `src/tools/`: `run_shell_command`, `read_file`, `write_file`, `edit_file`, `list_directory`, `search_files`, `fetch_url`, `http_request`, `web_search`, `list_processes`, `kill_process` — registered with declared scopes (read / write / destructive) in `src/tools/index.ts`. The web/process tools are modeled on [OpenClaw](https://github.com/openclaw/openclaw)'s own tool categories (`exec`, `web_search`, `web_fetch`, `process`), read directly from its GitHub docs rather than installed.
-- System prompt is split across two files: [SOUL.md](SOUL.md) (personality only) and [AGENT.md](AGENT.md) (tool-use protocol and every other operational rule) — see the note at the top of each
-- Full visibility into tool activity in the terminal: tool calls and their raw results are printed inline as they happen, not hidden
-- Unified retry loop (transient API errors + fake tool calls share one budget, max 4 attempts) — see the `agent` node in `src/agent/graph.ts`. Only the first attempt streams live; retries run with callbacks stripped so a retried response can never print a duplicate of text already shown (this actually happened: a retried "Salut !" reply reused a SOUL.md example verbatim and printed twice before the fix).
-- Guardrail against fake tool calls (see below) — see `looksLikeFakeToolCall` / `sanitizeHistory` in `src/agent/graph.ts`
-- No sandboxing (Docker), no manual per-action confirmation — a deliberate choice by the user
+## Current state
 
-### Known issue — unreliable tool calling (mitigated)
+The current version provides a terminal conversation loop with:
 
-Nemotron itself supports real structured tool-calling fine — confirmed
-empirically at 100% reliability on isolated, single-turn calls, with or
-without streaming, with or without the full system prompt. The problem only
-shows up in the long-running, persistent `ultron-main` thread: once the
-model writes a tool call as plain JSON text instead of a real `tool_calls`
-entry, that fake exchange used to get saved to history, and the model would
-imitate its own past bad behavior on later turns — a self-reinforcing loop.
+- Nemotron through NVIDIA's OpenAI-compatible API;
+- persistent LangGraph checkpoints in a local PostgreSQL database;
+- one persistent thread, `ultron-main`;
+- token streaming, elapsed-time statistics and an estimated context gauge;
+- eleven tools for shell commands, files, HTTP/web requests and processes;
+- declared tool scopes (`read`, `write`, `destructive`) for architectural clarity;
+- retry handling for transient API errors and malformed plain-text tool calls;
+- clean Ctrl+C interruption, including during an in-flight model request.
 
-Mitigated in `src/agent/graph.ts`:
-- `looksLikeFakeToolCall` detects a plain-text reply shaped like a real
-  tool's arguments (derived from each tool's own zod schema, so it
-  generalizes to new tools).
-- On detection, the turn is silently retried (sharing the same 4-attempt
-  budget as transient-error retries — see above) rather than accepted.
-- `sanitizeHistory` strips any such fake messages already sitting in
-  persisted history out of the prompt on every turn, so old pollution can't
-  keep re-poisoning new generations.
-- If every retry still fails, ULTRON returns an explicit failure notice
-  instead of ever presenting a fabricated tool result as fact.
+Telegram is the next interface planned. Mail and calendar integrations are
+still pending because they require OAuth. The separate Codex-style coding app
+is explicitly deferred.
 
-Verified end to end against the real, already-polluted `ultron-main`
-thread: real tool calls now go through reliably (occasionally after one
-internal retry, invisible to the conversation content, logged to stderr).
+## Design principles
+
+- Nemotron is the only model provider for now.
+- LangGraph owns orchestration and state; there is no packaged agent harness.
+- `SOUL.md` contains personality. `AGENT.md` contains operational rules.
+- The security posture is intentionally minimal: there is no Docker sandbox,
+  no per-action confirmation gate and no audit-log system at this stage.
+- ULTRON is developed directly in this repository; coding sub-agents are not
+  used to build it.
+
+The minimal security posture is a conscious project decision, not a production
+recommendation. The shell, filesystem, HTTP and process tools can affect the
+machine running ULTRON. Run it only in an environment you are willing to give
+that level of access to.
+
+## Requirements
+
+- Node.js 24 or newer;
+- pnpm 9.15.4 or a compatible pnpm release;
+- PostgreSQL running locally;
+- an NVIDIA API key with access to the configured Nemotron model.
+
+Create the database if needed:
+
+```bash
+createdb ultron
+```
 
 ## Setup
 
 ```bash
 pnpm install
-cp .env.example .env   # fill in NVIDIA_API_KEY
-pnpm dev
+cp .env.example .env
 ```
 
-Requires a local Postgres instance running with an `ultron` database (already created via `createdb ultron`).
+Set `NVIDIA_API_KEY` in `.env`. Never commit `.env` or paste the key into an
+issue, pull request or log. The file is ignored by Git by default.
 
-## Stopping the agent
+Available configuration:
 
-`Ctrl+C` at any time, including mid-response — the in-flight request is cancelled cleanly.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `NVIDIA_API_KEY` | required | NVIDIA API authentication |
+| `NEMOTRON_MODEL` | `nvidia/nemotron-3-super-120b-a12b` | Model identifier |
+| `NEMOTRON_BASE_URL` | `https://integrate.api.nvidia.com/v1` | OpenAI-compatible endpoint |
+| `DATABASE_URL` | `postgresql://localhost:5432/ultron` | PostgreSQL connection |
+| `CONTEXT_WINDOW_TOKENS` | `262144` | CLI context-gauge reference |
 
-## Documentation
+## Run and verify
 
-See [docs/agent-ia-personnel.md](docs/agent-ia-personnel.md) (French) for the full research and architecture decisions behind this project (AI model landscape, OpenClaw/Hermes comparison, pitfalls to avoid, chosen stack).
+```bash
+pnpm dev          # run directly from TypeScript
+pnpm typecheck    # strict TypeScript check
+pnpm build        # compile to dist/
+pnpm start        # run the compiled application
+```
+
+There are currently no automated tests or lint script. The first tests should
+cover graph routing, retry and fake-tool-call handling, tool behavior,
+interruption and PostgreSQL checkpointing.
+
+## Repository map
+
+```text
+src/index.ts                 terminal interface and streaming
+src/agent/graph.ts           LangGraph loop and tool routing
+src/llm/nemotron.ts          NVIDIA/Nemotron client
+src/memory/checkpointer.ts   PostgreSQL checkpoint setup
+src/tools/                   shell, filesystem, web and process tools
+AGENT.md                     operational rules injected into the prompt
+SOUL.md                      personality rules injected into the prompt
+PLAN.md                      project roadmap and scope
+```
 
 ## Roadmap
 
-1. ~~Loop + memory~~ (done)
-2. Telegram interface (replaces/complements the terminal)
-3. Tools (with read / write / destructive scopes) — filesystem, shell, web, and process tools done; mail/calendar still to come, they need OAuth setup
-4. Separate "vibe coding" app, Codex-style, with background sub-agents orchestrated from a main conversation
+1. ~~Terminal loop and persistent memory~~ — done.
+2. Telegram interface with grammY.
+3. Mail and calendar tools with OAuth.
+4. Background scheduled tasks once the core loop is trusted.
+5. Separate Codex-style vibe-coding application — deferred.
+
+See [PLAN.md](PLAN.md) for the detailed project plan and
+[docs/agent-ia-personnel.md](docs/agent-ia-personnel.md) for the original
+French research and architecture rationale.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Contributions should preserve the
+explicit architecture decisions and keep documentation current with code.
+
+## License
+
+ULTRON is released under the MIT License. See [LICENSE](LICENSE).

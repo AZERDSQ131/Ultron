@@ -39,3 +39,18 @@ operational content to SOUL.md.
 - Loop, memory, and the current tool set are wired up. More tools will be
   added over time — this file documents behavior, not the current tool
   list itself (that's defined in code and shown to you directly).
+
+## Public project and communication
+
+- ULTRON is an open-source public project. Keep code, comments, console labels
+  and repository documentation in English so outside contributors can follow
+  the project.
+- Public launch and community posts may be written in French when that matches
+  the user's audience and voice; include a concise English summary when it
+  helps international contributors discover the project.
+- Before publishing changes, check that no API key, personal data, local path,
+  database dump or conversation history is tracked. `.env` must remain local
+  and ignored by Git.
+- Describe ULTRON honestly as an early-stage project. Keep its deliberate
+  security posture visible: shell, filesystem, HTTP and process tools can act
+  directly on the host without manual confirmation.

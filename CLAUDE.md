@@ -38,3 +38,100 @@ TypeScript (Node 24+) / pnpm / LangGraph.js / Postgres / `@langchain/openai` (Op
 - `main`: stable
 - `develop`: current work
 - Commit + push on every code change (explicit user request — do not batch multiple changes into one deferred commit).
+
+---
+
+# État opérationnel du dépôt
+
+## Vue d'ensemble
+
+ULTRON est un agent IA personnel développé directement par l'utilisateur pour
+conserver la maîtrise de la boucle d'exécution, des outils et de la mémoire.
+La version actuelle fournit une conversation terminal persistante sur un fil
+unique (`ultron-main`). Telegram, les intégrations mail/calendrier et
+l'application de vibe-coding sont prévues mais ne sont pas implémentées.
+
+## Stack technique
+
+- TypeScript strict, Node.js 24+ attendu, pnpm 9.15.4.
+- LangGraph.js pour l'état et l'orchestration.
+- `@langchain/openai` contre l'endpoint OpenAI-compatible de NVIDIA.
+- Nemotron exclusivement, modèle par défaut `nvidia/nemotron-3-super-120b-a12b`.
+- PostgreSQL local avec `@langchain/langgraph-checkpoint-postgres`.
+- `chalk`, `dotenv`, `pg` et `zod` pour le CLI, la configuration et les outils.
+
+## Architecture du repo
+
+- `src/index.ts` : point d'entrée CLI, affichage, streaming, statistiques,
+  jauge de contexte et interruption Ctrl+C.
+- `src/agent/graph.ts` : prompt système, graphe agent/outils, routage,
+  nettoyage de l'historique et retries des erreurs transitoires ou faux appels.
+- `src/llm/nemotron.ts` : construction du client ChatOpenAI configuré pour NVIDIA.
+- `src/memory/checkpointer.ts` : initialisation paresseuse et setup du saver
+  PostgreSQL LangGraph.
+- `src/tools/` : onze outils avec scopes déclarés dans `index.ts` : shell,
+  fichiers, HTTP/web et processus.
+- `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
+  au démarrage ; ils ne doivent pas être fusionnés.
+- `PLAN.md`, `README.md` et `docs/agent-ia-personnel.md` : périmètre,
+  feuille de route et recherche historique en français.
+
+## Exécution locale
+
+Pré-requis : Node.js 24+, pnpm, PostgreSQL démarré avec une base `ultron`, et
+un fichier `.env` basé sur `.env.example` contenant `NVIDIA_API_KEY`.
+
+```bash
+pnpm install
+pnpm typecheck
+pnpm build
+pnpm dev
+pnpm start
+```
+
+Il n'existe actuellement ni script de test ni script de lint. Le démarrage
+réel dépend à la fois de PostgreSQL et de l'accès API NVIDIA ; le build et le
+typecheck sont indépendants de ces services.
+
+## Configuration et secrets
+
+- `NVIDIA_API_KEY` : obligatoire, chargé par `src/config.ts`.
+- `NEMOTRON_MODEL` : optionnel ; valeur par défaut documentée ci-dessus.
+- `NEMOTRON_BASE_URL` : optionnel ; défaut `https://integrate.api.nvidia.com/v1`.
+- `DATABASE_URL` : optionnel ; défaut `postgresql://localhost:5432/ultron`.
+- `CONTEXT_WINDOW_TOKENS` : optionnel ; défaut `262144`, utilisé uniquement
+  pour la jauge CLI.
+- `.env` est ignoré par Git ; `.env.example` est le contrat de configuration.
+
+## Qualité et tests
+
+Le compilateur TypeScript est strict et `pnpm typecheck` ainsi que `pnpm build`
+passent actuellement. Aucun test automatisé n'est présent. Les zones les plus
+importantes à couvrir seront le routage agent/outils, les retries et le
+nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
+checkpointer PostgreSQL.
+
+## Risques techniques
+
+1. Les outils shell, fichiers, HTTP et processus ont un accès direct et aucun
+   garde-fou d'autorisation : c'est une décision explicite du projet, mais
+   l'impact d'un mauvais appel est élevé.
+2. Les appels d'outils dépendent encore de la fiabilité du modèle Nemotron ;
+   le mécanisme de retry atténue les faux appels mais ne les élimine pas.
+3. Les estimations de tokens sont approximatives, car l'endpoint NVIDIA ne
+   fournit pas l'usage dans le streaming.
+4. La mémoire est un fil PostgreSQL unique et persistant ; une corruption ou
+   une pollution d'historique affecte directement les tours suivants.
+5. Le parsing HTML et la recherche DuckDuckGo sont volontairement légers et
+   peuvent échouer sur des pages dynamiques ou des changements de format.
+
+## Prochaines actions recommandées
+
+1. Ajouter des tests unitaires ciblés sans changer la posture de sécurité
+   choisie.
+2. Préparer la phase Telegram avec grammY en réutilisant `buildGraph` et le
+   même `thread_id`, sans démarrer la phase vibe-coding.
+3. Concevoir les intégrations mail/calendrier et leur OAuth avant d'ajouter
+   leurs outils.
+4. Corriger les écarts documentaires au fur et à mesure de chaque nouveau
+   changement de code, conformément à `AGENTS.md`.
