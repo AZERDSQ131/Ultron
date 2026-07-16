@@ -18,6 +18,7 @@ The current version provides a terminal conversation loop with:
 - token streaming, elapsed-time statistics and an estimated context gauge;
 - basic terminal Markdown styling, including `**bold**` text;
 - local slash commands for stopping, retrying, compacting and tuning reasoning;
+- resumable text archives through `/archive` and `/resume`;
 - eleven tools for shell commands, files, HTTP/web requests and processes;
 - declared tool scopes (`read`, `write`, `destructive`) for architectural clarity;
 - retry handling for transient API errors and malformed plain-text tool calls;
@@ -110,6 +111,13 @@ also be typed while Nemotron is generating; Ctrl+C remains available as the
 immediate interrupt.
 
 ## Repository map
+
+### Archive and resume
+
+Use `/archive` to save the current LangGraph session as a readable text file
+under `archives/`. Use `/resume <archive-path>` in a later session to restore
+the archived user and ULTRON messages into the current thread. Archive files
+are local and ignored by Git.
 
 ```text
 src/index.ts                 terminal interface and streaming

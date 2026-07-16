@@ -5,7 +5,7 @@ import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import { HumanMessage } from "@langchain/core/messages";
-import { buildGraph, compactThread, estimateContextUsage, prepareRetry } from "./agent/graph.js";
+import { archiveThread, buildGraph, compactThread, estimateContextUsage, prepareRetry, resumeThread } from "./agent/graph.js";
 import { config } from "./config.js";
 import type { ThinkingMode } from "./llm/nemotron.js";
 import { tools } from "./tools/index.js";
@@ -16,7 +16,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const THREAD_ID = "ultron-main";
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/think", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -214,7 +214,7 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  save the chat as a resumable text archive\n  ${chalk.cyanBright("/resume")}   load an archive into the current session\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -307,7 +307,10 @@ async function main() {
       if (stopping) break;
       if (!input.trim()) continue;
 
-      const command = input.trim().toLowerCase();
+      const rawInput = input.trim();
+      const commandName = rawInput.split(/\s+/, 1)[0].toLowerCase();
+      const command = rawInput.toLowerCase();
+      const commandArgument = rawInput.slice(commandName.length).trim();
       if (command.startsWith("/")) {
         switch (command) {
           case "/help":
@@ -346,6 +349,23 @@ async function main() {
             );
             continue;
           }
+          case "/archive": {
+            const archivePath = await archiveThread(graph, THREAD_ID);
+            appendTranscript(chalk.dim(`[ultron] chat archived to ${archivePath}\n\n`));
+            continue;
+          }
+          case "/resume":
+            if (!commandArgument) {
+              appendTranscript(chalk.yellow("[ultron] usage: /resume <archive-path>\n\n"));
+              continue;
+            }
+            try {
+              const messageCount = await resumeThread(graph, THREAD_ID, commandArgument);
+              appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
+            } catch (error) {
+              appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
+            }
+            continue;
           case "/think":
             appendTranscript(chalk.dim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
@@ -356,6 +376,19 @@ async function main() {
             stopping = true;
             continue;
           default:
+            if (commandName === "/resume") {
+              if (!commandArgument) {
+                appendTranscript(chalk.yellow("[ultron] usage: /resume <archive-path>\n\n"));
+                continue;
+              }
+              try {
+                const messageCount = await resumeThread(graph, THREAD_ID, commandArgument);
+                appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
+              } catch (error) {
+                appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
+              }
+              continue;
+            }
             if (command.startsWith("/think ")) {
               const mode = command.slice("/think ".length).trim();
               if (mode === "on" || mode === "full") thinkingMode = "full";

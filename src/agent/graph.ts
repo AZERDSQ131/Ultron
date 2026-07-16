@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
@@ -259,4 +259,56 @@ export async function prepareRetry(graph: ReturnType<typeof buildGraph>, threadI
     .map((message: BaseMessage) => new RemoveMessage({ id: message.id! }));
   if (removals.length) await graph.updateState(config, { messages: removals });
   return lastUserMessage;
+}
+
+function archiveMessageContent(message: BaseMessage): string {
+  return typeof message.content === "string" ? message.content : JSON.stringify(message.content, null, 2);
+}
+
+export async function archiveThread(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<string> {
+  const state = await graph.getState({ configurable: { thread_id: threadId } });
+  const messages = (state.values.messages ?? []).filter(
+    (message: BaseMessage) => message.getType() === "human" || message.getType() === "ai",
+  );
+  const archiveDir = join(process.cwd(), "archives");
+  mkdirSync(archiveDir, { recursive: true });
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const archivePath = join(archiveDir, `ultron-${timestamp}.txt`);
+  const blocks = messages.map((message: BaseMessage) => {
+    const role = message.getType() === "human" ? "USER" : "ULTRON";
+    return `===== ${role} =====\n${archiveMessageContent(message)}`;
+  });
+  const content = [
+    "ULTRON CHAT ARCHIVE",
+    `Created: ${new Date().toISOString()}`,
+    `Thread: ${threadId}`,
+    `Messages: ${messages.length}`,
+    "",
+    ...blocks,
+    "",
+  ].join("\n");
+
+  writeFileSync(archivePath, content, "utf-8");
+  return archivePath;
+}
+
+export async function resumeThread(
+  graph: ReturnType<typeof buildGraph>,
+  threadId: string,
+  archivePath: string,
+): Promise<number> {
+  const content = readFileSync(archivePath, "utf-8");
+  const blockPattern = /^===== (USER|ULTRON) =====\n([\s\S]*?)(?=\n===== (?:USER|ULTRON) =====\n|\n*$)/gm;
+  const messages = [...content.matchAll(blockPattern)].map((match) => {
+    const messageContent = match[2].trimEnd();
+    return match[1] === "USER" ? new HumanMessage(messageContent) : new AIMessage(messageContent);
+  });
+  if (messages.length === 0) throw new Error("archive contains no resumable messages");
+
+  await graph.updateState(
+    { configurable: { thread_id: threadId } },
+    { messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), ...messages] },
+  );
+  return messages.length;
 }
