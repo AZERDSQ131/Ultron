@@ -267,11 +267,53 @@ export async function prepareRetry(graph: ReturnType<typeof buildGraph>, threadI
   return lastUserMessage;
 }
 
+export interface ChatMessage {
+  role: "human" | "ai";
+  content: string;
+}
+
+// Simplified message list for replaying a chat's history in a UI (the web
+// sidebar switching between chats) — human/ai turns only, tool calls and
+// system/summary messages omitted since a UI transcript only needs to show
+// the conversation itself.
+export async function listChatMessages(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<ChatMessage[]> {
+  const state = await graph.getState({ configurable: { thread_id: threadId } });
+  const messages = (state.values.messages ?? []) as BaseMessage[];
+  return messages
+    .filter((message) => message.getType() === "human" || message.getType() === "ai")
+    .map((message) => ({
+      role: message.getType() as "human" | "ai",
+      content: typeof message.content === "string" ? message.content : JSON.stringify(message.content),
+    }))
+    .filter((message) => message.content.trim() !== "");
+}
+
 function archiveMessageContent(message: BaseMessage): string {
   return typeof message.content === "string" ? message.content : JSON.stringify(message.content, null, 2);
 }
 
-export async function archiveThread(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<string> {
+function archiveTitle(messages: BaseMessage[], requestedTitle?: string): string {
+  const requested = requestedTitle?.replace(/\s+/g, " ").trim();
+  if (requested) return requested;
+  const firstUserMessage = messages.find((message) => message.getType() === "human");
+  const content = firstUserMessage ? archiveMessageContent(firstUserMessage).replace(/\s+/g, " ").trim() : "ULTRON conversation";
+  return content.length > 48 ? `${content.slice(0, 47).trimEnd()}…` : content;
+}
+
+function archiveSlug(title: string): string {
+  return title
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase() || "ultron-conversation";
+}
+
+export async function archiveThread(
+  graph: ReturnType<typeof buildGraph>,
+  threadId: string,
+  requestedTitle?: string,
+): Promise<{ path: string; title: string }> {
   const state = await graph.getState({ configurable: { thread_id: threadId } });
   const messages = (state.values.messages ?? []).filter(
     (message: BaseMessage) => message.getType() === "human" || message.getType() === "ai",
@@ -279,14 +321,16 @@ export async function archiveThread(graph: ReturnType<typeof buildGraph>, thread
   const archiveDir = join(process.cwd(), "archives");
   mkdirSync(archiveDir, { recursive: true });
 
+  const title = archiveTitle(messages, requestedTitle);
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const archivePath = join(archiveDir, `ultron-${timestamp}.txt`);
+  const archivePath = join(archiveDir, `${archiveSlug(title)}-${timestamp}.txt`);
   const blocks = messages.map((message: BaseMessage) => {
     const role = message.getType() === "human" ? "USER" : "ULTRON";
     return `===== ${role} =====\n${archiveMessageContent(message)}`;
   });
   const content = [
     "ULTRON CHAT ARCHIVE",
+    `Title: ${title}`,
     `Created: ${new Date().toISOString()}`,
     `Thread: ${threadId}`,
     `Messages: ${messages.length}`,
@@ -296,7 +340,7 @@ export async function archiveThread(graph: ReturnType<typeof buildGraph>, thread
   ].join("\n");
 
   writeFileSync(archivePath, content, "utf-8");
-  return archivePath;
+  return { path: archivePath, title };
 }
 
 export async function resumeThread(

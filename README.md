@@ -107,7 +107,7 @@ The terminal handles these commands without sending them to Nemotron:
 | `/compact` | Summarize old session messages and keep the recent turns |
 | `/think on\|low\|off` | Enable full reasoning, low-effort reasoning, or no reasoning |
 | `/verbose on\|off` | Show or hide elapsed time and estimated generated tokens |
-| `/archive` | Save the current session as a readable text file under `archives/` |
+| `/archive [title]` | Save the current session as a readable text file under `archives/`; without a title, use the first user message |
 | `/resume <archive-path>` | Restore a previously archived session into the current thread |
 | `/clear` | Clear the terminal display |
 | `/quit` | Exit ULTRON |

@@ -30,9 +30,152 @@ body {
   color: var(--text);
   font-family: var(--sans);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   position: relative;
   overflow: hidden;
+}
+
+#app {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+#sidebar {
+  flex: none;
+  width: 260px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 12px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  transition: margin-left 0.2s ease;
+}
+
+#sidebar.collapsed {
+  margin-left: -260px;
+}
+
+@media (max-width: 860px) {
+  #sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    box-shadow: 20px 0 40px rgba(0, 0, 0, 0.5);
+  }
+  #sidebar.collapsed {
+    margin-left: -260px;
+  }
+}
+
+#new-chat-btn {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--red);
+  background: rgba(255, 68, 51, 0.08);
+  border: 1px dashed var(--red-dim);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+#new-chat-btn:hover {
+  background: rgba(255, 68, 51, 0.14);
+}
+
+#chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-dim);
+}
+.chat-item:hover {
+  background: var(--bg-raised);
+}
+.chat-item.active {
+  background: var(--bg-raised);
+  color: var(--text);
+}
+.chat-item.active .chat-title {
+  color: var(--text);
+}
+
+.chat-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-title-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--red-dim);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+
+.chat-actions {
+  display: none;
+  flex: none;
+  gap: 2px;
+}
+.chat-item:hover .chat-actions {
+  display: flex;
+}
+
+.chat-actions button {
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-dimmer);
+  cursor: pointer;
+}
+.chat-actions button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+#sidebar-toggle {
+  display: none;
+  font-size: 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px 8px;
+  margin-right: 4px;
+}
+@media (max-width: 860px) {
+  #sidebar-toggle {
+    display: inline-block;
+  }
 }
 
 /* Faint scanline + grain texture so the dark field doesn't read as flat. */

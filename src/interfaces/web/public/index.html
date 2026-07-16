@@ -7,32 +7,40 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <header>
-    <div class="brand">ULTRON</div>
-    <div class="status">
-      <span id="model-label" class="dim"></span>
-      <div class="context-bar">
-        <div id="context-fill" class="context-fill"></div>
+  <aside id="sidebar">
+    <button type="button" id="new-chat-btn">+ New chat</button>
+    <div id="chat-list"></div>
+  </aside>
+
+  <div id="app">
+    <header>
+      <button type="button" id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
+      <div class="brand">ULTRON</div>
+      <div class="status">
+        <span id="model-label" class="dim"></span>
+        <div class="context-bar">
+          <div id="context-fill" class="context-fill"></div>
+        </div>
+        <span id="context-label" class="dim"></span>
       </div>
-      <span id="context-label" class="dim"></span>
-    </div>
-  </header>
+    </header>
 
-  <main id="thread"></main>
+    <main id="thread"></main>
 
-  <footer>
-    <div id="command-menu" class="command-menu" hidden></div>
-    <form id="composer">
-      <select id="thinking-mode" title="Reasoning mode">
-        <option value="full">think: full</option>
-        <option value="low">think: low</option>
-        <option value="off">think: off</option>
-      </select>
-      <textarea id="input" placeholder="Message ULTRON…" rows="1" autocomplete="off"></textarea>
-      <button type="button" id="stop-btn" class="danger" hidden>Stop</button>
-      <button type="submit" id="send-btn">Send</button>
-    </form>
-  </footer>
+    <footer>
+      <div id="command-menu" class="command-menu" hidden></div>
+      <form id="composer">
+        <select id="thinking-mode" title="Reasoning mode">
+          <option value="full">think: full</option>
+          <option value="low">think: low</option>
+          <option value="off">think: off</option>
+        </select>
+        <textarea id="input" placeholder="Message ULTRON…" rows="1" autocomplete="off"></textarea>
+        <button type="button" id="stop-btn" class="danger" hidden>Stop</button>
+        <button type="submit" id="send-btn">Send</button>
+      </form>
+    </footer>
+  </div>
 
   <script src="/app.js"></script>
 </body>

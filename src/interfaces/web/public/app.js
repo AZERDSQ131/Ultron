@@ -8,9 +8,15 @@ const modelLabel = document.getElementById("model-label");
 const contextLabel = document.getElementById("context-label");
 const contextFill = document.getElementById("context-fill");
 const commandMenu = document.getElementById("command-menu");
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebar-toggle");
+const chatListEl = document.getElementById("chat-list");
+const newChatBtn = document.getElementById("new-chat-btn");
 
 let generating = false;
 let verbose = false;
+let activeChatId = null;
+let chatsCache = [];
 
 function escapeHtml(text) {
   return text
@@ -328,7 +334,7 @@ function updateContextGauge(usedTokens, maxTokens) {
 
 async function loadStatus() {
   try {
-    const res = await fetch("/api/status");
+    const res = await fetch(`/api/status?chatId=${encodeURIComponent(activeChatId ?? "")}`);
     const data = await res.json();
     modelLabel.textContent = data.model;
     updateContextGauge(data.contextTokens, data.maxTokens);
@@ -336,6 +342,141 @@ async function loadStatus() {
     modelLabel.textContent = "offline";
   }
 }
+
+function timeAgo(iso) {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+function renderChatList() {
+  chatListEl.innerHTML = "";
+  chatsCache.forEach((chat) => {
+    const item = document.createElement("div");
+    item.className = "chat-item" + (chat.id === activeChatId ? " active" : "");
+
+    const title = document.createElement("div");
+    title.className = "chat-title";
+    title.textContent = chat.title;
+    title.title = `${chat.title} · ${timeAgo(chat.updatedAt)} ago`;
+
+    const actions = document.createElement("div");
+    actions.className = "chat-actions";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.type = "button";
+    renameBtn.textContent = "✎";
+    renameBtn.title = "Rename";
+    renameBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      startRenameChat(chat, title);
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.textContent = "🗑";
+    deleteBtn.title = "Delete";
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteChat(chat);
+    });
+
+    actions.append(renameBtn, deleteBtn);
+    item.append(title, actions);
+    item.addEventListener("click", () => {
+      if (chat.id !== activeChatId) selectChat(chat.id);
+    });
+    chatListEl.appendChild(item);
+  });
+}
+
+function startRenameChat(chat, titleEl) {
+  const editor = document.createElement("input");
+  editor.className = "chat-title-input";
+  editor.value = chat.title;
+  titleEl.replaceWith(editor);
+  editor.focus();
+  editor.select();
+
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    const value = editor.value.trim();
+    if (value && value !== chat.title) {
+      await fetch(`/api/chats/${encodeURIComponent(chat.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: value }),
+      });
+    }
+    loadChats();
+  };
+
+  editor.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      editor.blur();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      settled = true;
+      loadChats();
+    }
+  });
+  editor.addEventListener("blur", commit);
+}
+
+async function deleteChat(chat) {
+  if (!confirm(`Delete "${chat.title}"? This removes its full history.`)) return;
+  await fetch(`/api/chats/${encodeURIComponent(chat.id)}`, { method: "DELETE" });
+  await loadChats();
+  if (chat.id === activeChatId) {
+    if (chatsCache.length > 0) await selectChat(chatsCache[0].id);
+    else await createNewChat();
+  }
+}
+
+async function createNewChat() {
+  const res = await fetch("/api/chats", { method: "POST" });
+  const data = await res.json();
+  await loadChats();
+  await selectChat(data.chat.id);
+}
+
+async function loadChats() {
+  const res = await fetch("/api/chats");
+  const data = await res.json();
+  chatsCache = data.chats;
+  renderChatList();
+}
+
+async function selectChat(id) {
+  activeChatId = id;
+  closeCommandMenu();
+  renderChatList();
+  thread.innerHTML = "";
+  await loadStatus();
+  try {
+    const res = await fetch(`/api/chats/${encodeURIComponent(id)}/messages`);
+    const data = await res.json();
+    for (const message of data.messages) {
+      const body = addTurn(message.role === "human" ? "user" : "assistant");
+      if (message.role === "human") body.textContent = message.content;
+      else body.innerHTML = renderMarkdown(message.content);
+    }
+  } catch {
+    addSystemNote("[ultron] could not load chat history.", true);
+  }
+  if (window.innerWidth <= 860) sidebar.classList.add("collapsed");
+  input.focus();
+}
+
+newChatBtn.addEventListener("click", () => createNewChat());
+sidebarToggle.addEventListener("click", () => sidebar.classList.toggle("collapsed"));
 
 async function streamTurn(body) {
   setGenerating(true);
@@ -419,6 +560,9 @@ async function streamTurn(body) {
   } finally {
     finishAssistant();
     setGenerating(false);
+    // Refreshes the sidebar so an auto-derived title (first message of a
+    // "New chat") and the recency ordering pick up this turn.
+    loadChats();
   }
 }
 
@@ -429,17 +573,17 @@ async function runCommand(raw) {
   if (command === "/help") {
     addSystemNote(
       "[ultron] commands: /status · /context · /stop · /retry · /compact · " +
-        "/archive · /resume <path> · /think on|low|off · /verbose on|off · /clear · /quit",
+        "/archive [title] · /resume <path> · /think on|low|off · /verbose on|off · /clear · /quit",
     );
     return;
   }
 
   if (command === "/status") {
     try {
-      const res = await fetch("/api/status");
+      const res = await fetch(`/api/status?chatId=${encodeURIComponent(activeChatId ?? "")}`);
       const data = await res.json();
       addSystemNote(
-        `[ultron] model ${data.model} · thread ultron-main · ${data.toolCount} tools · ` +
+        `[ultron] model ${data.model} · chat ${activeChatId} · ${data.toolCount} tools · ` +
           `think ${thinkingSelect.value} · verbose ${verbose ? "on" : "off"} · status ready`,
       );
     } catch {
@@ -450,7 +594,7 @@ async function runCommand(raw) {
 
   if (command === "/context") {
     try {
-      const res = await fetch("/api/status");
+      const res = await fetch(`/api/status?chatId=${encodeURIComponent(activeChatId ?? "")}`);
       const data = await res.json();
       updateContextGauge(data.contextTokens, data.maxTokens);
       const pct = Math.round((data.contextTokens / data.maxTokens) * 100);
@@ -509,8 +653,13 @@ async function runCommand(raw) {
   }
 
   if (command === "/compact") {
-    const res = await fetch("/api/compact", { method: "POST" });
+    const res = await fetch("/api/compact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId: activeChatId }),
+    });
     const data = await res.json();
+    if (data.compacted) await selectChat(activeChatId);
     addSystemNote(
       data.compacted
         ? `[ultron] compacted ${data.before} messages into ${data.after} context messages.`
@@ -520,19 +669,31 @@ async function runCommand(raw) {
   }
 
   if (command === "/retry") {
-    await streamTurn({ retry: true, thinking: thinkingSelect.value });
+    await streamTurn({ chatId: activeChatId, retry: true, thinking: thinkingSelect.value });
     return;
   }
 
   if (command === "/stop") {
-    await fetch("/api/stop", { method: "POST" });
+    await fetch("/api/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId: activeChatId }),
+    });
     return;
   }
 
   if (command === "/archive") {
-    const res = await fetch("/api/archive", { method: "POST" });
+    const res = await fetch("/api/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId: activeChatId, title: arg || undefined }),
+    });
     const data = await res.json();
-    addSystemNote(data.path ? `[ultron] archived to ${data.path}` : `[ultron] ${data.error ?? "archive failed"}`);
+    addSystemNote(
+      data.path
+        ? `[ultron] chat "${data.title}" archived to ${data.path}`
+        : `[ultron] ${data.error ?? "archive failed"}`,
+    );
     return;
   }
 
@@ -544,9 +705,10 @@ async function runCommand(raw) {
     const res = await fetch("/api/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: arg }),
+      body: JSON.stringify({ chatId: activeChatId, path: arg }),
     });
     const data = await res.json();
+    if (res.ok) await selectChat(activeChatId);
     addSystemNote(
       res.ok ? `[ultron] resumed ${data.count} messages from ${arg}` : `[ultron] ${data.error ?? "resume failed"}`,
       !res.ok,
@@ -572,12 +734,19 @@ composer.addEventListener("submit", (e) => {
   }
 
   addTurn("user").textContent = text;
-  streamTurn({ text, thinking: thinkingSelect.value });
+  streamTurn({ chatId: activeChatId, text, thinking: thinkingSelect.value });
 });
 
 stopBtn.addEventListener("click", async () => {
-  await fetch("/api/stop", { method: "POST" });
+  await fetch("/api/stop", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chatId: activeChatId }),
+  });
 });
 
-loadStatus();
-input.focus();
+(async () => {
+  await loadChats();
+  const initial = chatsCache[0];
+  if (initial) await selectChat(initial.id);
+})();

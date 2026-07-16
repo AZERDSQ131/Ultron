@@ -248,6 +248,13 @@ export class SqliteSaver extends BaseCheckpointSaver {
       statement.run(threadId, checkpointNs, checkpointId, taskId, writeIdx, channel, serializedValue);
     });
   }
+
+  // Used when a chat is deleted (see src/core/memory/chats.ts) so its
+  // checkpoint history doesn't linger in the database as orphaned rows.
+  deleteThread(threadId: string): void {
+    this.db.prepare("DELETE FROM checkpoints WHERE thread_id = ?").run(threadId);
+    this.db.prepare("DELETE FROM writes WHERE thread_id = ?").run(threadId);
+  }
 }
 
 let sharedCheckpointer: SqliteSaver | undefined;

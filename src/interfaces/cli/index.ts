@@ -8,12 +8,12 @@ import { HumanMessage } from "@langchain/core/messages";
 import { archiveThread, buildGraph, compactThread, estimateContextUsage, prepareRetry, resumeThread } from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import { getChatRegistry, LEGACY_CHAT_ID } from "../../core/memory/chats.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { MarkdownStreamRenderer } from "./markdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const THREAD_ID = "ultron-main";
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
 const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/verbose", "/quit"];
@@ -214,13 +214,13 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  save the chat as a resumable text archive\n  ${chalk.cyanBright("/resume")}   load an archive into the current session\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  archive chat, optionally with a title\n  ${chalk.cyanBright("/resume")}   load an archive into the current session\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
-function printStatus(thinkingMode: ThinkingMode, verbose: boolean) {
+function printStatus(thinkingMode: ThinkingMode, verbose: boolean, chatId: string) {
   appendTranscript(
-    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · thread ${THREAD_ID}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
+    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · chat ${chatId}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
   );
 }
 
@@ -285,6 +285,15 @@ async function main() {
   printBanner();
 
   const graph = buildGraph();
+  const chats = getChatRegistry(config.databasePath);
+  // Registers the CLI's original hardcoded thread (from before chats
+  // existed) so its history shows up in the registry instead of being
+  // orphaned — same migration the web server runs on its own startup.
+  chats.ensure(LEGACY_CHAT_ID);
+  // Resume whichever chat was most recently active, from either interface —
+  // not always the legacy thread, since /archive or the web UI may have
+  // moved on to a newer one since the CLI last ran.
+  let currentChatId = chats.list()[0].id;
 
   let abortController: AbortController | undefined;
   let stopping = false;
@@ -301,7 +310,7 @@ async function main() {
 
   try {
     while (!stopping) {
-      const currentContextTokens = await estimateContextUsage(graph, THREAD_ID);
+      const currentContextTokens = await estimateContextUsage(graph, currentChatId);
       const contextLine = renderContextBar(currentContextTokens, config.contextWindowTokens);
       let input = await readInput(contextLine);
       if (stopping) break;
@@ -317,14 +326,14 @@ async function main() {
             printHelp();
             continue;
           case "/status":
-            printStatus(thinkingMode, verbose);
+            printStatus(thinkingMode, verbose, currentChatId);
             continue;
           case "/clear":
             transcript = "";
             printBanner();
             continue;
           case "/context": {
-            const contextTokens = await estimateContextUsage(graph, THREAD_ID);
+            const contextTokens = await estimateContextUsage(graph, currentChatId);
             appendTranscript(`${renderContextBar(contextTokens, config.contextWindowTokens)}\n\n`);
             continue;
           }
@@ -332,7 +341,7 @@ async function main() {
             appendTranscript(chalk.dim("[ultron] no active generation to stop.\n\n"));
             continue;
           case "/retry": {
-            const retryInput = await prepareRetry(graph, THREAD_ID);
+            const retryInput = await prepareRetry(graph, currentChatId);
             if (!retryInput) {
               appendTranscript(chalk.yellow("[ultron] nothing to retry yet.\n\n"));
               continue;
@@ -341,7 +350,7 @@ async function main() {
             break;
           }
           case "/compact": {
-            const result = await compactThread(graph, THREAD_ID);
+            const result = await compactThread(graph, currentChatId);
             appendTranscript(
               result.compacted
                 ? chalk.dim(`[ultron] compacted ${result.before} messages into ${result.after} context messages.\n\n`)
@@ -350,8 +359,17 @@ async function main() {
             continue;
           }
           case "/archive": {
-            const archivePath = await archiveThread(graph, THREAD_ID);
-            appendTranscript(chalk.dim(`[ultron] chat archived to ${archivePath}\n\n`));
+            if (commandArgument) chats.rename(currentChatId, commandArgument);
+            const archive = await archiveThread(graph, currentChatId, chats.get(currentChatId)?.title);
+            const archivedTitle = chats.get(currentChatId)?.title ?? "this chat";
+            const nextChat = chats.create();
+            currentChatId = nextChat.id;
+            appendTranscript(
+              chalk.dim(
+                `[ultron] chat archived to ${archive.path} — "${archive.title || archivedTitle}" stays available in the sidebar (web UI) ` +
+                  `and via /resume. Starting a new chat.\n\n`,
+              ),
+            );
             continue;
           }
           case "/resume":
@@ -360,7 +378,7 @@ async function main() {
               continue;
             }
             try {
-              const messageCount = await resumeThread(graph, THREAD_ID, commandArgument);
+              const messageCount = await resumeThread(graph, currentChatId, commandArgument);
               appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
             } catch (error) {
               appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
@@ -376,13 +394,22 @@ async function main() {
             stopping = true;
             continue;
           default:
+            if (commandName === "/archive") {
+              if (commandArgument) chats.rename(currentChatId, commandArgument);
+              const archive = await archiveThread(graph, currentChatId, chats.get(currentChatId)?.title);
+              const archivedTitle = chats.get(currentChatId)?.title ?? archive.title;
+              const nextChat = chats.create();
+              currentChatId = nextChat.id;
+              appendTranscript(chalk.dim(`[ultron] chat "${archive.title || archivedTitle}" archived to ${archive.path}. Starting a new chat.\n\n`));
+              continue;
+            }
             if (commandName === "/resume") {
               if (!commandArgument) {
                 appendTranscript(chalk.yellow("[ultron] usage: /resume <archive-path>\n\n"));
                 continue;
               }
               try {
-                const messageCount = await resumeThread(graph, THREAD_ID, commandArgument);
+                const messageCount = await resumeThread(graph, currentChatId, commandArgument);
                 appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
               } catch (error) {
                 appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
@@ -416,6 +443,9 @@ async function main() {
         }
       }
 
+      if (command !== "/retry") chats.maybeAutoTitle(currentChatId, input);
+      chats.touch(currentChatId);
+
       abortController = new AbortController();
       const turnStarted = Date.now();
       generationInput = "";
@@ -426,7 +456,7 @@ async function main() {
         const stream = await graph.stream(
           { messages: command === "/retry" ? [] : [new HumanMessage(input)] },
           {
-            configurable: { thread_id: THREAD_ID, thinking: thinkingMode },
+            configurable: { thread_id: currentChatId, thinking: thinkingMode },
             signal: abortController.signal,
             streamMode: "messages",
           },
