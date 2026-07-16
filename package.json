@@ -11,7 +11,8 @@
     "build": "tsc -p tsconfig.json && cp -r src/interfaces/web/public dist/interfaces/web/public && cp src/interfaces/cli/ascii-art.txt dist/interfaces/cli/ascii-art.txt",
     "start": "node dist/interfaces/cli/index.js",
     "start:web": "node dist/interfaces/web/server.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@langchain/core": "^0.3.40",
