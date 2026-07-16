@@ -59,4 +59,7 @@ export function initAutomation() {
   load().catch(() => { panel.querySelector(".empty-hint")?.replaceChildren(document.createTextNode("Could not load automation")); });
   window.addEventListener("chats:loaded", render);
   window.addEventListener("chat:selected", render);
+  // A schedule is created by the model during a streaming turn, so the
+  // sidebar needs a small polling refresh to see it without a full reload.
+  setInterval(() => load().catch(() => {}), 5000);
 }
