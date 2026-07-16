@@ -8,7 +8,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { archiveThread, buildGraph, compactThread, estimateContextUsage, prepareRetry, resumeThread } from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import { getChatRegistry, LEGACY_CHAT_ID } from "../../core/memory/chats.js";
+import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID } from "../../core/memory/chats.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { MarkdownStreamRenderer } from "./markdown.js";
@@ -24,6 +24,7 @@ let generationInput = "";
 let generationCursor = 0;
 let pendingRender: { input: string; cursor: number; contextLine: string } | undefined;
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
+let activePrompt = INPUT_PROMPT;
 
 function appendTranscript(text: string): void {
   transcript += text;
@@ -47,13 +48,13 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
   const suggestion = commandSuggestion(input);
   const suggestionLine = suggestion ? chalk.dim(`↳ ${suggestion}`) : "";
-  const footer = `${rule()}\n${INPUT_PROMPT}${input}\n${suggestionLine}\n${contextLine}\n${rule()}`;
+  const footer = `${rule()}\n${activePrompt}${input}\n${suggestionLine}\n${contextLine}\n${rule()}`;
   const rows = stdout.rows || 24;
   const padding = Math.max(0, rows - transcriptRows(content) - 5);
 
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${footer}`);
   readline.moveCursor(stdout, 0, -3);
-  readline.cursorTo(stdout, INPUT_PROMPT.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + cursor);
+  readline.cursorTo(stdout, activePrompt.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + cursor);
 }
 
 function renderScreen(input: string, cursor: number, contextLine: string): void {
@@ -91,13 +92,19 @@ function rule(): string {
   return chalk.dim("─".repeat(ruleWidth()));
 }
 
-function readInput(contextLine: string): Promise<string> {
+function readInput(
+  contextLine: string,
+  initialValue = "",
+  prompt = INPUT_PROMPT,
+  recordHistory = true,
+): Promise<string> {
   readline.emitKeypressEvents(stdin);
   stdin.setRawMode?.(true);
+  activePrompt = prompt;
 
   return new Promise((resolve) => {
-    let value = "";
-    let cursor = 0;
+    let value = initialValue;
+    let cursor = value.length;
     let finished = false;
 
     const finish = (result: string, keepHistory = true) => {
@@ -107,9 +114,10 @@ function readInput(contextLine: string): Promise<string> {
       stdin.removeListener("keypress", onKeypress);
       cancelActiveInput = undefined;
 
-      if (keepHistory && result.trim()) appendTranscript(`${INPUT_PROMPT}${result}\n`);
+      if (keepHistory && recordHistory && result.trim()) appendTranscript(`${activePrompt}${result}\n`);
       renderScreen("", 0, contextLine);
       flushRender();
+      activePrompt = INPUT_PROMPT;
       resolve(result);
     };
 
@@ -214,7 +222,7 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  archive chat, optionally with a title\n  ${chalk.cyanBright("/resume")}   load an archive into the current session\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   load an archive into the current session\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -300,6 +308,28 @@ async function main() {
   let thinkingMode: ThinkingMode = "full";
   let verbose = false;
 
+  const archiveCurrentChat = async (contextLine: string, requestedTitle?: string): Promise<void> => {
+    let title = requestedTitle?.trim();
+    if (!title) {
+      const chat = chats.get(currentChatId);
+      const suggestedTitle = chat && chat.title !== DEFAULT_CHAT_TITLE ? chat.title : "";
+      title = (
+        await readInput(
+          contextLine,
+          suggestedTitle,
+          `${chalk.magentaBright.bold("title")} ${chalk.dim("›")} `,
+          false,
+        )
+      ).trim();
+    }
+
+    if (title) chats.rename(currentChatId, title);
+    const archive = await archiveThread(graph, currentChatId, title || undefined);
+    const nextChat = chats.create();
+    currentChatId = nextChat.id;
+    appendTranscript(`${chalk.greenBright("Chat Archived")} ${chalk.dim(`"${archive.title}" → ${archive.path}`)}\n\n`);
+  };
+
   process.on("SIGINT", () => {
     if (stopping) process.exit(0);
     stopping = true;
@@ -359,17 +389,7 @@ async function main() {
             continue;
           }
           case "/archive": {
-            if (commandArgument) chats.rename(currentChatId, commandArgument);
-            const archive = await archiveThread(graph, currentChatId, chats.get(currentChatId)?.title);
-            const archivedTitle = chats.get(currentChatId)?.title ?? "this chat";
-            const nextChat = chats.create();
-            currentChatId = nextChat.id;
-            appendTranscript(
-              chalk.dim(
-                `[ultron] chat archived to ${archive.path} — "${archive.title || archivedTitle}" stays available in the sidebar (web UI) ` +
-                  `and via /resume. Starting a new chat.\n\n`,
-              ),
-            );
+            await archiveCurrentChat(contextLine, commandArgument);
             continue;
           }
           case "/resume":
@@ -395,12 +415,7 @@ async function main() {
             continue;
           default:
             if (commandName === "/archive") {
-              if (commandArgument) chats.rename(currentChatId, commandArgument);
-              const archive = await archiveThread(graph, currentChatId, chats.get(currentChatId)?.title);
-              const archivedTitle = chats.get(currentChatId)?.title ?? archive.title;
-              const nextChat = chats.create();
-              currentChatId = nextChat.id;
-              appendTranscript(chalk.dim(`[ultron] chat "${archive.title || archivedTitle}" archived to ${archive.path}. Starting a new chat.\n\n`));
+              await archiveCurrentChat(contextLine, commandArgument);
               continue;
             }
             if (commandName === "/resume") {
