@@ -87,8 +87,8 @@ mais ne sont pas implémentées.
   au démarrage sur le chat le plus récemment actif, toutes interfaces confondues) ;
   `/archive` clôture le chat courant et en démarre un nouveau au lieu de quitter,
   pour que le chat archivé reste consultable depuis la sidebar web.
-- `src/core/tools/` : onze outils avec scopes déclarés dans `index.ts` : shell,
-  fichiers, HTTP/web et processus.
+- `src/core/tools/` : douze outils avec scopes déclarés dans `index.ts` : shell,
+  fichiers, HTTP/web, processus et date/heure courante.
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
   au démarrage ; ils ne doivent pas être fusionnés.
 - `PLAN.md`, `README.md` et `docs/agent-ia-personnel.md` : périmètre,

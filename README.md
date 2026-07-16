@@ -19,7 +19,7 @@ The current version provides a terminal conversation loop with:
 - basic terminal Markdown styling, including `**bold**` text;
 - local slash commands for stopping, retrying, compacting and tuning reasoning;
 - resumable text archives through `/archive` and `/resume`;
-- eleven tools for shell commands, files, HTTP/web requests and processes;
+- twelve tools for shell commands, files, HTTP/web requests, processes and the current date/time;
 - declared tool scopes (`read`, `write`, `destructive`) for architectural clarity;
 - retry handling for transient API errors and malformed plain-text tool calls;
 - clean Ctrl+C interruption, including during an in-flight model request.
