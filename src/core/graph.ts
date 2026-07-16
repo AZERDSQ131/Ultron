@@ -111,6 +111,17 @@ function looksLikeFakeToolCall(content: unknown): boolean {
   return toolArgKeySets.some((argKeys) => keys.every((k) => argKeys.has(k)));
 }
 
+function parseFakeToolArguments(content: unknown): Record<string, unknown> | undefined {
+  if (typeof content !== "string") return undefined;
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+    return parsed as Record<string, unknown>;
+  } catch { return undefined; }
+}
+
 // Shared across both retry reasons (transient API error, fake tool call) so
 // a bad run can't multiply the two into a combined worst case of a dozen-plus
 // sequential API calls — that's what was actually causing multi-minute
@@ -182,6 +193,14 @@ export function buildGraph() {
         console.error(
           `[ultron] model wrote a tool call as plain text instead of using it — discarding and retrying (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
         );
+      }
+
+      // Nemotron sometimes emits valid tool arguments as JSON text even
+      // after retries. Salvage the structured schedule request into a real
+      // tool call so the task is not silently discarded.
+      const fakeArgs = response ? parseFakeToolArguments(response.content) : undefined;
+      if (fakeArgs && typeof fakeArgs.name === "string" && typeof fakeArgs.instruction === "string" && (typeof fakeArgs.delaySeconds === "number" || typeof fakeArgs.cron === "string")) {
+        response = new AIMessage({ content: "", tool_calls: [{ name: "schedule_task", args: fakeArgs, id: `schedule-${Date.now()}` }] });
       }
 
       // Never surface a fabricated tool call/result as if it were a real
