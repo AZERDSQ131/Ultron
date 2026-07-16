@@ -79,7 +79,11 @@ function routeAfterAgent(state: typeof MessagesAnnotation.State) {
   // chat, which leaves an empty array here. Guard instead of assuming an
   // AIMessage is always present.
   const last = state.messages.at(-1);
-  if (last instanceof AIMessage && last.tool_calls?.length) { debugLog(`route after agent -> tools calls=${JSON.stringify(last.tool_calls)}`); return "tools"; }
+  // Check the structural field instead of relying only on instanceof: after
+  // checkpoint serialization LangGraph can restore an AI message using a
+  // compatible message class from a different module instance.
+  const toolCalls = (last as unknown as { tool_calls?: unknown[] } | undefined)?.tool_calls;
+  if (toolCalls?.length) { debugLog(`route after agent -> tools calls=${JSON.stringify(toolCalls)}`); return "tools"; }
   debugLog(`route after agent -> end last=${last?.getType() ?? "none"}`);
   return END;
 }
