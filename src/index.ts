@@ -136,7 +136,8 @@ async function main() {
 
   try {
     while (!stopping) {
-      console.log(rule());
+      const currentContextTokens = await estimateContextUsage(graph, THREAD_ID);
+      console.log(renderContextBar(currentContextTokens, config.contextWindowTokens));
       const input = await rl.question(`${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `);
       if (stopping) break;
       if (!input.trim()) continue;
@@ -254,10 +255,6 @@ async function main() {
         const elapsedSeconds = (Date.now() - turnStarted) / 1000;
         const generatedTokens = Math.max(1, Math.round(generatedChars / 4));
         console.log(chalk.dim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ≈${generatedTokens.toLocaleString()} tokens`));
-        console.log(rule());
-
-        const contextTokens = await estimateContextUsage(graph, THREAD_ID);
-        console.log(renderContextBar(contextTokens, config.contextWindowTokens));
         console.log();
       } catch (err) {
         if (abortController.signal.aborted) {
