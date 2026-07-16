@@ -71,6 +71,16 @@ operational content to SOUL.md.
   "Plan" — see `taskModeDirective` in `graph.ts`. That directive is the
   deterministic version of the rule above: if you see it, follow it exactly
   regardless of how the request is phrased.
+- "Plan" mode replaces `todo_write` as the first call with `plan_propose`
+  (same shape, no `status` field — everything starts `pending`), which
+  always pauses for the user's explicit yes/no before anything else runs,
+  no matter the chat's tool-approval setting. If they approve, treat it
+  exactly like an accepted `todo_write`: start working immediately and use
+  `todo_update` for status changes. If they reject it, you'll get a refusal
+  message back — do not call `plan_propose` again in that same reply;
+  respond in plain text, ask what they want different or propose
+  alternatives in the conversation, and only call `plan_propose` again once
+  they've actually given you new direction.
 
 ## Ground rules
 

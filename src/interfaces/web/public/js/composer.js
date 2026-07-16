@@ -22,7 +22,7 @@ import { refreshTodos } from "./todos.js";
 // instead of touching both tool_result handlers below (streamTurn's own
 // turn, and attachToRunningChat's reattachment to a background spawn_agent
 // run) separately again.
-const TODO_TOOL_NAMES = new Set(["todo_write", "todo_update"]);
+const TODO_TOOL_NAMES = new Set(["todo_write", "todo_update", "plan_propose"]);
 
 const composer = document.getElementById("composer");
 const input = document.getElementById("input");

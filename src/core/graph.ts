@@ -11,6 +11,7 @@ import { config as appConfig } from "../config.js";
 import { createNemotronModel, type ThinkingMode } from "./llm/nemotron.js";
 import { getCheckpointer } from "./memory/checkpointer.js";
 import { getChatRegistry } from "./memory/chats.js";
+import { getTodoRegistry } from "./memory/todos.js";
 import { AgentRegistry, type Agent } from "./memory/agents.js";
 import { tools, toolScopes } from "./tools/index.js";
 import { summarizeToolCall } from "./tools/summarize.js";
@@ -95,14 +96,46 @@ change (steps added, removed, or reordered).`;
 
 <task_mode>Plan</task_mode>
 For THIS turn, the user selected "Plan" task mode — this is a task they
-consider complex. Before your first tool call, you MUST call todo_write
-once with a detailed breakdown of the work into concrete steps, erring on
-the side of more and smaller steps rather than fewer and bigger ones.
-After that, use todo_update to mark a step 'in_progress' or 'completed' as
-you go — do NOT call todo_write again just to change a status. Only call
-todo_write a second time if the plan's shape itself needs to change.`;
+consider complex and want to review before you act. Before your first
+tool call of any other kind, you MUST call plan_propose once with a
+detailed breakdown of the work into concrete steps, erring on the side of
+more and smaller steps rather than fewer and bigger ones. plan_propose
+pauses and shows the user your plan:
+- If they approve it, you'll get a confirmation back — start executing
+  immediately after, and use todo_update (not todo_write, not another
+  plan_propose call) to mark steps 'in_progress'/'completed' as you go.
+- If they reject it, you'll get a refusal back instead — do NOT call
+  plan_propose again in that same reply. Respond in plain text: ask what
+  they want changed, or discuss alternatives. Only call plan_propose again
+  once they've given you new direction, which may be in a later turn.`;
   }
   return "";
+}
+
+const todoRegistryForPrompt = getTodoRegistry(appConfig.databasePath);
+
+type TodoState = "active" | "plan_denied" | "not_started";
+
+// "active" covers both a to-do created earlier this turn AND one left over
+// from an earlier turn in the same chat — the list is stored per chat (see
+// memory/todos.ts), not per turn, so checking the registry directly is both
+// simpler and more correct than scanning messages for a past todo_write
+// call: a continuing conversation that already has a list should never be
+// told to write a brand new one.
+// "plan_denied" only applies to "plan" mode: no list exists yet, but a
+// plan_propose call earlier in *this* turn got refused (see toolsNode's
+// refusal ToolMessage in graph.ts) — the model just got that news and
+// should discuss before proposing again, not immediately retry blind.
+function todoState(mode: TaskMode, threadId: string | undefined, messages: BaseMessage[]): TodoState {
+  if (threadId && todoRegistryForPrompt.get(threadId).length > 0) return "active";
+  if (mode === "plan") {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.getType() === "human") break;
+      if (message.getType() === "tool" && (message as ToolMessage).name === "plan_propose") return "plan_denied";
+    }
+  }
+  return "not_started";
 }
 
 // A one-line version of taskModeDirective, appended as the very last
@@ -111,30 +144,22 @@ todo_write a second time if the plan's shape itself needs to change.`;
 // real run had the directive in place yet still did six web_search calls
 // before ever touching todo_write — the instruction was correct but
 // buried behind a lot of history the model apparently weighted more than
-// a system message from the start of the context. Wording adapts to
-// whether todo_write already ran this turn, so it doesn't keep repeating
-// "before your first tool call" once that's no longer true.
-function taskModeReminder(mode: TaskMode, todoStartedThisTurn: boolean): string {
+// a system message from the start of the context. Wording adapts to the
+// list's current state so it doesn't keep repeating "before your first
+// tool call" once that's no longer true, and doesn't push a re-proposal
+// the instant a plan gets rejected (see todoState above).
+function taskModeReminder(mode: TaskMode, state: TodoState): string {
   if (mode === "none") return "";
-  if (!todoStartedThisTurn) {
-    return `[ultron:task_mode=${mode}] Reminder: call todo_write now, before any other tool call, laying out the ${mode === "plan" ? "full detailed breakdown" : "sub-tasks"} of this request. Do this before searching, fetching, or running anything else.`;
+  if (state === "active") {
+    return `[ultron:task_mode=${mode}] Reminder: a to-do list already exists for this chat. Use todo_update (one item, by its position) to mark a step in_progress/completed as you go — do NOT call todo_write${mode === "plan" ? " or plan_propose" : ""} again just to change a status, that replaces the whole list.`;
   }
-  return `[ultron:task_mode=${mode}] Reminder: a to-do list already exists for this turn. Use todo_update (one item, by its position) to mark a step in_progress/completed as you go — do NOT call todo_write again just to change a status, that replaces the whole list.`;
-}
-
-// Scans back from the end of the thread to the most recent human message,
-// checking whether any AI turn in between already called todo_write — i.e.
-// whether this turn already has a list going, for taskModeReminder above.
-function todoStartedThisTurn(messages: BaseMessage[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message.getType() === "human") return false;
-    if (message.getType() === "ai") {
-      const calls = (message as AIMessage).tool_calls ?? [];
-      if (calls.some((call) => call.name === "todo_write")) return true;
-    }
+  if (state === "plan_denied") {
+    return `[ultron:task_mode=plan] Reminder: your last proposed plan was NOT approved. Do not call plan_propose again in this reply — respond in plain text instead (ask what to change, discuss alternatives) and wait for the user's direction.`;
   }
-  return false;
+  if (mode === "plan") {
+    return `[ultron:task_mode=plan] Reminder: call plan_propose now, before any other tool call, with the full breakdown of this request. Do this before searching, fetching, or running anything else — it will pause for the user's approval before any real work starts.`;
+  }
+  return `[ultron:task_mode=todo] Reminder: call todo_write now, before any other tool call, laying out the sub-tasks of this request. Do this before searching, fetching, or running anything else.`;
 }
 
 function buildSystemPrompt(threadId?: string, taskMode: TaskMode = "none"): string {
@@ -321,6 +346,11 @@ async function toolsNode(state: typeof MessagesAnnotation.State, runConfig: Runn
   const mode = getChatRegistry(appConfig.databasePath).getSecurityMode(threadId);
 
   const needsApproval = (call: { name: string }): boolean => {
+    // plan_propose always pauses, independent of security mode — this is
+    // the "Plan" task-mode confirmation step (see plan.ts), a workflow
+    // control, not the shell/fs "destructive" safety gate that "bypass"
+    // mode is meant to skip.
+    if (call.name === "plan_propose") return true;
     if (mode === "bypass") return false;
     if (mode === "manual") return true;
     return (toolScopes[call.name] ?? "read") === "destructive";
@@ -343,7 +373,10 @@ async function toolsNode(state: typeof MessagesAnnotation.State, runConfig: Runn
         return new ToolMessage({
           name: call.name,
           tool_call_id: call.id ?? "",
-          content: "[ultron] Action refused by the user — not executed.",
+          content:
+            call.name === "plan_propose"
+              ? "[ultron] The user did not approve this plan. Do not call plan_propose again right away — respond in plain text first: ask what they'd like changed, or discuss alternatives. Only call plan_propose again once they've given you new direction."
+              : "[ultron] Action refused by the user — not executed.",
         });
       }
       const tool = tools.find((t) => t.name === call.name);
@@ -405,7 +438,7 @@ export function buildGraph() {
       const threadId = runConfig.configurable?.thread_id as string | undefined;
       const taskMode = (runConfig.configurable?.taskMode as TaskMode | undefined) ?? "none";
       const history = sanitizeHistory(state.messages);
-      const taskReminder = taskModeReminder(taskMode, todoStartedThisTurn(state.messages));
+      const taskReminder = taskModeReminder(taskMode, todoState(taskMode, threadId, state.messages));
       const messages = [
         { role: "system" as const, content: buildSystemPrompt(threadId, taskMode) },
         ...history,

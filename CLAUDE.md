@@ -164,6 +164,22 @@ indépendants.
   largement sur une tâche par ailleurs saine (`GRAPH_RECURSION_LIMIT`
   atteint). Propagé à tous les appels `graph.stream`/`graph.invoke`
   (CLI, serveur web, tâches planifiées, `spawn_agent`).
+- Le mode "Plan" ne se contente plus de forcer `todo_write` en amont : il
+  utilise un nouvel outil `plan_propose` (`src/core/tools/plan.ts`, même
+  forme que `todo_write` sans le champ `status`) qui **suspend toujours**
+  l'exécution pour une confirmation explicite de l'utilisateur, quel que
+  soit le mode de sécurité du chat (cas spécial dans `needsApproval` de
+  `toolsNode`, `graph.ts` — ce n'est pas la porte de sécurité
+  bypass/accept_edit/manual, c'est le contrôle de workflow propre à "Plan").
+  Réutilise entièrement le mécanisme `interrupt()`/`Command`/`/api/approve`
+  déjà en place pour l'approbation des outils destructifs. Sur refus, le
+  `ToolMessage` renvoyé au modèle lui dit explicitement de discuter en
+  langage naturel plutôt que de rappeler `plan_propose` immédiatement ; sur
+  acceptation, l'outil s'exécute réellement et écrit le plan dans le même
+  registre que `todo_write`/`todo_update`. `taskModeReminder`/`taskModeDirective`
+  et l'UI web (`addApprovalBlock` dans `thread.js`, rendu dédié "Plan
+  proposé" avec boutons Start/Discuss) reflètent ce cycle
+  propose → (accepte → exécute) | (refuse → discute → re-propose).
 - `WEB_PORT` : optionnel ; défaut `4173`, port de l'interface web locale.
 - `CONTEXT_WINDOW_TOKENS` : optionnel ; défaut `262144`, utilisé uniquement
   pour la jauge de contexte.

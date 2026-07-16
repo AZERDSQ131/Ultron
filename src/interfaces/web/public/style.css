@@ -1366,6 +1366,26 @@ footer {
   cursor: default;
 }
 
+/* Plan-mode variant of the approval block (plan_propose, see plan.ts) —
+   same amber/good/accent state machine, but the body reads as a numbered
+   plan instead of a raw tool-call JSON blob. */
+.plan-block {
+  margin-left: 0;
+}
+.plan-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.plan-index {
+  flex: none;
+  color: var(--text-dimmer);
+  min-width: 1.4em;
+}
+.plan-content {
+  color: var(--text);
+}
+
 #input {
   flex: 1;
   resize: none;

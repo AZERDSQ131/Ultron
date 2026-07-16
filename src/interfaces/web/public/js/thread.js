@@ -149,38 +149,62 @@ export function addMetaLine(text) {
 // call) and resolves once the user picks Approve/Deny — every pending call
 // in the batch gets the same decision, since the UI offers one choice for
 // the whole batch rather than a per-call checklist.
+//
+// A lone plan_propose call (Plan task mode, see plan.ts) gets a distinct
+// look: the proposed steps read as a plan, not a raw tool-call JSON blob,
+// and the buttons read "Start"/"Discuss" instead of the generic
+// "Approve"/"Deny" — same interrupt/resume plumbing underneath either way.
 export function addApprovalBlock(calls) {
+  const isPlan = calls.length === 1 && calls[0].name === "plan_propose";
   const wrap = document.createElement("div");
-  wrap.className = "approval-block";
+  wrap.className = "approval-block" + (isPlan ? " plan-block" : "");
 
   const header = document.createElement("div");
   header.className = "approval-header";
-  header.textContent = `Approval required · ${calls.length} tool call${calls.length > 1 ? "s" : ""}`;
+  header.textContent = isPlan
+    ? `Plan proposed · ${calls[0].args?.items?.length ?? 0} step${(calls[0].args?.items?.length ?? 0) === 1 ? "" : "s"}`
+    : `Approval required · ${calls.length} tool call${calls.length > 1 ? "s" : ""}`;
 
   const list = document.createElement("div");
   list.className = "approval-list";
-  for (const call of calls) {
-    const row = document.createElement("div");
-    row.className = "approval-row";
-    const scope = state.toolScopes[call.name] ?? "read";
-    const badge = document.createElement("span");
-    badge.className = `tool-badge scope-badge-${scope}`;
-    badge.textContent = scope;
-    const name = document.createElement("span");
-    name.className = "tool-name";
-    name.textContent = call.name;
-    const args = document.createElement("span");
-    args.className = "approval-args";
-    args.textContent = JSON.stringify(call.args);
-    row.append(badge, name, args);
-    list.appendChild(row);
+  if (isPlan) {
+    const items = calls[0].args?.items ?? [];
+    items.forEach((item, i) => {
+      const row = document.createElement("div");
+      row.className = "plan-row";
+      const index = document.createElement("span");
+      index.className = "plan-index";
+      index.textContent = `${i + 1}.`;
+      const content = document.createElement("span");
+      content.className = "plan-content";
+      content.textContent = item.content ?? String(item);
+      row.append(index, content);
+      list.appendChild(row);
+    });
+  } else {
+    for (const call of calls) {
+      const row = document.createElement("div");
+      row.className = "approval-row";
+      const scope = state.toolScopes[call.name] ?? "read";
+      const badge = document.createElement("span");
+      badge.className = `tool-badge scope-badge-${scope}`;
+      badge.textContent = scope;
+      const name = document.createElement("span");
+      name.className = "tool-name";
+      name.textContent = call.name;
+      const args = document.createElement("span");
+      args.className = "approval-args";
+      args.textContent = JSON.stringify(call.args);
+      row.append(badge, name, args);
+      list.appendChild(row);
+    }
   }
 
   const actions = document.createElement("div");
   actions.className = "approval-actions";
-  const approveBtn = makeActionBtn(`Approve${calls.length > 1 ? " all" : ""}`, () => settle(true));
+  const approveBtn = makeActionBtn(isPlan ? "Start" : `Approve${calls.length > 1 ? " all" : ""}`, () => settle(true));
   approveBtn.className = "approve";
-  const denyBtn = makeActionBtn(`Deny${calls.length > 1 ? " all" : ""}`, () => settle(false));
+  const denyBtn = makeActionBtn(isPlan ? "Discuss" : `Deny${calls.length > 1 ? " all" : ""}`, () => settle(false));
   denyBtn.className = "deny";
   actions.append(approveBtn, denyBtn);
 
@@ -194,7 +218,7 @@ export function addApprovalBlock(calls) {
       approveBtn.disabled = true;
       denyBtn.disabled = true;
       wrap.classList.add(approved ? "approved" : "denied");
-      header.textContent = approved ? "Approved" : "Denied";
+      header.textContent = isPlan ? (approved ? "Plan started" : "Plan not approved") : approved ? "Approved" : "Denied";
       const decisions = {};
       for (const call of calls) decisions[call.id] = approved;
       resolve(decisions);

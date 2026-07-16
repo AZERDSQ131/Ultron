@@ -11,7 +11,7 @@ const todos = getTodoRegistry(config.databasePath);
 // model can address one item (todo_update) without needing to track the
 // internal uuid — "item 2" is something it naturally reasons about, a
 // generated id is not.
-function formatList(items: TodoItem[]): string {
+export function formatTodoList(items: TodoItem[]): string {
   if (!items.length) return "[ultron] To-do list is empty.";
   const marks: Record<TodoItem["status"], string> = { pending: "[ ]", in_progress: "[~]", completed: "[x]" };
   return items.map((item, i) => `${i + 1}. ${marks[item.status]} ${item.content}`).join("\n");
@@ -26,7 +26,7 @@ export const todoWrite = tool(
     if (typeof threadId !== "string") return "error: no active chat to attach this to-do list to";
     const stored: TodoItem[] = items.map((item) => ({ id: randomUUID(), content: item.content, status: item.status }));
     todos.set(threadId, stored);
-    return `To-do list updated (${stored.length} item${stored.length === 1 ? "" : "s"}):\n${formatList(stored)}`;
+    return `To-do list updated (${stored.length} item${stored.length === 1 ? "" : "s"}):\n${formatTodoList(stored)}`;
   },
   {
     name: "todo_write",
@@ -66,7 +66,7 @@ export const todoUpdate = tool(
     if (status) items[i] = { ...items[i], status };
     if (content?.trim()) items[i] = { ...items[i], content: content.trim() };
     todos.set(threadId, items);
-    return `Item ${index} updated:\n${formatList(items)}`;
+    return `Item ${index} updated:\n${formatTodoList(items)}`;
   },
   {
     name: "todo_update",
@@ -87,7 +87,7 @@ export const todoRead = tool(
   async (_input: Record<string, never>, runConfig?: RunnableConfig) => {
     const threadId = runConfig?.configurable?.thread_id;
     if (typeof threadId !== "string") return "error: no active chat to read a to-do list from";
-    return formatList(todos.get(threadId));
+    return formatTodoList(todos.get(threadId));
   },
   {
     name: "todo_read",

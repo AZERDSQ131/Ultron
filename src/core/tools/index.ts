@@ -7,6 +7,7 @@ import { getCurrentDatetime } from "./datetime.js";
 import { scheduleTask } from "./schedules.js";
 import { spawnAgent } from "./agents.js";
 import { todoWrite, todoUpdate, todoRead } from "./todos.js";
+import { planPropose } from "./plan.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -28,6 +29,7 @@ export const tools: StructuredToolInterface[] = [
   todoWrite,
   todoUpdate,
   todoRead,
+  planPropose,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -54,4 +56,9 @@ export const toolScopes: Record<string, ToolScope> = {
   todo_write: "write",
   todo_update: "write",
   todo_read: "read",
+  // Not "destructive" for approval-mode purposes — it always pauses for
+  // confirmation regardless of security mode (see toolsNode's special case
+  // in graph.ts), so this scope only affects the badge color shown in the
+  // approval card and tool-call blocks.
+  plan_propose: "write",
 };
