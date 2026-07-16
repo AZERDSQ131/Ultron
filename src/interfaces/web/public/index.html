@@ -70,6 +70,26 @@
             </button>
           </div>
         </div>
+        <div class="security-control">
+          <button type="button" id="security-btn" class="security-btn" title="Tool approval mode" aria-haspopup="listbox" aria-expanded="false">
+            <span class="security-btn-icon" aria-hidden="true">◆</span>
+            <span id="security-btn-label">Bypass</span>
+          </button>
+          <div id="security-menu" class="security-menu" role="listbox" aria-label="Tool approval mode" hidden>
+            <button type="button" class="security-option" data-value="bypass" role="option">
+              <span class="security-option-title">Bypass permissions</span>
+              <span class="security-option-desc">Every tool call runs immediately</span>
+            </button>
+            <button type="button" class="security-option" data-value="accept_edit" role="option">
+              <span class="security-option-title">Accept Edit</span>
+              <span class="security-option-desc">Confirm only destructive calls</span>
+            </button>
+            <button type="button" class="security-option" data-value="manual" role="option">
+              <span class="security-option-title">Manual</span>
+              <span class="security-option-desc">Confirm every tool call</span>
+            </button>
+          </div>
+        </div>
         <textarea id="input" placeholder="Message ULTRON…" rows="1" autocomplete="off"></textarea>
         <button type="button" id="stop-btn" class="danger" hidden>Stop</button>
         <button type="submit" id="send-btn">Send</button>

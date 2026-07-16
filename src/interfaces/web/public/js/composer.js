@@ -2,6 +2,7 @@ import { api } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { state } from "./store.js";
 import {
+  addApprovalBlock,
   addMetaLine,
   addSystemNote,
   addToolBlock,
@@ -25,6 +26,11 @@ const thinkingMenu = document.getElementById("thinking-menu");
 const thinkingOptions = [...thinkingMenu.querySelectorAll(".thinking-option")];
 const thinkingSelectSettings = document.getElementById("thinking-select-settings");
 const THINKING_LABELS = { full: "Full", low: "Low", off: "Off" };
+const securityBtn = document.getElementById("security-btn");
+const securityBtnLabel = document.getElementById("security-btn-label");
+const securityMenu = document.getElementById("security-menu");
+const securityOptions = [...securityMenu.querySelectorAll(".security-option")];
+const SECURITY_LABELS = { bypass: "Bypass", accept_edit: "Accept Edit", manual: "Manual" };
 const verboseToggle = document.getElementById("verbose-toggle");
 const commandMenu = document.getElementById("command-menu");
 
@@ -209,12 +215,85 @@ for (const opt of thinkingOptions) {
 }
 
 document.addEventListener("click", (e) => {
-  if (!thinkingMenu.hidden && !thinkingMenu.contains(e.target) && e.target !== thinkingBtn) closeThinkingMenu();
+  // contains(), not === — a click on the icon/label spans inside the
+  // button is a different e.target than thinkingBtn itself, so the old
+  // strict-equality check treated every click on the button's own text as
+  // "outside" and closed the menu the instant it opened.
+  if (!thinkingMenu.hidden && !thinkingMenu.contains(e.target) && !thinkingBtn.contains(e.target)) closeThinkingMenu();
 });
 
 thinkingSelectSettings.addEventListener("change", () => setThinkingMode(thinkingSelectSettings.value));
 
 setThinkingMode(state.thinkingMode);
+
+function closeSecurityMenu() {
+  securityMenu.hidden = true;
+  securityBtn.setAttribute("aria-expanded", "false");
+}
+
+function openSecurityMenu() {
+  securityMenu.hidden = false;
+  securityBtn.setAttribute("aria-expanded", "true");
+  (securityOptions.find((opt) => opt.dataset.value === state.securityMode) ?? securityOptions[0])?.focus();
+}
+
+// Reflects a chat's mode in the UI without writing it back to the server —
+// used when switching chats, since the mode being displayed already came
+// from that chat's own record (see chatList.js's selectChat).
+export function syncSecurityMode(mode) {
+  state.securityMode = mode;
+  securityBtn.dataset.mode = mode;
+  securityBtnLabel.textContent = SECURITY_LABELS[mode] ?? mode;
+  for (const opt of securityOptions) {
+    const active = opt.dataset.value === mode;
+    opt.classList.toggle("active", active);
+    opt.setAttribute("aria-selected", String(active));
+  }
+}
+
+// User-driven change — updates the UI and persists it against the active
+// chat via PATCH /api/chats/:id/security (handleSetSecurity in server.ts),
+// which is what toolsNode reads on the next tool call (see graph.ts).
+async function setSecurityMode(mode) {
+  syncSecurityMode(mode);
+  if (!state.activeChatId) return;
+  await api.setSecurityMode(state.activeChatId, mode);
+  const chat = state.chatsCache.find((c) => c.id === state.activeChatId);
+  if (chat) chat.securityMode = mode;
+}
+
+securityBtn.addEventListener("click", () => {
+  securityMenu.hidden ? openSecurityMenu() : closeSecurityMenu();
+});
+
+securityMenu.addEventListener("keydown", (e) => {
+  const currentIndex = securityOptions.indexOf(document.activeElement);
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    securityOptions[(currentIndex + 1) % securityOptions.length]?.focus();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    securityOptions[(currentIndex - 1 + securityOptions.length) % securityOptions.length]?.focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeSecurityMenu();
+    securityBtn.focus();
+  }
+});
+
+for (const opt of securityOptions) {
+  opt.addEventListener("click", () => {
+    setSecurityMode(opt.dataset.value);
+    closeSecurityMenu();
+    securityBtn.focus();
+  });
+}
+
+document.addEventListener("click", (e) => {
+  if (!securityMenu.hidden && !securityMenu.contains(e.target) && !securityBtn.contains(e.target)) closeSecurityMenu();
+});
+
+syncSecurityMode(state.securityMode);
 verboseToggle.addEventListener("change", () => {
   state.verbose = verboseToggle.checked;
 });
@@ -230,13 +309,13 @@ export async function streamTurn(body) {
     cursorEl = null;
   };
 
-  try {
-    const res = await fetch("/api/turn", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
+  // Consumes one SSE response to completion. Recurses into a fresh
+  // /api/approve request when the stream ends on "approval_required" (see
+  // toolsNode's interrupt() call in graph.ts) instead of a terminal event —
+  // the assistant bubble/cursor state above stays shared across that
+  // boundary so a reply that continues after the tool runs looks like one
+  // uninterrupted turn, not two.
+  const pump = async (res) => {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "request failed" }));
       addSystemNote(`[ultron] ${err.error ?? "request failed"}`, true);
@@ -282,6 +361,16 @@ export async function streamTurn(body) {
           const blocks = [...document.querySelectorAll(".tool-block pre")];
           const match = [...blocks].reverse().find((p) => p.dataset.name === data.name && p.textContent === "…");
           if (match) match.textContent = data.content;
+        } else if (eventName === "approval_required") {
+          finishAssistant();
+          const decisions = await addApprovalBlock(data.calls);
+          await pump(
+            await fetch("/api/approve", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chatId: body.chatId, thinking: body.thinking, decisions }),
+            }),
+          );
         } else if (eventName === "done") {
           finishAssistant();
           updateContextGauge(data.contextTokens, data.maxTokens);
@@ -297,6 +386,16 @@ export async function streamTurn(body) {
         }
       }
     }
+  };
+
+  try {
+    await pump(
+      await fetch("/api/turn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
   } catch (err) {
     addSystemNote(`[ultron] connection error: ${err.message}`, true);
   } finally {

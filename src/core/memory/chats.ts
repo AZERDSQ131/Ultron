@@ -15,6 +15,17 @@ import { getCheckpointer } from "./checkpointer.js";
 
 export const DEFAULT_CHAT_TITLE = "New chat";
 
+// How the "tools" node in graph.ts decides whether a tool call runs
+// immediately or waits for a human decision (see the interrupt() call in
+// buildGraph's tools node):
+//   - "bypass": every tool call runs immediately (the project's long-standing
+//     default — see CLAUDE.md's "security intentionally minimal").
+//   - "accept_edit": only tool calls whose declared scope is "destructive"
+//     (see toolScopes in tools/index.ts) pause for approval.
+//   - "manual": every tool call pauses for approval, regardless of scope.
+export type SecurityMode = "bypass" | "accept_edit" | "manual";
+const DEFAULT_SECURITY_MODE: SecurityMode = "bypass";
+
 // The CLI's original hardcoded thread_id, from before chats existed. Every
 // entry point calls chats.ensure(LEGACY_CHAT_ID, ...) at startup so
 // pre-existing history registers as a real chat instead of being orphaned.
@@ -27,6 +38,7 @@ export interface Chat {
   updatedAt: string;
   agentId: string | null;
   scheduleId: string | null;
+  securityMode: SecurityMode;
 }
 
 interface ChatRow {
@@ -36,10 +48,19 @@ interface ChatRow {
   updated_at: string;
   agent_id?: string | null;
   schedule_id?: string | null;
+  security_mode?: string | null;
 }
 
 function toChat(row: ChatRow): Chat {
-  return { id: row.id, title: row.title, createdAt: row.created_at, updatedAt: row.updated_at, agentId: row.agent_id ?? null, scheduleId: row.schedule_id ?? null };
+  return {
+    id: row.id,
+    title: row.title,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    agentId: row.agent_id ?? null,
+    scheduleId: row.schedule_id ?? null,
+    securityMode: (row.security_mode as SecurityMode | null) ?? DEFAULT_SECURITY_MODE,
+  };
 }
 
 export function deriveTitle(text: string): string {
@@ -64,6 +85,7 @@ export class ChatRegistry {
     `);
     try { this.db.exec("ALTER TABLE chats ADD COLUMN agent_id TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN schedule_id TEXT"); } catch { /* already migrated */ }
+    try { this.db.exec("ALTER TABLE chats ADD COLUMN security_mode TEXT"); } catch { /* already migrated */ }
   }
 
   list(): Chat[] {
@@ -78,7 +100,7 @@ export class ChatRegistry {
 
   create(title: string = DEFAULT_CHAT_TITLE, agentId: string | null = null, scheduleId: string | null = null): Chat {
     const now = new Date().toISOString();
-    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId, scheduleId };
+    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId, scheduleId, securityMode: DEFAULT_SECURITY_MODE };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at, agent_id, schedule_id) VALUES (?, ?, ?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.agentId, chat.scheduleId);
@@ -92,7 +114,7 @@ export class ChatRegistry {
     const existing = this.get(id);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null, scheduleId: null };
+    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt);
@@ -101,6 +123,18 @@ export class ChatRegistry {
 
   rename(id: string, title: string): void {
     this.db.prepare("UPDATE chats SET title = ?, updated_at = ? WHERE id = ?").run(title, new Date().toISOString(), id);
+  }
+
+  // Read straight from the row instead of going through get() + list()'s
+  // ordering — called from inside the tools node on every turn that has
+  // tool calls, so it stays a single indexed lookup.
+  getSecurityMode(id: string): SecurityMode {
+    const row = this.db.prepare("SELECT security_mode FROM chats WHERE id = ?").get(id) as { security_mode?: string | null } | undefined;
+    return (row?.security_mode as SecurityMode | null) ?? DEFAULT_SECURITY_MODE;
+  }
+
+  setSecurityMode(id: string, mode: SecurityMode): void {
+    this.db.prepare("UPDATE chats SET security_mode = ? WHERE id = ?").run(mode, id);
   }
 
   touch(id: string): void {

@@ -2,21 +2,24 @@ import { appendFileSync, createReadStream, existsSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import {
   archiveThread,
   buildGraph,
   compactThread,
   estimateContextUsage,
+  getPendingApproval,
   listChatMessages,
   prepareEdit,
   prepareRetry,
   resumeThread,
   searchMessages,
+  type ToolApprovalDecision,
 } from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import { getChatRegistry, LEGACY_CHAT_ID } from "../../core/memory/chats.js";
+import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
@@ -138,34 +141,18 @@ async function handleChatMessages(res: ServerResponse, chatId: string): Promise<
   sendJson(res, 200, { messages });
 }
 
-async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ chatId?: string; text?: string; thinking?: ThinkingMode; retry?: boolean }>(req);
-  if (!payload) {
-    sendJson(res, 400, { error: "invalid JSON body" });
-    return;
-  }
-  if (!requireChat(res, payload.chatId)) return;
-  const chatId = payload.chatId as string;
-  const thinkingMode: ThinkingMode = payload.thinking ?? "full";
-  const isRetry = payload.retry === true;
-  let input = payload.text ?? "";
-  debugLog(`turn received chat=${chatId} retry=${isRetry} text=${JSON.stringify(input)}`);
-
-  if (isRetry) {
-    const retryInput = await prepareRetry(graph, chatId);
-    if (!retryInput) {
-      sendJson(res, 400, { error: "nothing to retry yet" });
-      return;
-    }
-    input = retryInput;
-  } else if (!input.trim()) {
-    sendJson(res, 400, { error: "message text is required" });
-    return;
-  } else {
-    chats.maybeAutoTitle(chatId, input);
-  }
-  chats.touch(chatId);
-
+// Shared by a fresh turn (HumanMessage input) and an approval resume
+// (Command input) — both just feed a different input into the same
+// graph.stream()/SSE pump. Ends either on a normal "done"/"aborted"/"error"
+// event, or on "approval_required" when the tools node's interrupt() call
+// (see toolsNode in graph.ts) pauses the thread waiting on a human decision.
+async function streamGraphTurn(
+  req: IncomingMessage,
+  res: ServerResponse,
+  chatId: string,
+  thinkingMode: ThinkingMode,
+  input: { messages: HumanMessage[] } | Command,
+): Promise<void> {
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache",
@@ -183,14 +170,11 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   const turnStarted = Date.now();
 
   try {
-    const stream = await graph.stream(
-      { messages: isRetry ? [] : [new HumanMessage(input)] },
-      {
-        configurable: { thread_id: chatId, thinking: thinkingMode },
-        signal: abortController.signal,
-        streamMode: "messages",
-      },
-    );
+    const stream = await graph.stream(input, {
+      configurable: { thread_id: chatId, thinking: thinkingMode },
+      signal: abortController.signal,
+      streamMode: "messages",
+    });
 
     let generatedChars = 0;
     let outputTokens: number | undefined;
@@ -239,13 +223,19 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
       sseWrite(res, "text", { delta: chunk.content });
     }
 
-    const elapsedSeconds = (Date.now() - turnStarted) / 1000;
-    // Nemotron's endpoint returns real usage on the stream's final chunk
-    // (see nemotron.ts); fall back to the chars/4 estimate only if a turn
-    // was interrupted before that chunk arrived.
-    const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
-    const contextTokens = await estimateContextUsage(graph, chatId);
-    sseWrite(res, "done", { elapsedSeconds, generatedTokens, contextTokens, maxTokens: config.contextWindowTokens });
+    const pendingApproval = await getPendingApproval(graph, chatId);
+    if (pendingApproval) {
+      debugLog(`approval required chat=${chatId} calls=${JSON.stringify(pendingApproval.calls.map((c) => c.name))}`);
+      sseWrite(res, "approval_required", { calls: pendingApproval.calls });
+    } else {
+      const elapsedSeconds = (Date.now() - turnStarted) / 1000;
+      // Nemotron's endpoint returns real usage on the stream's final chunk
+      // (see nemotron.ts); fall back to the chars/4 estimate only if a turn
+      // was interrupted before that chunk arrived.
+      const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
+      const contextTokens = await estimateContextUsage(graph, chatId);
+      sseWrite(res, "done", { elapsedSeconds, generatedTokens, contextTokens, maxTokens: config.contextWindowTokens });
+    }
   } catch (err) {
     debugLog(`turn error chat=${chatId} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`);
     if (abortController.signal.aborted) {
@@ -257,6 +247,64 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     if (activeAborts.get(chatId) === abortController) activeAborts.delete(chatId);
     res.end();
   }
+}
+
+async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ chatId?: string; text?: string; thinking?: ThinkingMode; retry?: boolean }>(req);
+  if (!payload) {
+    sendJson(res, 400, { error: "invalid JSON body" });
+    return;
+  }
+  if (!requireChat(res, payload.chatId)) return;
+  const chatId = payload.chatId as string;
+  const thinkingMode: ThinkingMode = payload.thinking ?? "full";
+  const isRetry = payload.retry === true;
+  let input = payload.text ?? "";
+  debugLog(`turn received chat=${chatId} retry=${isRetry} text=${JSON.stringify(input)}`);
+
+  if (isRetry) {
+    const retryInput = await prepareRetry(graph, chatId);
+    if (!retryInput) {
+      sendJson(res, 400, { error: "nothing to retry yet" });
+      return;
+    }
+    input = retryInput;
+  } else if (!input.trim()) {
+    sendJson(res, 400, { error: "message text is required" });
+    return;
+  } else {
+    chats.maybeAutoTitle(chatId, input);
+  }
+  chats.touch(chatId);
+
+  await streamGraphTurn(req, res, chatId, thinkingMode, { messages: isRetry ? [] : [new HumanMessage(input)] });
+}
+
+// Resumes a thread paused on toolsNode's interrupt() (see graph.ts) with the
+// user's per-call approve/deny decisions, then keeps streaming the rest of
+// the turn — including a further approval_required if another destructive
+// call follows immediately.
+async function handleApprove(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ chatId?: string; thinking?: ThinkingMode; decisions?: ToolApprovalDecision }>(req);
+  if (!payload || !requireChat(res, payload.chatId)) return;
+  const chatId = payload.chatId as string;
+  if (!payload.decisions) {
+    sendJson(res, 400, { error: "decisions is required" });
+    return;
+  }
+  const thinkingMode: ThinkingMode = payload.thinking ?? "full";
+  await streamGraphTurn(req, res, chatId, thinkingMode, new Command({ resume: payload.decisions }));
+}
+
+async function handleSetSecurity(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const payload = await readJson<{ mode?: SecurityMode }>(req);
+  if (!payload?.mode || !["bypass", "accept_edit", "manual"].includes(payload.mode)) {
+    sendJson(res, 400, { error: "mode must be bypass, accept_edit or manual" });
+    return;
+  }
+  chats.setSecurityMode(chatId, payload.mode);
+  sendJson(res, 200, { chat: chats.get(chatId) });
 }
 
 async function handleStop(res: ServerResponse, chatId: string | undefined): Promise<void> {
@@ -422,9 +470,22 @@ const server = createServer((req, res) => {
     handleDeleteChat(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] delete chat failed:", err));
     return;
   }
+  const securityMatch = path.match(/^\/api\/chats\/([^/]+)\/security$/);
+  if (securityMatch && req.method === "PATCH") {
+    handleSetSecurity(req, res, decodeURIComponent(securityMatch[1])).catch((err) => console.error("[ultron-web] set security failed:", err));
+    return;
+  }
   if (req.method === "POST" && path === "/api/turn") {
     handleTurn(req, res).catch((err) => {
       console.error("[ultron-web] turn handler failed:", err);
+      if (!res.headersSent) sendJson(res, 500, { error: "internal error" });
+      else res.end();
+    });
+    return;
+  }
+  if (req.method === "POST" && path === "/api/approve") {
+    handleApprove(req, res).catch((err) => {
+      console.error("[ultron-web] approve handler failed:", err);
       if (!res.headersSent) sendJson(res, 500, { error: "internal error" });
       else res.end();
     });

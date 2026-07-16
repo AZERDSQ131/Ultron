@@ -22,6 +22,12 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
   deleteChat: (id) => fetch(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  setSecurityMode: (id, mode) =>
+    fetch(`/api/chats/${encodeURIComponent(id)}/security`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    }).then(json),
   chatMessages: (id) => fetch(`/api/chats/${encodeURIComponent(id)}/messages`).then(json),
 
   stop: (chatId) =>

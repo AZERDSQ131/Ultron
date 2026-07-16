@@ -1,17 +1,17 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
+import { StateGraph, MessagesAnnotation, END, START, interrupt } from "@langchain/langgraph";
 import { REMOVE_ALL_MESSAGES } from "@langchain/langgraph";
-import { ToolNode } from "@langchain/langgraph/prebuilt";
-import { AIMessage, HumanMessage, RemoveMessage, SystemMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import type { BaseMessage, BaseMessageLike } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { ZodObject, ZodRawShape } from "zod";
 import { config as appConfig } from "../config.js";
 import { createNemotronModel, type ThinkingMode } from "./llm/nemotron.js";
 import { getCheckpointer } from "./memory/checkpointer.js";
-import { tools } from "./tools/index.js";
+import { getChatRegistry } from "./memory/chats.js";
+import { tools, toolScopes } from "./tools/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -149,6 +149,107 @@ function sanitizeHistory(messages: BaseMessageLike[]): BaseMessageLike[] {
   });
 }
 
+export interface PendingToolCall {
+  id: string;
+  name: string;
+  args: unknown;
+}
+
+export interface ToolApprovalRequest {
+  type: "tool_approval";
+  calls: PendingToolCall[];
+}
+
+// Resolution passed back on resume: which pending call ids were approved.
+// Anything not present (or explicitly false) is treated as denied — see
+// toolsNode below.
+export type ToolApprovalDecision = Record<string, boolean>;
+
+// Replaces LangGraph's prebuilt ToolNode so a tool call can pause for human
+// approval before it runs, per the chat's SecurityMode (see chats.ts):
+//   - "bypass": nothing pauses, same behavior as the prebuilt ToolNode.
+//   - "accept_edit": only "destructive"-scoped calls pause.
+//   - "manual": every call pauses.
+// A single interrupt() call batches every pending call in this node
+// invocation into one round trip instead of one interrupt per call — the
+// node function re-runs from the top on resume, but interrupt() replays its
+// already-resolved value instead of pausing again, and nothing before it in
+// this function has side effects, so that replay is safe.
+async function toolsNode(state: typeof MessagesAnnotation.State, runConfig: RunnableConfig) {
+  const last = state.messages.at(-1) as AIMessage;
+  const toolCalls = last.tool_calls ?? [];
+  if (!toolCalls.length) return { messages: [] };
+
+  const threadId = String(runConfig.configurable?.thread_id ?? "");
+  const mode = getChatRegistry(appConfig.databasePath).getSecurityMode(threadId);
+
+  const needsApproval = (call: { name: string }): boolean => {
+    if (mode === "bypass") return false;
+    if (mode === "manual") return true;
+    return (toolScopes[call.name] ?? "read") === "destructive";
+  };
+
+  const pending = toolCalls.filter(needsApproval);
+  let decisions: ToolApprovalDecision = {};
+  if (pending.length) {
+    debugLog(`awaiting approval thread=${threadId} mode=${mode} calls=${JSON.stringify(pending.map((c) => c.name))}`);
+    const request: ToolApprovalRequest = {
+      type: "tool_approval",
+      calls: pending.map((c) => ({ id: c.id ?? "", name: c.name, args: c.args })),
+    };
+    decisions = interrupt(request) as ToolApprovalDecision;
+  }
+
+  const outputs = await Promise.all(
+    toolCalls.map(async (call) => {
+      if (needsApproval(call) && decisions[call.id ?? ""] !== true) {
+        return new ToolMessage({
+          name: call.name,
+          tool_call_id: call.id ?? "",
+          content: "[ultron] Action refused by the user — not executed.",
+        });
+      }
+      const tool = tools.find((t) => t.name === call.name);
+      if (!tool) {
+        return new ToolMessage({ name: call.name, tool_call_id: call.id ?? "", content: `Tool "${call.name}" not found.` });
+      }
+      try {
+        const output = await tool.invoke({ ...call, type: "tool_call" } as never, runConfig);
+        if (output instanceof ToolMessage) return output;
+        return new ToolMessage({
+          name: tool.name,
+          content: typeof output === "string" ? output : JSON.stringify(output),
+          tool_call_id: call.id ?? "",
+        });
+      } catch (err) {
+        return new ToolMessage({
+          name: call.name,
+          tool_call_id: call.id ?? "",
+          content: `Error: ${err instanceof Error ? err.message : String(err)}\n Please fix your mistakes.`,
+        });
+      }
+    }),
+  );
+
+  return { messages: outputs };
+}
+
+// Reads a paused thread's pending approval request, if any — used by both
+// interfaces after a stream ends without a "done"/"aborted"/"error" event to
+// decide whether to prompt for approval instead of just stopping.
+export async function getPendingApproval(
+  graph: ReturnType<typeof buildGraph>,
+  threadId: string,
+): Promise<ToolApprovalRequest | undefined> {
+  const state = await graph.getState({ configurable: { thread_id: threadId } });
+  for (const task of state.tasks) {
+    for (const i of task.interrupts ?? []) {
+      if ((i.value as ToolApprovalRequest | undefined)?.type === "tool_approval") return i.value as ToolApprovalRequest;
+    }
+  }
+  return undefined;
+}
+
 export function buildGraph() {
   const fullThinkingModel = createNemotronModel("full");
   const lowThinkingModel = createNemotronModel("low");
@@ -230,7 +331,7 @@ export function buildGraph() {
 
       return { messages: [response as AIMessage] };
     })
-    .addNode("tools", new ToolNode(tools))
+    .addNode("tools", toolsNode)
     .addEdge(START, "agent")
     .addConditionalEdges("agent", routeAfterAgent, ["tools", END])
     .addEdge("tools", "agent");

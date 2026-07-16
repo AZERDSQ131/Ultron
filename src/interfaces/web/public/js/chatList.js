@@ -3,6 +3,7 @@ import { renderMarkdown } from "./markdown.js";
 import { state } from "./store.js";
 import { addTurn, addSystemNote, clearThread, updateTurnActions } from "./thread.js";
 import { loadStatus } from "./statusBar.js";
+import { syncSecurityMode } from "./composer.js";
 
 const sidebar = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebar-toggle");
@@ -173,6 +174,7 @@ export async function selectChat(id) {
   await loadStatus();
   const chat = getChat(id);
   activeChatTitle.textContent = chat ? chat.title : "ULTRON";
+  syncSecurityMode(chat?.securityMode ?? "bypass");
   try {
     const data = await api.chatMessages(id);
     for (const message of data.messages) {

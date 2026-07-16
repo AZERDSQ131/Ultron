@@ -4,19 +4,23 @@ import { fileURLToPath } from "node:url";
 import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
+import { Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import {
   archiveThread,
   buildGraph,
   compactThread,
   estimateContextUsage,
+  getPendingApproval,
   listChatMessages,
   prepareRetry,
   resumeThread,
+  type PendingToolCall,
+  type ToolApprovalDecision,
 } from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID } from "../../core/memory/chats.js";
+import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { MarkdownStreamRenderer } from "./markdown.js";
@@ -24,7 +28,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/security", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -316,6 +320,36 @@ async function showRestoredMessages(graph: ReturnType<typeof buildGraph>, thread
   }
 }
 
+const SECURITY_LABELS: Record<SecurityMode, string> = {
+  bypass: "bypass (run everything)",
+  accept_edit: "accept edit (confirm destructive calls)",
+  manual: "manual (confirm every call)",
+};
+
+// Backs the pause created by toolsNode's interrupt() (see graph.ts) — a
+// single yes/no for the whole batch, since the terminal has no per-call
+// widget the way the web UI's approval block does.
+async function promptToolApproval(contextLine: string, calls: PendingToolCall[]): Promise<ToolApprovalDecision> {
+  const list = calls
+    .map((c) => `  ${chalk.yellow("•")} ${chalk.bold(c.name)} ${chalk.dim(JSON.stringify(c.args))}`)
+    .join("\n");
+  appendTranscript(`${chalk.yellowBright.bold("[ultron] approval required")}\n${list}\n`);
+  renderScreen("", 0, contextLine);
+  flushRender();
+
+  const answer = (
+    await readInput(contextLine, "", `${chalk.yellowBright.bold("approve?")} ${chalk.dim("(y/n) ›")} `, false)
+  )
+    .trim()
+    .toLowerCase();
+  const approved = answer === "y" || answer === "yes";
+  appendTranscript(chalk.dim(`[ultron] ${approved ? "approved" : "denied"} ${calls.length} tool call(s).\n\n`));
+
+  const decisions: ToolApprovalDecision = {};
+  for (const call of calls) decisions[call.id] = approved;
+  return decisions;
+}
+
 function contextBarColor(ratio: number): (text: string) => string {
   if (ratio < 0.5) return chalk.greenBright;
   if (ratio < 0.8) return chalk.yellowBright;
@@ -347,13 +381,13 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
-function printStatus(thinkingMode: ThinkingMode, verbose: boolean, chatId: string) {
+function printStatus(thinkingMode: ThinkingMode, verbose: boolean, chatId: string, securityMode: SecurityMode) {
   appendTranscript(
-    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · chat ${chatId}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
+    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · chat ${chatId}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("security")} ${securityMode}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
   );
 }
 
@@ -481,7 +515,7 @@ async function main() {
             printHelp();
             continue;
           case "/status":
-            printStatus(thinkingMode, verbose, currentChatId);
+            printStatus(thinkingMode, verbose, currentChatId, chats.getSecurityMode(currentChatId));
             continue;
           case "/clear":
             transcript = "";
@@ -544,6 +578,13 @@ async function main() {
           case "/think":
             appendTranscript(chalk.dim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
+          case "/security":
+            appendTranscript(
+              chalk.dim(
+                `[ultron] tool approval: ${chats.getSecurityMode(currentChatId)} (use /security bypass|accept_edit|manual).\n\n`,
+              ),
+            );
+            continue;
           case "/verbose":
             appendTranscript(chalk.dim(`[ultron] verbose is ${verbose ? "on" : "off"} (use /verbose on|off).\n\n`));
             continue;
@@ -592,6 +633,16 @@ async function main() {
               appendTranscript(chalk.dim(`[ultron] reasoning mode set to ${thinkingMode}.\n\n`));
               continue;
             }
+            if (command.startsWith("/security ")) {
+              const mode = command.slice("/security ".length).trim();
+              if (mode !== "bypass" && mode !== "accept_edit" && mode !== "manual") {
+                appendTranscript(chalk.yellow("[ultron] use /security bypass, /security accept_edit or /security manual.\n\n"));
+                continue;
+              }
+              chats.setSecurityMode(currentChatId, mode);
+              appendTranscript(chalk.dim(`[ultron] tool approval set to ${mode}.\n\n`));
+              continue;
+            }
             if (command === "/verbose on" || command === "/verbose true") {
               verbose = true;
               appendTranscript(chalk.dim("[ultron] verbose on.\n\n"));
@@ -617,14 +668,9 @@ async function main() {
       const disarmStopCommand = armStopCommand(abortController, contextLine);
 
       try {
-        const stream = await graph.stream(
-          { messages: command === "/retry" ? [] : [new HumanMessage(input)] },
-          {
-            configurable: { thread_id: currentChatId, thinking: thinkingMode },
-            signal: abortController.signal,
-            streamMode: "messages",
-          },
-        );
+        let nextInput: { messages: HumanMessage[] } | Command = {
+          messages: command === "/retry" ? [] : [new HumanMessage(input)],
+        };
 
         let wrotePrefix = false;
         let inToolCall = false;
@@ -633,69 +679,91 @@ async function main() {
         const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
         const markdown = new MarkdownStreamRenderer();
 
-        for await (const [chunk] of stream) {
-          const type = chunk.getType();
+        // Loops more than once only when toolsNode's interrupt() (see
+        // graph.ts) pauses the thread for approval — resumed below with a
+        // Command carrying the user's decision, same as the web UI's
+        // /api/approve round trip.
+        for (;;) {
+          const stream = await graph.stream(nextInput, {
+            configurable: { thread_id: currentChatId, thinking: thinkingMode },
+            signal: abortController.signal,
+            streamMode: "messages",
+          });
 
-          if (type === "tool") {
+          for await (const [chunk] of stream) {
+            const type = chunk.getType();
+
+            if (type === "tool") {
+              if (inToolCall) {
+                writeLive("\n", contextLine);
+                inToolCall = false;
+              }
+              const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
+              const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
+              if (pending) {
+                writeLive(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`), contextLine);
+                const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
+                if (key !== undefined) pendingToolCalls.delete(key);
+              }
+              writeLive(chalk.dim(`[tool result · ${toolName}]\n${chunk.content}\n\n`), contextLine);
+              continue;
+            }
+
+            if (type !== "ai") continue;
+
+            const toolCallChunks = (
+              chunk as unknown as {
+                tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[];
+              }
+            ).tool_call_chunks;
+
+            if (toolCallChunks?.length) {
+              for (const tc of toolCallChunks) {
+                const key = tc.index ?? tc.id ?? tc.name ?? 0;
+                const isNewToolCall = !pendingToolCalls.has(key);
+                const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
+                pending.name = tc.name ?? pending.name;
+                pending.args += tc.args ?? "";
+                pendingToolCalls.set(key, pending);
+                if (tc.name && isNewToolCall) {
+                  if (wrotePrefix) {
+                    writeLive("\n\n", contextLine);
+                    wrotePrefix = false;
+                  }
+                }
+                if (tc.args) generatedChars += tc.args.length;
+              }
+              inToolCall = true;
+              continue;
+            }
+
+            const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
+            if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+
+            if (typeof chunk.content !== "string" || !chunk.content) continue;
+
             if (inToolCall) {
-              writeLive("\n", contextLine);
+              writeLive("\n\n", contextLine);
               inToolCall = false;
             }
-            const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
-            const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
-            if (pending) {
-              writeLive(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`), contextLine);
-              const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
-              if (key !== undefined) pendingToolCalls.delete(key);
+            if (!wrotePrefix) {
+              writeLive(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `, contextLine);
+              wrotePrefix = true;
             }
-            writeLive(chalk.dim(`[tool result · ${toolName}]\n${chunk.content}\n\n`), contextLine);
-            continue;
+            writeLive(markdown.push(chunk.content), contextLine);
+            generatedChars += chunk.content.length;
           }
 
-          if (type !== "ai") continue;
-
-          const toolCallChunks = (
-            chunk as unknown as {
-              tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[];
-            }
-          ).tool_call_chunks;
-
-          if (toolCallChunks?.length) {
-            for (const tc of toolCallChunks) {
-              const key = tc.index ?? tc.id ?? tc.name ?? 0;
-              const isNewToolCall = !pendingToolCalls.has(key);
-              const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
-              pending.name = tc.name ?? pending.name;
-              pending.args += tc.args ?? "";
-              pendingToolCalls.set(key, pending);
-              if (tc.name && isNewToolCall) {
-                if (wrotePrefix) {
-                  writeLive("\n\n", contextLine);
-                  wrotePrefix = false;
-                }
-              }
-              if (tc.args) generatedChars += tc.args.length;
-            }
-            inToolCall = true;
-            continue;
-          }
-
-          const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
-          if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
-
-          if (typeof chunk.content !== "string" || !chunk.content) continue;
-
+          const pendingApproval = await getPendingApproval(graph, currentChatId);
+          if (!pendingApproval) break;
           if (inToolCall) {
-            writeLive("\n\n", contextLine);
+            writeLive("\n", contextLine);
             inToolCall = false;
           }
-          if (!wrotePrefix) {
-            writeLive(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `, contextLine);
-            wrotePrefix = true;
-          }
-          writeLive(markdown.push(chunk.content), contextLine);
-          generatedChars += chunk.content.length;
+          const decisions = await promptToolApproval(contextLine, pendingApproval.calls);
+          nextInput = new Command({ resume: decisions });
         }
+
         writeLive(markdown.flush(), contextLine);
         appendTranscript("\n\n");
 
