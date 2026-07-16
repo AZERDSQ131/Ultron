@@ -7,8 +7,10 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "web": "tsx src/web/server.ts",
+    "build": "tsc -p tsconfig.json && cp -r src/web/public dist/web/public",
     "start": "node dist/index.js",
+    "start:web": "node dist/web/server.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

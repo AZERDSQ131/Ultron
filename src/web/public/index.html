@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ULTRON</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">ULTRON</div>
+    <div class="status">
+      <span id="model-label" class="dim"></span>
+      <div class="context-bar">
+        <div id="context-fill" class="context-fill"></div>
+      </div>
+      <span id="context-label" class="dim"></span>
+    </div>
+  </header>
+
+  <main id="thread"></main>
+
+  <footer>
+    <form id="composer">
+      <select id="thinking-mode" title="Reasoning mode">
+        <option value="full">think: full</option>
+        <option value="low">think: low</option>
+        <option value="off">think: off</option>
+      </select>
+      <textarea id="input" placeholder="Message ULTRON…" rows="1"></textarea>
+      <button type="button" id="stop-btn" class="danger" hidden>Stop</button>
+      <button type="submit" id="send-btn">Send</button>
+    </form>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

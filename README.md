@@ -23,6 +23,11 @@ The current version provides a terminal conversation loop with:
 - retry handling for transient API errors and malformed plain-text tool calls;
 - clean Ctrl+C interruption, including during an in-flight model request.
 
+A local web interface (`pnpm web`) is also available: same LangGraph core,
+same streaming and tool-call behavior, served over HTTP with a small vanilla
+HTML/CSS/JS frontend and no framework. It runs on its own thread
+(`ultron-web`), separate from the CLI's `ultron-main`.
+
 Telegram is the next interface planned. Mail and calendar integrations are
 still pending because they require OAuth. The separate Codex-style coding app
 is explicitly deferred.
@@ -66,14 +71,17 @@ Available configuration:
 | `NEMOTRON_MODEL` | `nvidia/nemotron-3-super-120b-a12b` | Model identifier |
 | `NEMOTRON_BASE_URL` | `https://integrate.api.nvidia.com/v1` | OpenAI-compatible endpoint |
 | `CONTEXT_WINDOW_TOKENS` | `262144` | CLI context-gauge reference |
+| `WEB_PORT` | `4173` | Local web interface port |
 
 ## Run and verify
 
 ```bash
-pnpm dev          # run directly from TypeScript
+pnpm dev          # run the terminal interface directly from TypeScript
+pnpm web          # run the local web interface (http://localhost:4173 by default)
 pnpm typecheck    # strict TypeScript check
-pnpm build        # compile to dist/
-pnpm start        # run the compiled application
+pnpm build        # compile to dist/, including the web frontend assets
+pnpm start        # run the compiled terminal interface
+pnpm start:web    # run the compiled web interface
 ```
 
 There are currently no automated tests or lint script. The first tests should
@@ -105,6 +113,8 @@ immediate interrupt.
 
 ```text
 src/index.ts                 terminal interface and streaming
+src/web/server.ts            local web interface (HTTP + SSE streaming)
+src/web/public/              web frontend (vanilla HTML/CSS/JS, no framework)
 src/agent/graph.ts           LangGraph loop and tool routing
 src/llm/nemotron.ts          NVIDIA/Nemotron client
 MEMORY.md                    durable human-readable memory loaded each turn

@@ -16,4 +16,5 @@ export const config = {
   // (~262k), per the user directly — the "up to 1M" figure surfaced by web
   // search was wrong for this served model, trust the correction over that.
   contextWindowTokens: Number(process.env.CONTEXT_WINDOW_TOKENS ?? 262_144),
+  webPort: Number(process.env.WEB_PORT ?? 4173),
 };

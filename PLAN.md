@@ -21,6 +21,17 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 - Ctrl+C interrupts cleanly at any point, including mid-response
 - No Docker, no manual confirmations, no audit logs — explicit choices, see [CLAUDE.md](CLAUDE.md)
 
+## Additional entry point — local web interface (done)
+
+- `src/web/server.ts` + `src/web/public/` — a local web UI, requested directly by the user
+  alongside the CLI (they work with Codex on the terminal side, ULTRON's web UI covers the browser)
+- Same `buildGraph()` core, same tool set and streaming behavior as the CLI — plain `node:http`
+  server (no Express) and a vanilla HTML/CSS/JS frontend (no framework), consistent with owning
+  the loop instead of delegating to one
+- Runs on its own thread (`ultron-web`), separate from the CLI's `ultron-main` — each entry point
+  is its own process with its own in-memory `MemorySaver`, so there's no shared state to protect anyway
+- `pnpm web` (dev) / `pnpm start:web` (compiled) — port via `WEB_PORT`, default `4173`
+
 ## Phase 2 — Telegram interface
 
 - Replace/complement the terminal with a Telegram bot (grammY)
