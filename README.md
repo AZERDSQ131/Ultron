@@ -186,7 +186,7 @@ PLAN.md                              project roadmap and scope
 1. ~~Terminal loop and classic file memory~~ — done.
 2. Telegram interface with grammY.
 3. Mail and calendar tools with OAuth.
-4. ~~Background scheduled tasks once the core loop is trusted~~ — web foundation started: Agents, Agent-owned chats, persisted five-field cron schedules and scheduled execution chats are available in the web interface.
+4. ~~Background scheduled tasks once the core loop is trusted~~ — web foundation started: Agents, Agent-owned chats, persisted five-field cron schedules and scheduled execution chats are available in the web interface. Schedules are created conversationally through ULTRON's `schedule_task` tool.
 5. Separate Codex-style vibe-coding application — deferred.
 
 See [PLAN.md](PLAN.md) for the detailed project plan and

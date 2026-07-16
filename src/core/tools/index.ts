@@ -4,6 +4,7 @@ import { readFile, writeFile, editFile, listDirectory, searchFiles } from "./fs.
 import { fetchUrl, httpRequest, webSearch } from "./web.js";
 import { listProcesses, killProcess } from "./process.js";
 import { getCurrentDatetime } from "./datetime.js";
+import { scheduleTask } from "./schedules.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -20,6 +21,7 @@ export const tools: StructuredToolInterface[] = [
   listProcesses,
   killProcess,
   getCurrentDatetime,
+  scheduleTask,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -37,4 +39,5 @@ export const toolScopes: Record<string, ToolScope> = {
   list_processes: "read",
   kill_process: "destructive",
   get_current_datetime: "read",
+  schedule_task: "write",
 };

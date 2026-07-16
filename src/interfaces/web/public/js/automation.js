@@ -9,21 +9,12 @@ const form = document.getElementById("automation-form");
 const title = document.getElementById("automation-dialog-title");
 const description = document.getElementById("automation-description");
 const instructions = document.getElementById("automation-instructions");
-const task = document.getElementById("automation-task");
-const cron = document.getElementById("automation-cron");
-const agentSelect = document.getElementById("automation-agent");
 let agents = [];
 
-function openDialog(kind) {
-  title.textContent = kind === "agent" ? "New agent" : "New scheduled task";
-  description.parentElement.hidden = kind !== "agent";
-  instructions.parentElement.hidden = kind !== "agent";
-  task.parentElement.hidden = kind !== "schedule";
-  cron.parentElement.hidden = kind !== "schedule";
-  agentSelect.parentElement.hidden = kind !== "schedule";
-  form.dataset.kind = kind;
+function openDialog() {
+  title.textContent = "New agent";
+  form.dataset.kind = "agent";
   form.reset();
-  if (kind === "schedule") { agentSelect.innerHTML = '<option value="">ULTRON (global)</option>' + agents.map((a) => `<option value="${a.id}">${a.name}</option>`).join(""); }
   dialog.hidden = false;
   document.getElementById("automation-name").focus();
 }
@@ -42,14 +33,13 @@ async function load() {
 }
 export function initAutomation() {
   document.getElementById("new-agent-btn").addEventListener("click", () => openDialog("agent"));
-  document.getElementById("new-schedule-btn").addEventListener("click", () => openDialog("schedule"));
+  
   document.getElementById("automation-cancel").addEventListener("click", closeDialog);
   dialog.addEventListener("click", (event) => { if (event.target === dialog) closeDialog(); });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = document.getElementById("automation-name").value.trim();
-    if (form.dataset.kind === "agent") await api.createAgent({ name, description: description.value, instructions: instructions.value });
-    else await api.createSchedule({ name, agentId: agentSelect.value || null, instruction: task.value, cron: cron.value });
+    await api.createAgent({ name, description: description.value, instructions: instructions.value });
     closeDialog();
     await load();
   });
