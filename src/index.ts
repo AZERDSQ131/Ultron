@@ -75,6 +75,47 @@ function printStatus() {
   console.log();
 }
 
+function summarizeToolCall(name: string, rawArgs: string): string {
+  let args: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(rawArgs) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      args = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Streaming arguments may still be incomplete; use the tool name below.
+  }
+
+  const path = typeof args.path === "string" ? args.path : undefined;
+  switch (name) {
+    case "write_file":
+      return path && typeof args.content === "string"
+        ? `Write ${args.content.length} chars in ${path}`
+        : "Write file";
+    case "edit_file":
+      return path ? `Edit ${path}` : "Edit file";
+    case "read_file":
+      return path ? `Read ${path}` : "Read file";
+    case "list_directory":
+      return `List ${path ?? "."}`;
+    case "search_files":
+      return typeof args.pattern === "string" ? `Search for ${args.pattern}` : "Search files";
+    case "fetch_url":
+    case "http_request":
+      return typeof args.url === "string" ? `Fetch ${args.url}` : "Make HTTP request";
+    case "web_search":
+      return typeof args.query === "string" ? `Search the web for ${args.query}` : "Search the web";
+    case "run_shell_command":
+      return typeof args.command === "string" ? `Run ${args.command}` : "Run shell command";
+    case "list_processes":
+      return "List processes";
+    case "kill_process":
+      return typeof args.pid === "number" ? `Signal process ${args.pid}` : "Signal process";
+    default:
+      return name;
+  }
+}
+
 async function main() {
   printBanner();
 
@@ -144,7 +185,7 @@ async function main() {
         let wrotePrefix = false;
         let inToolCall = false;
         let generatedChars = 0;
-        const announcedToolCalls = new Set<string | number>();
+        const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
         const markdown = new MarkdownStreamRenderer();
 
         for await (const [chunk] of stream) {
@@ -156,6 +197,12 @@ async function main() {
               inToolCall = false;
             }
             const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
+            const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
+            if (pending) {
+              stdout.write(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`));
+              const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
+              if (key !== undefined) pendingToolCalls.delete(key);
+            }
             stdout.write(chalk.dim(`[tool result · ${toolName}]\n${chunk.content}\n\n`));
             continue;
           }
@@ -171,18 +218,18 @@ async function main() {
           if (toolCallChunks?.length) {
             for (const tc of toolCallChunks) {
               const key = tc.index ?? tc.id ?? tc.name ?? 0;
-              if (tc.name && !announcedToolCalls.has(key)) {
+              const isNewToolCall = !pendingToolCalls.has(key);
+              const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
+              pending.name = tc.name ?? pending.name;
+              pending.args += tc.args ?? "";
+              pendingToolCalls.set(key, pending);
+              if (tc.name && isNewToolCall) {
                 if (wrotePrefix) {
                   stdout.write("\n\n");
                   wrotePrefix = false;
                 }
-                stdout.write(chalk.dim(`[tool call · ${tc.name}] `));
-                announcedToolCalls.add(key);
               }
-              if (tc.args) {
-                stdout.write(chalk.dim(tc.args));
-                generatedChars += tc.args.length;
-              }
+              if (tc.args) generatedChars += tc.args.length;
             }
             inToolCall = true;
             continue;
