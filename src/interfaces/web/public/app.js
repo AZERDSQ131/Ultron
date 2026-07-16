@@ -544,7 +544,7 @@ async function streamTurn(body) {
           finishAssistant();
           updateContextGauge(data.contextTokens, data.maxTokens);
           if (verbose) {
-            addMetaLine(`⏱ ${data.elapsedSeconds.toFixed(1)}s   ≈${data.generatedTokens.toLocaleString()} tokens`);
+            addMetaLine(`⏱ ${data.elapsedSeconds.toFixed(1)}s   ${data.generatedTokens.toLocaleString()} tokens`);
           }
         } else if (eventName === "aborted") {
           finishAssistant();

@@ -629,6 +629,7 @@ async function main() {
         let wrotePrefix = false;
         let inToolCall = false;
         let generatedChars = 0;
+        let outputTokens: number | undefined;
         const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
         const markdown = new MarkdownStreamRenderer();
 
@@ -679,6 +680,9 @@ async function main() {
             continue;
           }
 
+          const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
+          if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+
           if (typeof chunk.content !== "string" || !chunk.content) continue;
 
           if (inToolCall) {
@@ -696,8 +700,12 @@ async function main() {
         appendTranscript("\n\n");
 
         const elapsedSeconds = (Date.now() - turnStarted) / 1000;
-        const generatedTokens = Math.max(1, Math.round(generatedChars / 4));
-        if (verbose) appendTranscript(chalk.dim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ≈${generatedTokens.toLocaleString()} tokens\n\n`));
+        // Nemotron's endpoint returns real usage on the stream's final chunk
+        // (see nemotron.ts); fall back to the chars/4 estimate only if a
+        // turn was interrupted before that chunk arrived.
+        const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
+        const tokenLabel = outputTokens !== undefined ? `${generatedTokens.toLocaleString()} tokens` : `≈${generatedTokens.toLocaleString()} tokens`;
+        if (verbose) appendTranscript(chalk.dim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ${tokenLabel}\n\n`));
         renderScreen("", 0, contextLine);
       } catch (err) {
         if (abortController.signal.aborted) {

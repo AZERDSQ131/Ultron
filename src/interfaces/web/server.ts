@@ -182,6 +182,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     );
 
     let generatedChars = 0;
+    let outputTokens: number | undefined;
     const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
 
     for await (const [chunk] of stream) {
@@ -217,13 +218,19 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
         continue;
       }
 
+      const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
+      if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+
       if (typeof chunk.content !== "string" || !chunk.content) continue;
       generatedChars += chunk.content.length;
       sseWrite(res, "text", { delta: chunk.content });
     }
 
     const elapsedSeconds = (Date.now() - turnStarted) / 1000;
-    const generatedTokens = Math.max(1, Math.round(generatedChars / 4));
+    // Nemotron's endpoint returns real usage on the stream's final chunk
+    // (see nemotron.ts); fall back to the chars/4 estimate only if a turn
+    // was interrupted before that chunk arrived.
+    const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
     const contextTokens = await estimateContextUsage(graph, chatId);
     sseWrite(res, "done", { elapsedSeconds, generatedTokens, contextTokens, maxTokens: config.contextWindowTokens });
   } catch (err) {

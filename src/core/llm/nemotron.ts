@@ -21,9 +21,11 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
       baseURL: config.nemotronBaseUrl,
     },
     streaming: true,
-    // NVIDIA's endpoint doesn't return usage in the stream; without this,
-    // langchain falls back to a tiktoken-based estimate and logs a noisy
-    // "Unknown model" warning on every reply.
-    streamUsage: false,
+    // Verified against the live NVIDIA endpoint: it does return real usage
+    // on the final stream chunk (empty content, populated usage_metadata),
+    // so this gets exact token counts instead of langchain's tiktoken-based
+    // estimate — no "Unknown model" warning either, since real usage means
+    // there's nothing to estimate.
+    streamUsage: true,
   });
 }

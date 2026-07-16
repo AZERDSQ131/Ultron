@@ -15,7 +15,9 @@ The current version provides a terminal conversation loop with:
 
 - Nemotron through NVIDIA's OpenAI-compatible API;
 - a human-readable `MEMORY.md` for durable facts, preferences and context;
-- token streaming, elapsed-time statistics and an estimated context gauge;
+- token streaming, elapsed-time statistics with an exact generated-token count
+  (real usage from NVIDIA's endpoint, not an estimate) and an estimated
+  context gauge;
 - basic terminal Markdown styling, including `**bold**` text;
 - local slash commands for stopping, retrying, compacting and tuning reasoning;
 - resumable text archives through `/archive` and `/resume`;
@@ -115,7 +117,7 @@ The terminal handles these commands without sending them to Nemotron:
 | `/retry` | Remove the previous assistant turn and run the last user message again |
 | `/compact` | Summarize old session messages and keep the recent turns |
 | `/think on\|low\|off` | Enable full reasoning, low-effort reasoning, or no reasoning |
-| `/verbose on\|off` | Show or hide elapsed time and estimated generated tokens |
+| `/verbose on\|off` | Show or hide elapsed time and exact generated token count |
 | `/archive [title]` | Save the current session as a readable text file under `archives/`; without a title, use the first user message |
 | `/resume <archive-path>` | Restore a previously archived session into the current thread |
 | `/clear` | Clear the terminal display |

@@ -141,8 +141,11 @@ checkpointer PostgreSQL.
    l'impact d'un mauvais appel est élevé.
 2. Les appels d'outils dépendent encore de la fiabilité du modèle Nemotron ;
    le mécanisme de retry atténue les faux appels mais ne les élimine pas.
-3. Les estimations de tokens sont approximatives, car l'endpoint NVIDIA ne
-   fournit pas l'usage dans le streaming.
+3. Le nombre de tokens générés par tour est désormais exact (usage réel
+   renvoyé par NVIDIA sur le dernier chunk du stream, voir
+   `src/core/llm/nemotron.ts`) ; seule la jauge de contexte totale reste une
+   estimation approximative (chars/4), car elle inclut l'historique complet
+   sans relancer d'appel.
 4. La mémoire est un fil SQLite unique et persistant, partagé par le CLI et
    le serveur web ; une corruption ou une pollution d'historique affecte
    directement les deux interfaces. Le `SqliteSaver` étant écrit à la main
