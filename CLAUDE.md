@@ -92,8 +92,12 @@ mais ne sont pas implémentées.
   au démarrage sur le chat le plus récemment actif, toutes interfaces confondues) ;
   `/archive` clôture le chat courant et en démarre un nouveau au lieu de quitter,
   pour que le chat archivé reste consultable depuis la sidebar web.
-- `src/core/tools/` : douze outils avec scopes déclarés dans `index.ts` : shell,
-  fichiers, HTTP/web, processus et date/heure courante.
+- `src/core/tools/` : outils avec scopes déclarés dans `index.ts` : shell,
+  fichiers, HTTP/web, processus, date/heure courante, tâches planifiées,
+  sous-agents, et une to-do list par chat (`todo_write`/`todo_read`,
+  `src/core/memory/todos.ts`) que le modèle tient à jour sur les tâches
+  longues et que l'UI web affiche en direct dans un panneau à droite
+  (`public/js/todos.js`, `GET /api/chats/:id/todos`).
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
   au démarrage ; ils ne doivent pas être fusionnés.
 - `PLAN.md`, `README.md` et `docs/agent-ia-personnel.md` : périmètre,

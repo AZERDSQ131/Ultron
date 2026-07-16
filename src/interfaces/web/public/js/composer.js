@@ -15,6 +15,7 @@ import {
 } from "./thread.js";
 import { loadStatus, updateContextGauge } from "./statusBar.js";
 import { loadChats, selectChat } from "./chatList.js";
+import { refreshTodos } from "./todos.js";
 
 const composer = document.getElementById("composer");
 const input = document.getElementById("input");
@@ -361,6 +362,7 @@ export async function streamTurn(body) {
           const blocks = [...document.querySelectorAll(".tool-block pre")];
           const match = [...blocks].reverse().find((p) => p.dataset.name === data.name && p.textContent === "…");
           if (match) match.textContent = data.content;
+          if (data.name === "todo_write") refreshTodos();
         } else if (eventName === "approval_required") {
           finishAssistant();
           const decisions = await addApprovalBlock(data.calls);

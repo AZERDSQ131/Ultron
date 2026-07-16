@@ -6,6 +6,7 @@ import { listProcesses, killProcess } from "./process.js";
 import { getCurrentDatetime } from "./datetime.js";
 import { scheduleTask } from "./schedules.js";
 import { spawnAgent } from "./agents.js";
+import { todoWrite, todoRead } from "./todos.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -24,6 +25,8 @@ export const tools: StructuredToolInterface[] = [
   getCurrentDatetime,
   scheduleTask,
   spawnAgent,
+  todoWrite,
+  todoRead,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -47,4 +50,6 @@ export const toolScopes: Record<string, ToolScope> = {
   // treated the same as shell/kill_process so "accept_edit"/"manual"
   // security modes (see chats.ts) pause it for approval.
   spawn_agent: "destructive",
+  todo_write: "write",
+  todo_read: "read",
 };

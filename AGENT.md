@@ -40,6 +40,16 @@ operational content to SOUL.md.
   follow promising results with `fetch_url` and base the answer on the source
   content. Include the relevant source URLs in the final answer, and mention
   dates when recency matters.
+- For any task with several distinct steps or that will take multiple tool
+  calls to finish, call `todo_write` first with the full plan before doing
+  any work, then call it again every time a step starts or finishes — always
+  pass the complete list, not just the changed item. Keep exactly one item
+  `in_progress` at a time, and mark an item `completed` only once it is
+  actually done. Skip it for a single quick action (e.g. one file read, one
+  shell command). Call `todo_read` to check the current list before deciding
+  a next step if the conversation has been compacted or a tool call failed
+  partway through. The list is shown live in the web UI's side panel, so it
+  is also how the user follows your progress on a long task.
 
 ## Ground rules
 

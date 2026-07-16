@@ -21,6 +21,7 @@ import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
+import { getTodoRegistry } from "../../core/memory/todos.js";
 import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { abortRun, isRunning, subscribeToRun } from "../../core/runs.js";
@@ -38,6 +39,7 @@ function debugLog(message: string): void {
 const graph = buildGraph();
 const chats = getChatRegistry(config.databasePath);
 const agents = new AgentRegistry(config.databasePath);
+const todos = getTodoRegistry(config.databasePath);
 // Migrates the CLI's original hardcoded thread ("ultron-main", used before
 // chats existed) into the registry on first run, so pre-existing history
 // shows up as a chat instead of being orphaned.
@@ -144,6 +146,15 @@ async function handleChatMessages(res: ServerResponse, chatId: string): Promise<
   // handleAttachToRun) right after loading this history — true for a
   // spawn_agent execution chat (see tools/agents.ts) still in progress.
   sendJson(res, 200, { messages, running: isRunning(chatId) });
+}
+
+// Backs the web UI's right-side to-do panel — read straight from the todos
+// table (tools/todos.ts) rather than the checkpointed message history, so it
+// stays cheap to poll after every todo_write tool_result without re-walking
+// the whole thread.
+async function handleChatTodos(res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  sendJson(res, 200, { items: todos.get(chatId) });
 }
 
 // Shared by a fresh turn (HumanMessage input) and an approval resume
@@ -503,7 +514,7 @@ async function handleStatus(res: ServerResponse, chatId: string | undefined): Pr
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
-  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages)?$/);
+  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/todos)?$/);
 
   if (req.method === "GET" && path === "/api/chats") {
     handleListChats(res).catch((err) => console.error("[ultron-web] list chats failed:", err));
@@ -515,6 +526,10 @@ const server = createServer((req, res) => {
   }
   if (chatMatch && chatMatch[2] === "/messages" && req.method === "GET") {
     handleChatMessages(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] chat messages failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/todos" && req.method === "GET") {
+    handleChatTodos(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] chat todos failed:", err));
     return;
   }
   const streamMatch = path.match(/^\/api\/chats\/([^/]+)\/stream$/);

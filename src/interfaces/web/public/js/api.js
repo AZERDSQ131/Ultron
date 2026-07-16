@@ -29,6 +29,7 @@ export const api = {
       body: JSON.stringify({ mode }),
     }).then(json),
   chatMessages: (id) => fetch(`/api/chats/${encodeURIComponent(id)}/messages`).then(json),
+  chatTodos: (id) => fetch(`/api/chats/${encodeURIComponent(id)}/todos`).then(json),
 
   stop: (chatId) =>
     fetch("/api/stop", {
