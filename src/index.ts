@@ -490,8 +490,9 @@ async function main() {
         renderScreen("", 0, contextLine);
       } catch (err) {
         if (abortController.signal.aborted) {
-          appendTranscript("\n\n");
-          break;
+          appendTranscript(chalk.dim("[ultron] generation stopped.\n\n"));
+          renderScreen("", 0, contextLine);
+          continue;
         }
         appendTranscript(chalk.red(`[ultron] error: ${err instanceof Error ? err.message : String(err)}\n\n`));
       } finally {
