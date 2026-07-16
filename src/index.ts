@@ -19,6 +19,8 @@ const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/ret
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
+let generationInput = "";
+let generationCursor = 0;
 
 function appendTranscript(text: string): void {
   transcript += text;
@@ -54,7 +56,7 @@ function renderScreen(input: string, cursor: number, contextLine: string): void 
 function writeLive(text: string, contextLine: string): void {
   if (!text) return;
   appendTranscript(text);
-  renderScreen("", 0, contextLine);
+  renderScreen(generationInput, generationCursor, contextLine);
 }
 
 function ruleWidth(): number {
@@ -197,27 +199,54 @@ function printStatus(thinkingMode: ThinkingMode, verbose: boolean) {
   );
 }
 
-function armStopCommand(abort: AbortController): () => void {
+function armStopCommand(abort: AbortController, contextLine: string): () => void {
   readline.emitKeypressEvents(stdin);
   stdin.setRawMode?.(true);
-  let buffer = "";
   const onKeypress = (input: string, key: readline.Key) => {
     if (key.ctrl && key.name === "c") {
       process.emit("SIGINT");
       return;
     }
     if (key.name === "return" || key.name === "enter") {
-      if (buffer.trim().toLowerCase() === "/stop") abort.abort();
-      buffer = "";
+      if (generationInput.trim().toLowerCase() === "/stop") abort.abort();
+      else if (generationInput.trim()) appendTranscript(chalk.yellow("[ultron] only /stop is available while generating.\n"));
+      generationInput = "";
+      generationCursor = 0;
+      renderScreen(generationInput, generationCursor, contextLine);
       return;
     }
     if (key.name === "backspace") {
-      buffer = buffer.slice(0, -1);
+      if (generationCursor > 0) {
+        generationInput = generationInput.slice(0, generationCursor - 1) + generationInput.slice(generationCursor);
+        generationCursor--;
+        renderScreen(generationInput, generationCursor, contextLine);
+      }
+      return;
+    }
+    if (key.name === "left") {
+      if (generationCursor > 0) generationCursor--;
+      renderScreen(generationInput, generationCursor, contextLine);
+      return;
+    }
+    if (key.name === "right") {
+      if (generationCursor < generationInput.length) generationCursor++;
+      renderScreen(generationInput, generationCursor, contextLine);
+      return;
+    }
+    if (key.name === "home") {
+      generationCursor = 0;
+      renderScreen(generationInput, generationCursor, contextLine);
+      return;
+    }
+    if (key.name === "end") {
+      generationCursor = generationInput.length;
+      renderScreen(generationInput, generationCursor, contextLine);
       return;
     }
     if (!key.ctrl && !key.meta && input && !input.includes("\n") && !input.includes("\r")) {
-      buffer += input;
-      if (!"/stop".startsWith(buffer.toLowerCase())) buffer = "";
+      generationInput = generationInput.slice(0, generationCursor) + input + generationInput.slice(generationCursor);
+      generationCursor += input.length;
+      renderScreen(generationInput, generationCursor, contextLine);
     }
   };
   stdin.on("keypress", onKeypress);
@@ -372,7 +401,9 @@ async function main() {
 
       abortController = new AbortController();
       const turnStarted = Date.now();
-      const disarmStopCommand = armStopCommand(abortController);
+      generationInput = "";
+      generationCursor = 0;
+      const disarmStopCommand = armStopCommand(abortController, contextLine);
 
       try {
         const stream = await graph.stream(
