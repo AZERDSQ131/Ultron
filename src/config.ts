@@ -17,6 +17,8 @@ export const config = {
   nvidiaApiKey: required("NVIDIA_API_KEY"),
   nemotronModel: process.env.NEMOTRON_MODEL ?? "nvidia/nemotron-3-super-120b-a12b",
   nemotronBaseUrl: process.env.NEMOTRON_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
+  webSearchProvider: process.env.WEB_SEARCH_PROVIDER ?? "auto",
+  tavilyApiKey: process.env.TAVILY_API_KEY,
   // Reference point for the context gauge in the CLI: 262,144 tokens
   // (~262k), per the user directly — the "up to 1M" figure surfaced by web
   // search was wrong for this served model, trust the correction over that.

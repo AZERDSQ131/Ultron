@@ -1,8 +1,11 @@
 import { tool } from "@langchain/core/tools";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { z } from "zod";
+import { config as appConfig } from "../../config.js";
+import { createWebSearchProvider, formatSearchResults } from "./search.js";
 
 const MAX_BODY_CHARS = 20_000;
+const MAX_DOWNLOAD_CHARS = 2_000_000;
 const FETCH_TIMEOUT_MS = 15_000;
 
 function timeoutSignal(config?: RunnableConfig): AbortSignal {
@@ -38,15 +41,28 @@ function truncate(text: string): string {
   return text.length > MAX_BODY_CHARS ? `${text.slice(0, MAX_BODY_CHARS)}\n\n[truncated — ${text.length} chars total]` : text;
 }
 
+function validateHttpUrl(rawUrl: string): URL {
+  const url = new URL(rawUrl);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Only http:// and https:// URLs are supported");
+  }
+  return url;
+}
+
 export const fetchUrl = tool(
   async ({ url }: { url: string }, config?: RunnableConfig) => {
     try {
-      const res = await fetch(url, { signal: timeoutSignal(config) });
+      const resolvedUrl = validateHttpUrl(url);
+      const res = await fetch(resolvedUrl, { signal: timeoutSignal(config) });
+      const contentLength = Number(res.headers.get("content-length") ?? 0);
+      if (contentLength > MAX_DOWNLOAD_CHARS) {
+        return `status: ${res.status}\n\nerror: response is too large (${contentLength} bytes; limit is ${MAX_DOWNLOAD_CHARS})`;
+      }
       const text = await res.text();
       const contentType = res.headers.get("content-type") ?? "";
       const looksLikeHtml = contentType.includes("html") || /^\s*<(!doctype|html)/i.test(text.slice(0, 200));
       const body = looksLikeHtml ? extractReadableText(text) : text;
-      return `status: ${res.status}\n\n${truncate(body)}`;
+      return `status: ${res.status}${res.ok ? "" : " (request failed)"}\nurl: ${res.url || resolvedUrl}\n\n${truncate(body)}`;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return `error: ${message}`;
@@ -74,11 +90,12 @@ export const httpRequest = tool(
   ) => {
     try {
       const resolvedMethod = (method ?? "GET").toUpperCase();
+      const resolvedUrl = validateHttpUrl(url);
       // Some model outputs pass a placeholder body even for a GET/HEAD
       // call, which the fetch spec (correctly) rejects — drop it instead
       // of surfacing a confusing low-level error for something harmless.
       const allowsBody = resolvedMethod !== "GET" && resolvedMethod !== "HEAD";
-      const res = await fetch(url, {
+      const res = await fetch(resolvedUrl, {
         method: resolvedMethod,
         headers: headers ?? undefined,
         body: allowsBody ? (body ?? undefined) : undefined,
@@ -105,35 +122,14 @@ export const httpRequest = tool(
   },
 );
 
-const DUCKDUCKGO_ENDPOINT = "https://html.duckduckgo.com/html/";
-const RESULT_LINK_RE = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
-
-function decodeDuckDuckGoUrl(raw: string): string {
-  const uddgMatch = raw.match(/[?&]uddg=([^&]+)/);
-  const target = uddgMatch ? decodeURIComponent(uddgMatch[1]) : raw;
-  return target.startsWith("//") ? `https:${target}` : target;
-}
+const webSearchProvider = createWebSearchProvider(appConfig.webSearchProvider, appConfig.tavilyApiKey);
 
 export const webSearch = tool(
   async ({ query, count }: { query: string; count?: number | null }, config?: RunnableConfig) => {
     try {
-      const n = count ?? 5;
-      const res = await fetch(`${DUCKDUCKGO_ENDPOINT}?${new URLSearchParams({ q: query })}`, {
-        headers: { "user-agent": "Mozilla/5.0 (compatible; ULTRON/0.1; personal agent)" },
-        signal: timeoutSignal(config),
-      });
-      const html = await res.text();
-
-      const results: string[] = [];
-      let match: RegExpExecArray | null;
-      RESULT_LINK_RE.lastIndex = 0;
-      while ((match = RESULT_LINK_RE.exec(html)) && results.length < n) {
-        const url = decodeDuckDuckGoUrl(match[1]);
-        const title = match[2].replace(/<[^>]+>/g, "").trim();
-        if (title) results.push(`${results.length + 1}. ${title}\n   ${url}`);
-      }
-
-      return results.length ? results.join("\n\n") : "(no results — DuckDuckGo may have served a bot-check page instead)";
+      const n = Math.min(10, Math.max(1, Math.round(count ?? 5)));
+      const results = await webSearchProvider.search(query, n, config);
+      return formatSearchResults(webSearchProvider.name, results);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return `error: ${message}`;
@@ -142,7 +138,7 @@ export const webSearch = tool(
   {
     name: "web_search",
     description:
-      "Search the web via DuckDuckGo (no API key required) and return titles and URLs for the top results. Follow up with fetch_url on a promising result to read the actual content.",
+      "Search the live web and return ranked results with titles, URLs and readable snippets. Tavily is used when configured; DuckDuckGo is the no-key fallback. Follow up with fetch_url on a promising result to verify the actual source content.",
     schema: z.object({
       query: z.string().describe("The search query."),
       count: z.number().nullable().optional().describe("Number of results to return (1-10). Defaults to 5."),
