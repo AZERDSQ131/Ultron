@@ -79,7 +79,8 @@ function routeAfterAgent(state: typeof MessagesAnnotation.State) {
   // chat, which leaves an empty array here. Guard instead of assuming an
   // AIMessage is always present.
   const last = state.messages.at(-1);
-  if (last instanceof AIMessage && last.tool_calls?.length) return "tools";
+  if (last instanceof AIMessage && last.tool_calls?.length) { debugLog(`route after agent -> tools calls=${JSON.stringify(last.tool_calls)}`); return "tools"; }
+  debugLog(`route after agent -> end last=${last?.getType() ?? "none"}`);
   return END;
 }
 
