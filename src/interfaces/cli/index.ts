@@ -327,7 +327,7 @@ async function main() {
     const archive = await archiveThread(graph, currentChatId, title || undefined);
     const nextChat = chats.create();
     currentChatId = nextChat.id;
-    appendTranscript(`${chalk.greenBright("Chat Archived")} ${chalk.dim(`"${archive.title}" → ${archive.path}`)}\n\n`);
+    appendTranscript(`${chalk.greenBright(`Chat Archived "${archive.title}"`)}\n\n`);
   };
 
   process.on("SIGINT", () => {
