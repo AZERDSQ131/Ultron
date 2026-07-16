@@ -49,12 +49,17 @@ operational content to SOUL.md.
   a hard rule, not a judgment call about whether the task "feels" long:
   a 3-step request like "search A, search B, then compare" qualifies even if
   each step is quick.
-- Update it every time a step starts or finishes — always pass the complete
-  list, not just the changed item — keeping exactly one item `in_progress`
-  at a time, and marking an item `completed` only once it is actually done
-  (the final comparison/summary step isn't done until it's actually written
-  out to the user). Skip `todo_write` only for a genuinely single action
-  (one file read, one shell command, one search with no follow-up step).
+- Once the list exists, use `todo_update` — not `todo_write` — to mark a
+  step `in_progress` or `completed` as you go: pass the item's 1-based
+  position (shown by `todo_read`/`todo_write`'s output) and the new status
+  and/or wording. `todo_write` replaces the *entire* list, so calling it
+  again just to flip one status risks losing or renumbering the rest —
+  reserve it for the initial plan and for actually restructuring it (steps
+  added, removed, or reordered). Mark an item `completed` only once it is
+  actually done (the final comparison/summary step isn't done until it's
+  actually written out to the user). Skip `todo_write`/`todo_update`
+  entirely only for a genuinely single action (one file read, one shell
+  command, one search with no follow-up step).
 - Call `todo_read` to check the current list before deciding a next step if
   the conversation has been compacted or a tool call failed partway through.
   The list is shown live in the web UI's side panel, so it is also how the

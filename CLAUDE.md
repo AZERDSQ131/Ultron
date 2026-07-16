@@ -117,6 +117,14 @@ mais ne sont pas implémentées.
   `<tool_call>...</tool_call>` ou une fence ```json — un vrai `todo_write`
   émis sous cette forme atterrissait auparavant comme réponse finale
   cassée au lieu d'être exécuté ou corrigé par un retry.
+- Un run en mode "To-Do" a aussi montré le modèle rappeler `todo_write`
+  (liste entière) juste pour clore le dernier item, au lieu de ne changer
+  que son statut — risque de perte/renumérotation du reste de la liste.
+  Ajout de `todo_update` (`index`, `status?`, `content?`) qui modifie un
+  seul item par sa position 1-based ; `todo_write` est réservé à la
+  création initiale et à la restructuration du plan. Les directives de
+  `taskModeDirective`/`taskModeReminder` et `AGENT.md` disent maintenant
+  explicitement de préférer `todo_update` pour les changements de statut.
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
   au démarrage ; ils ne doivent pas être fusionnés.
 - `PLAN.md`, `README.md` et `docs/agent-ia-personnel.md` : périmètre,

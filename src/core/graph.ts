@@ -79,11 +79,14 @@ function taskModeDirective(mode: TaskMode): string {
 
 <task_mode>To-Do</task_mode>
 For THIS turn, the user selected "To-Do" task mode. Before your first tool
-call, you MUST call todo_write with one item per sub-task in the user's
-request — this is mandatory, not a judgment call, even if each sub-task
-looks quick on its own. Keep the list updated (todo_write with the full
-list again) every time a step starts or finishes, and mark the final
-step completed only once you've actually delivered it to the user.`;
+call, you MUST call todo_write once with one item per sub-task in the
+user's request — this is mandatory, not a judgment call, even if each
+sub-task looks quick on its own. After that, use todo_update to mark a
+step 'in_progress' or 'completed' as you go (one item, by its position) —
+do NOT call todo_write again just to change a status; that rewrites the
+whole list and is how progress gets lost or a step gets silently dropped.
+Only call todo_write a second time if the plan's shape itself needs to
+change (steps added, removed, or reordered).`;
   }
   if (mode === "plan") {
     return `
@@ -93,10 +96,11 @@ step completed only once you've actually delivered it to the user.`;
 <task_mode>Plan</task_mode>
 For THIS turn, the user selected "Plan" task mode — this is a task they
 consider complex. Before your first tool call, you MUST call todo_write
-with a detailed breakdown of the work into concrete steps, erring on the
-side of more and smaller steps rather than fewer and bigger ones. Keep the
-list updated (todo_write with the full list again) every time a step
-starts or finishes.`;
+once with a detailed breakdown of the work into concrete steps, erring on
+the side of more and smaller steps rather than fewer and bigger ones.
+After that, use todo_update to mark a step 'in_progress' or 'completed' as
+you go — do NOT call todo_write again just to change a status. Only call
+todo_write a second time if the plan's shape itself needs to change.`;
   }
   return "";
 }
@@ -115,7 +119,7 @@ function taskModeReminder(mode: TaskMode, todoStartedThisTurn: boolean): string 
   if (!todoStartedThisTurn) {
     return `[ultron:task_mode=${mode}] Reminder: call todo_write now, before any other tool call, laying out the ${mode === "plan" ? "full detailed breakdown" : "sub-tasks"} of this request. Do this before searching, fetching, or running anything else.`;
   }
-  return `[ultron:task_mode=${mode}] Reminder: keep the to-do list from earlier in this turn current — call todo_write with the full updated list whenever a step's status changes.`;
+  return `[ultron:task_mode=${mode}] Reminder: a to-do list already exists for this turn. Use todo_update (one item, by its position) to mark a step in_progress/completed as you go — do NOT call todo_write again just to change a status, that replaces the whole list.`;
 }
 
 // Scans back from the end of the thread to the most recent human message,

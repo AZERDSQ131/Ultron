@@ -6,7 +6,7 @@ import { listProcesses, killProcess } from "./process.js";
 import { getCurrentDatetime } from "./datetime.js";
 import { scheduleTask } from "./schedules.js";
 import { spawnAgent } from "./agents.js";
-import { todoWrite, todoRead } from "./todos.js";
+import { todoWrite, todoUpdate, todoRead } from "./todos.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -26,6 +26,7 @@ export const tools: StructuredToolInterface[] = [
   scheduleTask,
   spawnAgent,
   todoWrite,
+  todoUpdate,
   todoRead,
 ];
 
@@ -51,5 +52,6 @@ export const toolScopes: Record<string, ToolScope> = {
   // security modes (see chats.ts) pause it for approval.
   spawn_agent: "destructive",
   todo_write: "write",
+  todo_update: "write",
   todo_read: "read",
 };
