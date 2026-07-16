@@ -30,10 +30,10 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 - Same `buildGraph()` core, same tool set and streaming behavior as the CLI — plain `node:http`
   server (no Express) and a vanilla HTML/CSS/JS frontend (no framework), consistent with owning
   the loop instead of delegating to one
-- Shares the CLI's thread (`ultron-main`) and the same SQLite checkpoint database — the CLI and
-  the web UI are two views onto one running conversation, not two disconnected sessions. Each
-  process opens its own connection to the same file; a write from one is visible to the other on
-  its next read (see `src/core/memory/checkpointer.ts`)
+- Shares the same SQLite database as the CLI — the CLI and the web UI are two views onto the
+  same chats, not two disconnected sessions. Each process opens its own connection to the same
+  file; a write from one is visible to the other on its next read (see
+  `src/core/memory/checkpointer.ts`)
 - `/compact`, `/retry` and `/archive` are exposed as web API routes too (`/api/compact`,
   `/api/turn` with `retry: true`, `/api/archive`, `/api/resume`) and recognized as slash commands
   by the web frontend, so commands behave the same regardless of which interface issues them
@@ -45,6 +45,29 @@ Two independent processes sharing one SQLite file keeps the CLI fully usable sta
 while still merging state — the trade-off is that two writes at the exact same instant from both
 interfaces could theoretically race; acceptable for a single-user local tool used from one
 interface at a time.
+
+## Multiple chats + sidebar (done)
+
+- Conversations stopped being a single hardcoded thread (`"ultron-main"`). `src/core/memory/chats.ts`
+  (`ChatRegistry`) tracks every chat — id, title, `createdAt`/`updatedAt` — in the same SQLite
+  database file; a chat's `id` doubles as its LangGraph `thread_id`, so no change was needed to
+  how the checkpointer itself stores messages.
+- Web UI: a sidebar (new `#sidebar` in `index.html`) lists every chat, sorted by recent activity.
+  New chat, rename (inline edit), delete (with confirmation, also purges that chat's checkpoint
+  rows via `SqliteSaver.deleteThread`), and switching — each fetches the chat's message history
+  from `GET /api/chats/:id/messages` and replays it into the thread view.
+- Titles are auto-derived from each chat's first message (`ChatRegistry.maybeAutoTitle`) unless
+  the user renames it manually — renaming permanently opts a chat out of auto-titling.
+- CLI: no sidebar (it's a terminal), but it participates in the same registry. It keeps one
+  "current chat" per process, resuming whichever chat was most recently active on *either*
+  interface at startup — not always the same one. Running `/archive` now finalizes the current
+  chat (still writes the existing human-readable `.txt` export too) and starts a fresh chat
+  instead of just dumping a file, so the archived conversation stays visible and clickable from
+  the web sidebar afterwards — this is what actually connects "`/archive` on the CLI" to
+  "show up in the web UI".
+- The pre-existing hardcoded thread id (`"ultron-main"`, exported as `LEGACY_CHAT_ID` from
+  `chats.ts`) is registered into the chat table on startup via `chats.ensure(...)`, so upgrading
+  doesn't orphan whatever history already existed.
 
 ## Phase 2 — Telegram interface
 

@@ -26,11 +26,18 @@ The current version provides a terminal conversation loop with:
 
 A local web interface (`pnpm web`) is also available: same LangGraph core,
 same streaming and tool-call behavior, served over HTTP with a small vanilla
-HTML/CSS/JS frontend and no framework. It shares the same conversation
-thread and memory as the CLI through a local SQLite checkpoint database
-(`ultron-state.sqlite3`) — a message sent from one interface shows up in
-the other, and `/compact`, `/retry` and `/archive` act on the same history
-no matter which interface issued them.
+HTML/CSS/JS frontend and no framework. It shares the same chats and memory
+as the CLI through a local SQLite database (`ultron-state.sqlite3`) — a
+message sent from one interface shows up in the other, and `/compact`,
+`/retry` and `/archive` act on the same history no matter which interface
+issued them.
+
+Conversations are organized as chats, each with its own id and title,
+listed in the web UI's sidebar (create, rename, delete, switch between
+them). Running `/archive` from the CLI finalizes the current chat and
+starts a new one, so the archived chat stays browsable and resumable from
+the web sidebar — the CLI itself always resumes whichever chat was most
+recently active on either interface.
 
 Telegram is the next interface planned. Mail and calendar integrations are
 still pending because they require OAuth. The separate Codex-style coding app
@@ -127,6 +134,7 @@ src/core/                            shared engine — knows nothing about any i
   graph.ts                           LangGraph loop, tool routing, archive/resume
   llm/nemotron.ts                    NVIDIA/Nemotron client
   memory/checkpointer.ts             SQLite checkpoint saver shared by every interface
+  memory/chats.ts                    chat registry (list/create/rename/delete) shared by every interface
   tools/                             shell, filesystem, web and process tools
 src/interfaces/                      presentation layers — import from core, never the reverse
   cli/index.ts                       terminal interface and streaming

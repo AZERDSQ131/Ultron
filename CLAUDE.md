@@ -12,7 +12,8 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 
 - **Model**: Nemotron (NVIDIA API) exclusively for now — no multi-provider setup.
 - **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
-- **Memory**: local SQLite checkpoint database (`ultron-state.sqlite3`), custom `SqliteSaver` in `src/core/memory/checkpointer.ts` implementing LangGraph's `BaseCheckpointSaver` directly on Node's built-in `node:sqlite` (no `@langchain/langgraph-checkpoint-postgres`/`pg`, no `@langchain/langgraph-checkpoint-sqlite` — neither package's published versions match this project's `@langchain/core` ^0.3 / `langgraph` ^0.2 pin, and `node:sqlite` needs zero extra dependencies since Node 24 is already required). Single persistent thread (`ultron-main`) shared by every entry point.
+- **Memory**: local SQLite checkpoint database (`ultron-state.sqlite3`), custom `SqliteSaver` in `src/core/memory/checkpointer.ts` implementing LangGraph's `BaseCheckpointSaver` directly on Node's built-in `node:sqlite` (no `@langchain/langgraph-checkpoint-postgres`/`pg`, no `@langchain/langgraph-checkpoint-sqlite` — neither package's published versions match this project's `@langchain/core` ^0.3 / `langgraph` ^0.2 pin, and `node:sqlite` needs zero extra dependencies since Node 24 is already required).
+- **Chats**: conversations are no longer a single hardcoded thread. `src/core/memory/chats.ts` (`ChatRegistry`) tracks every chat (id, title, timestamps) in the same database file; a chat's `id` doubles as its LangGraph `thread_id`. The web UI's sidebar lists/creates/renames/deletes chats. The CLI keeps one "current chat" per process, resuming whichever chat was most recently active on either interface at startup; `/archive` finalizes the current chat and starts a fresh one rather than exiting. The legacy hardcoded thread id (`ultron-main`, exported as `LEGACY_CHAT_ID`) is migrated into the registry on first run via `chats.ensure(...)` so pre-existing history isn't orphaned.
 - **Interface**: terminal (v0.1) and a local web UI (`src/interfaces/web/`) — both point at the same SQLite file and thread, so they share memory and slash commands (`/compact`, `/retry`, `/archive`, `/resume`). Telegram is next (grammY planned).
 - **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [AGENT.md](AGENT.md). Do not let it default to English regardless of input language.
 - **System prompt split**: [SOUL.md](SOUL.md) is personality only (voice, tone, examples). [AGENT.md](AGENT.md) is everything else — tool-use protocol, language matching, other operational rules. Don't fold one into the other; `src/core/graph.ts` concatenates both at startup.
@@ -70,7 +71,8 @@ mais ne sont pas implémentées.
 - `src/interfaces/cli/index.ts` : point d'entrée CLI, affichage, streaming, statistiques,
   jauge de contexte et interruption Ctrl+C.
 - `src/interfaces/web/server.ts` + `src/interfaces/web/public/` : interface web locale (HTTP + SSE),
-  même graphe et même fil que le CLI ; frontend HTML/CSS/JS sans framework.
+  sidebar de gestion des chats (créer, renommer, supprimer, changer de chat) ;
+  frontend HTML/CSS/JS sans framework.
 - `src/core/graph.ts` : prompt système, graphe agent/outils, routage,
   nettoyage de l'historique, retries des erreurs transitoires ou faux appels,
   et archive/reprise de conversation (`archiveThread` / `resumeThread`).
@@ -79,6 +81,12 @@ mais ne sont pas implémentées.
   de LangGraph sur `node:sqlite`) — c'est ce fichier qui permet au CLI et au
   serveur web de partager mémoire et commandes : chaque processus ouvre sa
   propre connexion vers le même fichier `.sqlite3`.
+- `src/core/memory/chats.ts` : `ChatRegistry` — la liste des chats (id, titre,
+  horodatages) dans ce même fichier SQLite ; l'`id` d'un chat sert aussi de
+  `thread_id` LangGraph. Le CLI garde un « chat courant » par processus (repris
+  au démarrage sur le chat le plus récemment actif, toutes interfaces confondues) ;
+  `/archive` clôture le chat courant et en démarre un nouveau au lieu de quitter,
+  pour que le chat archivé reste consultable depuis la sidebar web.
 - `src/core/tools/` : onze outils avec scopes déclarés dans `index.ts` : shell,
   fichiers, HTTP/web et processus.
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
