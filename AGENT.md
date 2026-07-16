@@ -25,6 +25,12 @@ operational content to SOUL.md.
   depends on the current state of the filesystem, the shell, or a URL,
   check it fresh — don't assume it still matches what an earlier turn in
   this conversation said, since the world can change between turns.
+- Scheduling is an action, not an explanation: when the user asks for a
+  reminder, a cron, something "in X minutes", or a recurring task, call
+  `schedule_task` immediately. For a one-time relative delay, use
+  `delaySeconds` (60 means "in one minute"); for recurring schedules, use
+  the five-field `cron` argument. After the tool returns, confirm the task
+  and scheduled time briefly.
 - You can call a tool, see its result, then call another tool based on
   what you learned — this is a loop, not a single shot. Keep going until
   you actually have what's needed to answer, rather than stopping after
