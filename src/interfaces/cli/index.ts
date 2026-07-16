@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as readline from "node:readline";
@@ -191,6 +191,110 @@ function readInput(
   });
 }
 
+interface ArchiveEntry {
+  path: string;
+  title: string;
+}
+
+function listArchives(): ArchiveEntry[] {
+  const archiveDir = join(process.cwd(), "archives");
+  try {
+    return readdirSync(archiveDir)
+      .filter((name) => name.endsWith(".txt"))
+      .map((name) => {
+        const path = join(archiveDir, name);
+        const content = readFileSync(path, "utf-8");
+        const title = content.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || name.replace(/\.txt$/, "");
+        return { path, title };
+      })
+      .sort((a, b) => b.path.localeCompare(a.path));
+  } catch {
+    return [];
+  }
+}
+
+function pickArchive(contextLine: string): Promise<string | undefined> {
+  const archives = listArchives();
+  if (archives.length === 0) return Promise.resolve(undefined);
+
+  return new Promise((resolve) => {
+    let query = "";
+    let selected = 0;
+    let finished = false;
+
+    const redraw = () => {
+      const matches = archives.filter((archive) => archive.title.toLowerCase().includes(query.toLowerCase()));
+      selected = Math.min(selected, Math.max(0, matches.length - 1));
+      const rows = matches.length
+        ? matches
+            .map((archive, index) => {
+              const marker = index === selected ? chalk.greenBright("›") : " ";
+              return `  ${marker} ${archive.title}`;
+            })
+            .join("\n")
+        : chalk.dim("  no matching chats");
+      const prompt = `${chalk.magentaBright.bold("resume")} ${chalk.dim("›")} `;
+      const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
+      const picker = `${chalk.dim("Select a chat · type to search · ↑/↓ navigate · Enter confirm")}\n${rows}`;
+      const footer = `${rule()}\n${prompt}${query}\n${contextLine}\n${rule()}`;
+      const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
+      stdout.write(`\x1b[2J\x1b[H${content}${picker}\n${"\n".repeat(padding)}${footer}`);
+      readline.moveCursor(stdout, 0, -2);
+      readline.cursorTo(stdout, prompt.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + query.length);
+    };
+
+    const finish = (path?: string) => {
+      if (finished) return;
+      finished = true;
+      stdin.setRawMode?.(false);
+      stdin.removeListener("keypress", onKeypress);
+      cancelActiveInput = undefined;
+      renderScreen("", 0, contextLine);
+      flushRender();
+      resolve(path);
+    };
+
+    const onKeypress = (input: string, key: readline.Key) => {
+      const matches = archives.filter((archive) => archive.title.toLowerCase().includes(query.toLowerCase()));
+      if (key.name === "return" || key.name === "enter") {
+        finish(matches[selected]?.path);
+        return;
+      }
+      if (key.name === "escape") {
+        finish();
+        return;
+      }
+      if (key.name === "up") {
+        if (matches.length) selected = (selected - 1 + matches.length) % matches.length;
+        redraw();
+        return;
+      }
+      if (key.name === "down") {
+        if (matches.length) selected = (selected + 1) % matches.length;
+        redraw();
+        return;
+      }
+      if (key.name === "backspace") {
+        query = query.slice(0, -1);
+        selected = 0;
+        redraw();
+        return;
+      }
+      if (!key.ctrl && !key.meta && input && !input.includes("\n") && !input.includes("\r")) {
+        query += input;
+        selected = 0;
+        redraw();
+      }
+    };
+
+    cancelActiveInput = () => finish();
+    readline.emitKeypressEvents(stdin);
+    stdin.setRawMode?.(true);
+    stdin.on("keypress", onKeypress);
+    redraw();
+  });
+}
+
 function contextBarColor(ratio: number): (text: string) => string {
   if (ratio < 0.5) return chalk.greenBright;
   if (ratio < 0.8) return chalk.yellowBright;
@@ -222,7 +326,7 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   load an archive into the current session\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -394,7 +498,17 @@ async function main() {
           }
           case "/resume":
             if (!commandArgument) {
-              appendTranscript(chalk.yellow("[ultron] usage: /resume <archive-path>\n\n"));
+              const selectedArchive = await pickArchive(contextLine);
+              if (!selectedArchive) {
+                appendTranscript(chalk.yellow("[ultron] no archive selected.\n\n"));
+                continue;
+              }
+              try {
+                const messageCount = await resumeThread(graph, currentChatId, selectedArchive);
+                appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages.\n\n`));
+              } catch (error) {
+                appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
+              }
               continue;
             }
             try {
@@ -420,7 +534,17 @@ async function main() {
             }
             if (commandName === "/resume") {
               if (!commandArgument) {
-                appendTranscript(chalk.yellow("[ultron] usage: /resume <archive-path>\n\n"));
+                const selectedArchive = await pickArchive(contextLine);
+                if (!selectedArchive) {
+                  appendTranscript(chalk.yellow("[ultron] no archive selected.\n\n"));
+                  continue;
+                }
+                try {
+                  const messageCount = await resumeThread(graph, currentChatId, selectedArchive);
+                  appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages.\n\n`));
+                } catch (error) {
+                  appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
+                }
                 continue;
               }
               try {
