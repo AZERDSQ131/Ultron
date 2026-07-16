@@ -19,6 +19,12 @@
       <span class="kbd-hint">⌘K</span>
     </button>
     <div id="chat-list" aria-label="Chats"></div>
+    <section id="automation-panel" aria-label="Agents and schedules">
+      <div class="panel-heading"><span>Agents</span><button type="button" id="new-agent-btn" class="icon-btn" title="New agent">+</button></div>
+      <div id="agent-list"></div>
+      <div class="panel-heading schedule-heading"><span>Scheduled tasks</span><button type="button" id="new-schedule-btn" class="icon-btn" title="New scheduled task">+</button></div>
+      <div id="schedule-list"></div>
+    </section>
   </aside>
 
   <div id="app">
@@ -54,6 +60,19 @@
         <button type="submit" id="send-btn">Send</button>
       </form>
     </footer>
+  </div>
+
+  <div id="automation-dialog" class="overlay" hidden>
+    <form id="automation-form" class="automation-dialog" role="dialog">
+      <h2 id="automation-dialog-title">New agent</h2>
+      <label>Name<input id="automation-name" required /></label>
+      <label>Description<textarea id="automation-description" rows="2"></textarea></label>
+      <label>Instructions<textarea id="automation-instructions" rows="4" placeholder="Specialized context and behavior"></textarea></label>
+      <label>Agent for schedule<select id="automation-agent"></select></label>
+      <label>Task instruction<textarea id="automation-task" rows="3" placeholder="Only for a scheduled task"></textarea></label>
+      <label>Cron expression<input id="automation-cron" placeholder="30 19 * * *" /></label>
+      <div class="dialog-actions"><button type="button" id="automation-cancel">Cancel</button><button type="submit">Create</button></div>
+    </form>
   </div>
 
   <!-- Command palette: Cmd/Ctrl+K — unifies chat switching, message search

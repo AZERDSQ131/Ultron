@@ -58,4 +58,11 @@ export const api = {
   health: () => fetch("/api/health").then(json),
   tools: () => fetch("/api/tools").then(json),
   search: (query) => fetch(`/api/search?q=${encodeURIComponent(query)}`).then(json),
+  listAgents: () => fetch("/api/agents").then(json),
+  createAgent: (body) => fetch("/api/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(json),
+  deleteAgent: (id) => fetch(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" }).then(json),
+  listSchedules: () => fetch("/api/schedules").then(json),
+  createSchedule: (body) => fetch("/api/schedules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(json),
+  toggleSchedule: (id, enabled) => fetch(`/api/schedules/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) }).then(json),
+  deleteSchedule: (id) => fetch(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }).then(json),
 };

@@ -8,5 +8,6 @@ export const state = {
   thinkingMode: "full",
   activeChatId: null,
   chatsCache: [],
+  agentsCache: [],
   toolScopes: {},
 };

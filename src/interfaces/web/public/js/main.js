@@ -5,6 +5,7 @@ import { initInspector } from "./inspector.js";
 import { initPalette } from "./palette.js";
 import { initShortcuts } from "./shortcuts.js";
 import { state } from "./store.js";
+import { initAutomation } from "./automation.js";
 
 initThread({ onEditLast: editLast, onRegenerateLast: regenerateLast });
 initChatList({ onAfterSelect: focusInput });
@@ -12,6 +13,7 @@ initComposer();
 initInspector();
 initPalette();
 initShortcuts();
+initAutomation();
 
 (async () => {
   await loadChats();

@@ -263,6 +263,25 @@ body {
   margin-top: 6px;
 }
 
+#automation-panel { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.panel-heading { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; color: var(--text-dimmer); font: 700 var(--fs-2xs) var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.schedule-heading { margin-top: 12px; }
+.automation-item { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: var(--radius-md); color: var(--text-dim); font-size: var(--fs-sm); }
+.automation-item:hover { background: var(--bg-raised); }
+.automation-item span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); }
+.schedule-item small { margin-left: auto; color: var(--text-dimmer); font: var(--fs-2xs) var(--mono); }
+.schedule-item button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
+.empty-hint { padding: 8px; color: var(--text-dimmer); font-size: var(--fs-xs); }
+
+.automation-dialog { width: min(440px, calc(100vw - 32px)); padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-panel); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+.automation-dialog h2 { margin: 0 0 16px; font-size: var(--fs-lg); }
+.automation-dialog label { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; color: var(--text-dim); font-size: var(--fs-sm); }
+.automation-dialog input, .automation-dialog textarea, .automation-dialog select { width: 100%; box-sizing: border-box; padding: 9px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-raised); color: var(--text); font: inherit; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.dialog-actions button { padding: 8px 14px; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--bg-raised); color: var(--text); cursor: pointer; }
+.dialog-actions button[type="submit"] { background: var(--accent); color: white; border-color: var(--accent); }
+
 .chat-item {
   display: flex;
   align-items: center;

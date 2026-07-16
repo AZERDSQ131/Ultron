@@ -98,6 +98,13 @@ interface at a time.
 - One main conversation orchestrates background sub-agents, each managing a project
 - Will reuse the tool/memory layers built in phases 1–3 rather than starting over
 
+## Web automation foundation (started)
+
+- Agents are persisted in the shared SQLite database with their own description and specialized instructions.
+- Web chats may be owned by an Agent (`agent_id`) while remaining ordinary LangGraph threads.
+- The web UI exposes Agent and scheduled-task panels; schedules use five-field cron expressions and can be enabled or disabled.
+- A lightweight web-process scheduler wakes due schedules, creates an execution chat under the owning Agent, and runs the task with that Agent's instructions. CLI behavior is unchanged.
+
 ## Ground rules carried across every phase
 
 - Full research and the reasoning behind these choices: [docs/agent-ia-personnel.md](docs/agent-ia-personnel.md) (French)

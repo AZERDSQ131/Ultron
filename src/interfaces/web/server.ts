@@ -17,6 +17,7 @@ import {
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { getChatRegistry, LEGACY_CHAT_ID } from "../../core/memory/chats.js";
+import { AgentRegistry } from "../../core/memory/agents.js";
 import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 
@@ -25,6 +26,7 @@ const PUBLIC_DIR = join(__dirname, "public");
 
 const graph = buildGraph();
 const chats = getChatRegistry(config.databasePath);
+const agents = new AgentRegistry(config.databasePath);
 // Migrates the CLI's original hardcoded thread ("ultron-main", used before
 // chats existed) into the registry on first run, so pre-existing history
 // shows up as a chat instead of being orphaned.
@@ -96,12 +98,13 @@ async function handleListChats(res: ServerResponse): Promise<void> {
 }
 
 async function handleCreateChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ title?: string }>(req);
+  const payload = await readJson<{ title?: string; agentId?: string | null }>(req);
   if (!payload) {
     sendJson(res, 400, { error: "invalid JSON body" });
     return;
   }
-  const chat = chats.create(payload.title?.trim() || undefined);
+  if (payload.agentId && !agents.getAgent(payload.agentId)) { sendJson(res, 404, { error: "unknown agent" }); return; }
+  const chat = chats.create(payload.title?.trim() || undefined, payload.agentId ?? null);
   sendJson(res, 200, { chat });
 }
 
@@ -338,6 +341,34 @@ async function handleTools(res: ServerResponse): Promise<void> {
   });
 }
 
+async function handleAgents(res: ServerResponse): Promise<void> { sendJson(res, 200, { agents: agents.listAgents() }); }
+async function handleCreateAgent(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const p = await readJson<{ name?: string; description?: string; instructions?: string }>(req);
+  if (!p?.name?.trim()) { sendJson(res, 400, { error: "name is required" }); return; }
+  sendJson(res, 200, { agent: agents.createAgent(p.name.trim(), p.description?.trim() ?? "", p.instructions?.trim() ?? "") });
+}
+async function handleDeleteAgent(res: ServerResponse, id: string): Promise<void> { if (!agents.getAgent(id)) { sendJson(res, 404, { error: "unknown agent" }); return; } agents.deleteAgent(id); sendJson(res, 200, { deleted: true }); }
+async function handleSchedules(res: ServerResponse): Promise<void> { sendJson(res, 200, { schedules: agents.listSchedules() }); }
+async function handleCreateSchedule(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const p = await readJson<{ agentId?: string | null; name?: string; instruction?: string; cron?: string; timezone?: string }>(req);
+  if (!p?.name?.trim() || !p.instruction?.trim() || !p.cron?.trim()) { sendJson(res, 400, { error: "name, instruction and cron are required" }); return; }
+  if (p.agentId && !agents.getAgent(p.agentId)) { sendJson(res, 404, { error: "unknown agent" }); return; }
+  try { sendJson(res, 200, { schedule: agents.createSchedule({ ...p, name: p.name.trim(), instruction: p.instruction.trim(), cron: p.cron.trim() }) }); } catch (err) { sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }); }
+}
+async function handleScheduleAction(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> { const p = await readJson<{ enabled?: boolean }>(req); agents.setScheduleEnabled(id, p?.enabled === true); sendJson(res, 200, { schedules: agents.listSchedules() }); }
+async function handleDeleteSchedule(res: ServerResponse, id: string): Promise<void> { agents.deleteSchedule(id); sendJson(res, 200, { deleted: true }); }
+
+async function runDueSchedules(): Promise<void> {
+  for (const task of agents.getDueSchedules()) {
+    agents.markRun(task.id);
+    const owner = task.agentId ? agents.getAgent(task.agentId) : undefined;
+    const execution = chats.create(`Scheduled: ${task.name}`, task.agentId);
+    const prompt = `${owner?.instructions ? `${owner.instructions}\n\n` : ""}This is a scheduled task. Execute it now and report exactly what happened.\n\nTask: ${task.instruction}`;
+    try { await graph.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: execution.id, thinking: "low" } }); }
+    catch (err) { console.error(`[ultron-web] scheduled task failed (${task.name}):`, err); }
+  }
+}
+
 async function handleStatus(res: ServerResponse, chatId: string | undefined): Promise<void> {
   const id = chatId && chats.get(chatId) ? chatId : LEGACY_CHAT_ID;
   const contextTokens = await estimateContextUsage(graph, id);
@@ -412,6 +443,15 @@ const server = createServer((req, res) => {
     handleTools(res).catch((err) => console.error("[ultron-web] tools handler failed:", err));
     return;
   }
+  if (req.method === "GET" && path === "/api/agents") { handleAgents(res).catch((err) => console.error("[ultron-web] list agents failed:", err)); return; }
+  if (req.method === "POST" && path === "/api/agents") { handleCreateAgent(req, res).catch((err) => console.error("[ultron-web] create agent failed:", err)); return; }
+  const agentMatch = path.match(/^\/api\/agents\/([^/]+)$/);
+  if (agentMatch && req.method === "DELETE") { handleDeleteAgent(res, decodeURIComponent(agentMatch[1])).catch((err) => console.error("[ultron-web] delete agent failed:", err)); return; }
+  if (req.method === "GET" && path === "/api/schedules") { handleSchedules(res).catch((err) => console.error("[ultron-web] list schedules failed:", err)); return; }
+  if (req.method === "POST" && path === "/api/schedules") { handleCreateSchedule(req, res).catch((err) => console.error("[ultron-web] create schedule failed:", err)); return; }
+  const scheduleMatch = path.match(/^\/api\/schedules\/([^/]+)$/);
+  if (scheduleMatch && req.method === "PATCH") { handleScheduleAction(req, res, decodeURIComponent(scheduleMatch[1])).catch((err) => console.error("[ultron-web] schedule action failed:", err)); return; }
+  if (scheduleMatch && req.method === "DELETE") { handleDeleteSchedule(res, decodeURIComponent(scheduleMatch[1])).catch((err) => console.error("[ultron-web] delete schedule failed:", err)); return; }
   if (req.method === "GET" && path === "/api/health") {
     handleHealth(res).catch((err) => console.error("[ultron-web] health handler failed:", err));
     return;
@@ -428,3 +468,4 @@ const server = createServer((req, res) => {
 server.listen(config.webPort, () => {
   console.log(`[ultron-web] listening on http://localhost:${config.webPort}`);
 });
+setInterval(() => { runDueSchedules().catch((err) => console.error("[ultron-web] scheduler failed:", err)); }, 15_000).unref();

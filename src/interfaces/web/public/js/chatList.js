@@ -16,6 +16,7 @@ export function initChatList(injectedHandlers) {
   handlers = injectedHandlers;
   newChatBtn.addEventListener("click", () => createNewChat());
   sidebarToggle.addEventListener("click", () => sidebar.classList.toggle("collapsed"));
+  window.addEventListener("agents:loaded", renderChatList);
 }
 
 export function toggleSidebar(force) {
@@ -50,6 +51,10 @@ function renderChatList() {
     title.className = "chat-title";
     title.textContent = chat.title;
     title.title = `${chat.title} · ${timeAgo(chat.updatedAt)} ago`;
+    if (chat.agentId) {
+      const owner = state.agentsCache.find((agent) => agent.id === chat.agentId);
+      if (owner) { title.textContent = `${owner.name} · ${chat.title}`; title.title = `${owner.name} · ${chat.title}`; }
+    }
 
     const actions = document.createElement("div");
     actions.className = "chat-actions";

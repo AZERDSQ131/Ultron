@@ -25,6 +25,7 @@ export interface Chat {
   title: string;
   createdAt: string;
   updatedAt: string;
+  agentId: string | null;
 }
 
 interface ChatRow {
@@ -32,10 +33,11 @@ interface ChatRow {
   title: string;
   created_at: string;
   updated_at: string;
+  agent_id?: string | null;
 }
 
 function toChat(row: ChatRow): Chat {
-  return { id: row.id, title: row.title, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, title: row.title, createdAt: row.created_at, updatedAt: row.updated_at, agentId: row.agent_id ?? null };
 }
 
 export function deriveTitle(text: string): string {
@@ -58,6 +60,7 @@ export class ChatRegistry {
         updated_at TEXT NOT NULL
       )
     `);
+    try { this.db.exec("ALTER TABLE chats ADD COLUMN agent_id TEXT"); } catch { /* already migrated */ }
   }
 
   list(): Chat[] {
@@ -70,12 +73,12 @@ export class ChatRegistry {
     return row ? toChat(row) : undefined;
   }
 
-  create(title: string = DEFAULT_CHAT_TITLE): Chat {
+  create(title: string = DEFAULT_CHAT_TITLE, agentId: string | null = null): Chat {
     const now = new Date().toISOString();
-    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now };
+    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId };
     this.db
-      .prepare("INSERT INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
-      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt);
+      .prepare("INSERT INTO chats (id, title, created_at, updated_at, agent_id) VALUES (?, ?, ?, ?, ?)")
+      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.agentId);
     return chat;
   }
 
@@ -86,7 +89,7 @@ export class ChatRegistry {
     const existing = this.get(id);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const chat: Chat = { id, title, createdAt: now, updatedAt: now };
+    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt);
