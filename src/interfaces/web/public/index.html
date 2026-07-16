@@ -21,13 +21,14 @@
   <main id="thread"></main>
 
   <footer>
+    <div id="command-menu" class="command-menu" hidden></div>
     <form id="composer">
       <select id="thinking-mode" title="Reasoning mode">
         <option value="full">think: full</option>
         <option value="low">think: low</option>
         <option value="off">think: off</option>
       </select>
-      <textarea id="input" placeholder="Message ULTRON…" rows="1"></textarea>
+      <textarea id="input" placeholder="Message ULTRON…" rows="1" autocomplete="off"></textarea>
       <button type="button" id="stop-btn" class="danger" hidden>Stop</button>
       <button type="submit" id="send-btn">Send</button>
     </form>

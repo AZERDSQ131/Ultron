@@ -171,6 +171,125 @@ main#thread {
 .turn.assistant .body {
   border-left: 2px solid var(--red-dim);
   padding-left: 14px;
+  white-space: normal;
+}
+
+.turn.assistant .body > *:first-child {
+  margin-top: 0;
+}
+.turn.assistant .body > *:last-child {
+  margin-bottom: 0;
+}
+
+.turn.assistant .body h1,
+.turn.assistant .body h2,
+.turn.assistant .body h3,
+.turn.assistant .body h4,
+.turn.assistant .body h5,
+.turn.assistant .body h6 {
+  font-family: var(--mono);
+  color: var(--text);
+  line-height: 1.35;
+  margin: 20px 0 8px;
+}
+.turn.assistant .body h1 { font-size: 1.5em; color: var(--red); }
+.turn.assistant .body h2 { font-size: 1.28em; }
+.turn.assistant .body h3 { font-size: 1.12em; }
+.turn.assistant .body h4,
+.turn.assistant .body h5,
+.turn.assistant .body h6 { font-size: 1em; color: var(--text-dim); }
+
+.turn.assistant .body p {
+  margin: 10px 0;
+}
+
+.turn.assistant .body strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.turn.assistant .body em {
+  font-style: italic;
+  color: var(--text);
+}
+
+.turn.assistant .body ul,
+.turn.assistant .body ol {
+  margin: 10px 0;
+  padding-left: 22px;
+}
+.turn.assistant .body li {
+  margin: 4px 0;
+}
+.turn.assistant .body li::marker {
+  color: var(--red-dim);
+}
+
+.turn.assistant .body blockquote {
+  margin: 10px 0;
+  padding: 4px 14px;
+  border-left: 2px solid var(--line);
+  color: var(--text-dim);
+}
+
+.turn.assistant .body hr {
+  border: none;
+  border-top: 1px dashed var(--line);
+  margin: 18px 0;
+}
+
+.turn.assistant .body a {
+  color: #7fb3ff;
+  text-decoration: underline;
+  text-decoration-color: rgba(127, 179, 255, 0.35);
+}
+
+.turn.assistant .body pre.code-block {
+  margin: 10px 0;
+  padding: 12px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.turn.assistant .body pre.code-block code {
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.turn.assistant .body .table-wrap {
+  margin: 12px 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.turn.assistant .body table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13.5px;
+}
+.turn.assistant .body th,
+.turn.assistant .body td {
+  padding: 7px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.turn.assistant .body th:last-child,
+.turn.assistant .body td:last-child {
+  border-right: none;
+}
+.turn.assistant .body tr:last-child td {
+  border-bottom: none;
+}
+.turn.assistant .body thead th {
+  background: rgba(255, 255, 255, 0.03);
+  font-family: var(--mono);
+  color: var(--text-dim);
+  font-weight: 600;
 }
 
 .turn .body code {
@@ -255,9 +374,60 @@ main#thread {
 
 footer {
   flex: none;
+  position: relative;
   border-top: 1px solid var(--line);
   background: var(--bg-panel);
   padding: 16px 22vw 22px;
+}
+
+.command-menu {
+  position: absolute;
+  left: 22vw;
+  right: 22vw;
+  bottom: calc(100% - 4px);
+  background: var(--bg-raised);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  animation: rise 0.15s ease both;
+}
+
+@media (max-width: 1100px) {
+  .command-menu {
+    left: 6vw;
+    right: 6vw;
+  }
+}
+
+.command-menu .item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.command-menu .item.active {
+  background: rgba(255, 68, 51, 0.12);
+}
+
+.command-menu .item .name {
+  color: var(--red);
+  font-weight: 700;
+  flex: none;
+}
+
+.command-menu .item .desc {
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1100px) {
