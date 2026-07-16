@@ -703,6 +703,7 @@ async function main() {
               configurable: { thread_id: currentChatId, thinking: thinkingMode },
               signal: controller.signal,
               streamMode: "messages",
+              recursionLimit: config.graphRecursionLimit,
             });
 
             for await (const [chunk] of stream) {

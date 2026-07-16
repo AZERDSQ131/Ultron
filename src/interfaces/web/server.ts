@@ -197,6 +197,7 @@ async function streamGraphTurn(
         configurable: { thread_id: chatId, thinking: thinkingMode, taskMode },
         signal: abortController.signal,
         streamMode: "messages",
+        recursionLimit: config.graphRecursionLimit,
       });
 
       let generatedChars = 0;
@@ -499,7 +500,7 @@ async function runDueSchedules(): Promise<void> {
     // buildAgentSystemPrompt in graph.ts), which also keeps this execution
     // out of ULTRON's own SOUL.md persona and memory.
     const prompt = `This is a scheduled task. Execute it now and report exactly what happened.\n\nTask: ${task.instruction}`;
-    try { await withThreadLock(execution.id, () => graph.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: execution.id, thinking: "low" } })); }
+    try { await withThreadLock(execution.id, () => graph.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: execution.id, thinking: "low" }, recursionLimit: config.graphRecursionLimit })); }
     catch (err) { debugLog(`scheduled task failed name=${task.name} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`); }
   }
 }

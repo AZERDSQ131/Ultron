@@ -77,6 +77,7 @@ async function runSpawnedAgent(opts: {
         configurable: { thread_id: opts.executionChatId, thinking: opts.thinking, spawnDepth: opts.spawnDepth },
         signal: run.signal,
         streamMode: "messages",
+        recursionLimit: config.graphRecursionLimit,
       },
     );
 
@@ -155,7 +156,7 @@ async function runSpawnedAgent(opts: {
     await withThreadLock(opts.parentThreadId, () =>
       graph.invoke(
         { messages: [new SystemMessage(note)] },
-        { configurable: { thread_id: opts.parentThreadId, thinking: opts.thinking } },
+        { configurable: { thread_id: opts.parentThreadId, thinking: opts.thinking }, recursionLimit: config.graphRecursionLimit },
       ),
     );
     chats.touch(opts.parentThreadId);

@@ -157,6 +157,13 @@ indépendants.
 - `NEMOTRON_BASE_URL` : optionnel ; défaut `https://integrate.api.nvidia.com/v1`.
 - `DATABASE_PATH` : optionnel ; défaut `ultron-state.sqlite3` à la racine du
   projet — fichier de checkpoint partagé par le CLI et le serveur web.
+- `GRAPH_RECURSION_LIMIT` : optionnel ; défaut `150`. LangGraph compte
+  chaque visite de nœud (pas chaque appel d'outil) contre sa limite par
+  défaut de 25 — un tour en mode To-Do/Plan avec plusieurs sous-tâches,
+  chacune suivie de son propre aller-retour `todo_update`, la dépassait
+  largement sur une tâche par ailleurs saine (`GRAPH_RECURSION_LIMIT`
+  atteint). Propagé à tous les appels `graph.stream`/`graph.invoke`
+  (CLI, serveur web, tâches planifiées, `spawn_agent`).
 - `WEB_PORT` : optionnel ; défaut `4173`, port de l'interface web locale.
 - `CONTEXT_WINDOW_TOKENS` : optionnel ; défaut `262144`, utilisé uniquement
   pour la jauge de contexte.

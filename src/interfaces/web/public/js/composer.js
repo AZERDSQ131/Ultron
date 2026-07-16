@@ -17,6 +17,13 @@ import { loadStatus, updateContextGauge } from "./statusBar.js";
 import { loadChats, selectChat } from "./chatList.js";
 import { refreshTodos } from "./todos.js";
 
+// Any tool result from either of these means the panel is stale — refresh
+// it. Kept as a set so a future todo tool only needs adding here once,
+// instead of touching both tool_result handlers below (streamTurn's own
+// turn, and attachToRunningChat's reattachment to a background spawn_agent
+// run) separately again.
+const TODO_TOOL_NAMES = new Set(["todo_write", "todo_update"]);
+
 const composer = document.getElementById("composer");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send-btn");
@@ -425,7 +432,7 @@ export async function streamTurn(body) {
           const blocks = [...document.querySelectorAll(".tool-block pre")];
           const match = [...blocks].reverse().find((p) => p.dataset.name === data.name && p.textContent === "…");
           if (match) match.textContent = data.content;
-          if (data.name === "todo_write") refreshTodos();
+          if (TODO_TOOL_NAMES.has(data.name)) refreshTodos();
         } else if (eventName === "approval_required") {
           finishAssistant();
           const decisions = await addApprovalBlock(data.calls);
@@ -541,6 +548,7 @@ export async function attachToRunningChat(chatId) {
           const blocks = [...document.querySelectorAll(".tool-block pre")];
           const match = [...blocks].reverse().find((p) => p.dataset.name === data.name && p.textContent === "…");
           if (match) match.textContent = data.content;
+          if (TODO_TOOL_NAMES.has(data.name)) refreshTodos();
         } else if (eventName === "aborted") {
           finishAssistant();
           addSystemNote("[ultron] generation stopped.");

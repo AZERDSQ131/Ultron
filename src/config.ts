@@ -23,6 +23,14 @@ export const config = {
   // (~262k), per the user directly — the "up to 1M" figure surfaced by web
   // search was wrong for this served model, trust the correction over that.
   contextWindowTokens: Number(process.env.CONTEXT_WINDOW_TOKENS ?? 262_144),
+  // LangGraph's default (25) counts every node visit, not tool calls — a
+  // todo-mode turn with N sub-tasks each needing its own search + a
+  // separate todo_update round trip can blow past 25 well before the
+  // model is actually stuck looping, killing an otherwise-healthy long
+  // turn with GRAPH_RECURSION_LIMIT. Raised well above what a real
+  // multi-step research turn needs; still bounded so a truly runaway loop
+  // (e.g. the model retrying a failing tool forever) terminates eventually.
+  graphRecursionLimit: Number(process.env.GRAPH_RECURSION_LIMIT ?? 150),
   webPort: Number(process.env.WEB_PORT ?? 4173),
   // Shared checkpoint database: the CLI and the web interface each open
   // their own connection to this same file, which is how they end up
