@@ -30,6 +30,9 @@ export class AgentRegistry {
   markRun(id: string, now = new Date()): void { const s = this.db.prepare("SELECT * FROM schedules WHERE id=?").get(id) as ScheduleRow | undefined; if (!s) return; const next = s.cron === "@once" ? null : nextCronDate(s.cron, now).toISOString(); this.db.prepare("UPDATE schedules SET last_run_at=?, next_run_at=? WHERE id=?").run(now.toISOString(), next, id); }
   setLastRunChat(id: string, chatId: string): void { this.db.prepare("UPDATE schedules SET last_run_chat_id=? WHERE id=?").run(chatId, id); }
   deleteSchedule(id: string): void { this.db.prepare("DELETE FROM schedules WHERE id=?").run(id); }
+  cleanupCompletedSchedules(now = new Date(), retentionMs = 60 * 60 * 1000): void {
+    this.db.prepare("DELETE FROM schedules WHERE cron='@once' AND last_run_at IS NOT NULL AND last_run_at <= ?").run(new Date(now.getTime() - retentionMs).toISOString());
+  }
 }
 
 function fieldMatches(field: string, value: number): boolean { return field === "*" || field.split(",").some((part) => part.startsWith("*/") ? value % Number(part.slice(2)) === 0 : Number(part) === value); }

@@ -41,9 +41,14 @@ async function load() {
   state.agentsCache = agents;
   window.dispatchEvent(new Event("agents:loaded"));
   render();
-  scheduleList.innerHTML = scheduleData.schedules.length ? scheduleData.schedules.map((s) => `<div class="automation-item schedule-item${s.lastRunChatId ? " clickable" : ""}" data-chat-id="${s.lastRunChatId ?? ""}"><span title="${s.instruction}">${s.name}</span><small>${s.cron === "@once" ? "once" : s.cron}</small><button data-id="${s.id}" data-enabled="${s.enabled}" title="Enable/disable">${s.enabled ? "●" : "○"}</button></div>`).join("") : '<div class="empty-hint">No schedules</div>';
+  scheduleList.innerHTML = scheduleData.schedules.length ? scheduleData.schedules.map((s) => {
+    const completed = s.cron === "@once" && s.lastRunAt;
+    const remaining = completed ? Math.max(0, 3600 - Math.floor((Date.now() - new Date(s.lastRunAt).getTime()) / 1000)) : null;
+    const timer = remaining === null ? (s.cron === "@once" ? "pending" : s.cron) : `deletes in ${Math.floor(remaining / 60)}m ${remaining % 60}s`;
+    return `<div class="automation-item schedule-item${s.lastRunChatId ? " clickable" : ""}" data-chat-id="${s.lastRunChatId ?? ""}"><span title="${s.instruction}">${s.name}<small class="schedule-timer">${timer}</small></span><button class="schedule-delete" data-id="${s.id}" title="Delete task" aria-label="Delete task">×</button></div>`;
+  }).join("") : '<div class="empty-hint">No schedules</div>';
   scheduleList.querySelectorAll(".schedule-item[data-chat-id]").forEach((item) => item.addEventListener("click", async (event) => { if (event.target.closest("button")) return; await selectChat(item.dataset.chatId); }));
-  scheduleList.querySelectorAll("button").forEach((button) => button.addEventListener("click", async () => { await api.toggleSchedule(button.dataset.id, button.dataset.enabled !== "true"); load(); }));
+  scheduleList.querySelectorAll(".schedule-delete").forEach((button) => button.addEventListener("click", async () => { if (confirm("Delete this scheduled task?")) { await api.deleteSchedule(button.dataset.id); await load(); } }));
 }
 export function initAutomation() {
   document.getElementById("new-agent-btn").addEventListener("click", () => openDialog("agent"));
@@ -62,5 +67,5 @@ export function initAutomation() {
   window.addEventListener("chat:selected", render);
   // A schedule is created by the model during a streaming turn, so the
   // sidebar needs a small polling refresh to see it without a full reload.
-  setInterval(() => load().catch(() => {}), 5000);
+  setInterval(() => load().catch(() => {}), 1000);
 }

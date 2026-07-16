@@ -368,6 +368,7 @@ async function handleScheduleAction(req: IncomingMessage, res: ServerResponse, i
 async function handleDeleteSchedule(res: ServerResponse, id: string): Promise<void> { agents.deleteSchedule(id); sendJson(res, 200, { deleted: true }); }
 
 async function runDueSchedules(): Promise<void> {
+  agents.cleanupCompletedSchedules();
   for (const task of agents.getDueSchedules()) {
     debugLog(`scheduler picked id=${task.id} name=${task.name} agent=${task.agentId ?? "ultron"}`);
     agents.markRun(task.id);
