@@ -16,6 +16,7 @@ const THREAD_ID = "ultron-main";
 
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
+const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -33,14 +34,21 @@ function transcriptRows(text: string): number {
   return text.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(stripAnsi(line).length / width)), 0);
 }
 
+function commandSuggestion(input: string): string {
+  if (!input.startsWith("/") || /\s/.test(input)) return "";
+  return LOCAL_COMMANDS.find((command) => command.startsWith(input) && command !== input) ?? "";
+}
+
 function renderScreen(input: string, cursor: number, contextLine: string): void {
   const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
-  const footer = `${rule()}\n${INPUT_PROMPT}${input}\n${contextLine}\n${rule()}`;
+  const suggestion = commandSuggestion(input);
+  const suggestionLine = suggestion ? chalk.dim(`↳ ${suggestion}`) : "";
+  const footer = `${rule()}\n${INPUT_PROMPT}${input}\n${suggestionLine}\n${contextLine}\n${rule()}`;
   const rows = stdout.rows || 24;
-  const padding = Math.max(0, rows - transcriptRows(content) - 4);
+  const padding = Math.max(0, rows - transcriptRows(content) - 5);
 
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${footer}`);
-  readline.moveCursor(stdout, 0, -2);
+  readline.moveCursor(stdout, 0, -3);
   readline.cursorTo(stdout, INPUT_PROMPT.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + cursor);
 }
 
@@ -88,6 +96,15 @@ function readInput(contextLine: string): Promise<string> {
         process.emit("SIGINT");
         return;
       }
+      if (key.name === "tab") {
+        const suggestion = commandSuggestion(value);
+        if (suggestion) {
+          value = suggestion;
+          cursor = value.length;
+          renderScreen(value, cursor, contextLine);
+        }
+        return;
+      }
       if (key.name === "backspace") {
         if (cursor > 0) {
           value = value.slice(0, cursor - 1) + value.slice(cursor);
@@ -106,24 +123,24 @@ function readInput(contextLine: string): Promise<string> {
       if (key.name === "left") {
         if (cursor > 0) {
           cursor--;
-          stdout.write("\x1b[1D");
+          renderScreen(value, cursor, contextLine);
         }
         return;
       }
       if (key.name === "right") {
         if (cursor < value.length) {
           cursor++;
-          stdout.write("\x1b[1C");
+          renderScreen(value, cursor, contextLine);
         }
         return;
       }
       if (key.name === "home") {
-          cursor = 0;
+        cursor = 0;
         renderScreen(value, cursor, contextLine);
         return;
       }
       if (key.name === "end") {
-          cursor = value.length;
+        cursor = value.length;
         renderScreen(value, cursor, contextLine);
         return;
       }
