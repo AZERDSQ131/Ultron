@@ -72,7 +72,12 @@ mais ne sont pas implémentées.
   jauge de contexte et interruption Ctrl+C.
 - `src/interfaces/web/server.ts` + `src/interfaces/web/public/` : interface web locale (HTTP + SSE),
   sidebar de gestion des chats (créer, renommer, supprimer, changer de chat) ;
-  frontend HTML/CSS/JS sans framework.
+  frontend HTML/CSS + modules ES natifs (`public/js/*.js`), sans framework ni bundler.
+  Refonte complète (2026-07-16) : palette de commandes `⌘/Ctrl K` (chats + recherche plein
+  texte cross-chat + commandes), actions au survol des messages (copier, brut/rendu, éditer/
+  régénérer sur le dernier tour de chaque rôle uniquement, seule chose que `prepareEdit`/
+  `prepareRetry` côté backend peuvent défaire), blocs d'appel d'outil badgés par scope, et un
+  panneau réglages/raccourcis coulissant avec bascule clair/sombre/système manuelle.
 - `src/core/graph.ts` : prompt système, graphe agent/outils, routage,
   nettoyage de l'historique, retries des erreurs transitoires ou faux appels,
   et archive/reprise de conversation (`archiveThread` / `resumeThread`).

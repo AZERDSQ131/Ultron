@@ -28,8 +28,18 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 - `src/interfaces/web/server.ts` + `src/interfaces/web/public/` — a local web UI, requested directly by the user
   alongside the CLI (they work with Codex on the terminal side, ULTRON's web UI covers the browser)
 - Same `buildGraph()` core, same tool set and streaming behavior as the CLI — plain `node:http`
-  server (no Express) and a vanilla HTML/CSS/JS frontend (no framework), consistent with owning
+  server (no Express) and a vanilla HTML/CSS + native-ES-modules frontend (no framework, no
+  bundler — `public/js/*.js` loaded directly via `<script type="module">`), consistent with owning
   the loop instead of delegating to one
+- Redesigned (2026-07-16) into a full control-panel UI on top of the same backend: a
+  `⌘/Ctrl K` command palette merging chat switching, cross-chat full-text search
+  (`GET /api/search`, backed by `searchMessages()` in `graph.ts`) and slash commands; per-turn
+  hover actions (copy, raw markdown toggle, and — only on the last turn of each role, since
+  that's all the backend's `prepareEdit`/`prepareRetry` can undo — edit or regenerate); tool-call
+  blocks badged by declared scope; and a settings/shortcuts slide-over (`⌘,` / `⌘/`) with a manual
+  light/dark/system theme toggle. Design tokens (color, type scale) live at the top of `style.css`;
+  dropped the earlier scanline/glow treatment in favor of a plainer dark-with-red-accent identity
+  that also has a fully considered light theme, not an inversion.
 - Shares the same SQLite database as the CLI — the CLI and the web UI are two views onto the
   same chats, not two disconnected sessions. Each process opens its own connection to the same
   file; a write from one is visible to the other on its next read (see

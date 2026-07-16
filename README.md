@@ -27,14 +27,15 @@ The current version provides a terminal conversation loop with:
 - clean Ctrl+C interruption, including during an in-flight model request.
 
 A local web interface (`pnpm web`) is also available: same LangGraph core,
-same streaming and tool-call behavior, served over HTTP with a small vanilla
-HTML/CSS/JS frontend and no framework. It shares the same chats and memory
-as the CLI through a local SQLite database (`ultron-state.sqlite3`) — a
-message sent from one interface shows up in the other, and `/compact`,
-`/retry` and `/archive` act on the same history no matter which interface
-issued them. `GET /api/health` is a liveness probe (process uptime, model,
-whether the shared SQLite file is reachable) — useful for a future Telegram
-process or a supervisor script to check before assuming ULTRON is up.
+same streaming and tool-call behavior, served over HTTP with a vanilla
+HTML/CSS/JS frontend (native ES modules under `public/js/`, no bundler, no
+framework). It shares the same chats and memory as the CLI through a local
+SQLite database (`ultron-state.sqlite3`) — a message sent from one interface
+shows up in the other, and `/compact`, `/retry` and `/archive` act on the
+same history no matter which interface issued them. `GET /api/health` is a
+liveness probe (process uptime, model, whether the shared SQLite file is
+reachable) — useful for a future Telegram process or a supervisor script to
+check before assuming ULTRON is up.
 
 Conversations are organized as chats, each with its own id and title,
 listed in the web UI's sidebar (create, rename, delete, switch between
@@ -42,6 +43,22 @@ them). Running `/archive` from the CLI finalizes the current chat and
 starts a new one, so the archived chat stays browsable and resumable from
 the web sidebar — the CLI itself always resumes whichever chat was most
 recently active on either interface.
+
+The web UI also has:
+
+- a command palette (`⌘/Ctrl K`) unifying chat switching, full-text search
+  across every chat's messages, and slash commands behind one keyboard-first
+  entry point;
+- message actions on hover — copy, toggle raw markdown, and (on the last
+  turn of each role only, matching what the backend can actually undo) edit
+  the last message or regenerate the last reply;
+- tool-call blocks badged by declared scope (read/write/destructive) so a
+  destructive call reads as such at a glance without opening it;
+- a settings/shortcuts panel (`⌘,` / `⌘/`) with a manual light/dark theme
+  toggle (system-aware by default), the reasoning mode, verbose stats, and
+  the live tool list with its scopes;
+- a small set of global keyboard shortcuts (new chat, search, settings,
+  toggle sidebar…) — the full list is in the Shortcuts tab of that panel.
 
 Telegram is the next interface planned. Mail and calendar integrations are
 still pending because they require OAuth. The separate Codex-style coding app
@@ -144,7 +161,19 @@ src/interfaces/                      presentation layers — import from core, n
   cli/index.ts                       terminal interface and streaming
   cli/markdown.ts                    terminal markdown rendering
   web/server.ts                      local web interface (HTTP + SSE streaming)
-  web/public/                        web frontend (vanilla HTML/CSS/JS, no framework)
+  web/public/                        web frontend (vanilla HTML/CSS + native ES modules, no framework)
+    style.css                        design tokens (light/dark) and every component's styles
+    index.html                       shell: sidebar, thread, composer, command palette, inspector
+    js/main.js                       entry point — wires every module together and boots the app
+    js/thread.js                     message rendering, tool-call blocks, per-turn actions
+    js/composer.js                   input, streaming, slash commands, edit/regenerate
+    js/palette.js                    ⌘/Ctrl K command palette (chats + search + commands)
+    js/inspector.js                  settings/shortcuts slide-over panel
+    js/chatList.js                   sidebar (list/create/rename/delete/select)
+    js/theme.js                      light/dark/system theme preference
+    js/api.js                        fetch wrappers for every backend route
+    js/store.js                      shared app state
+    js/markdown.js                   the same lightweight Markdown renderer as the CLI
 src/config.ts                        shared configuration (env vars, paths)
 MEMORY.md                            durable human-readable memory loaded each turn
 AGENT.md                             operational rules injected into the prompt

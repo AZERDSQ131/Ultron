@@ -1,0 +1,61 @@
+// Thin fetch wrappers — one function per backend route, so every other
+// module talks to the server through here instead of building fetch calls
+// inline. Kept boring on purpose: no caching, no retries, just the shape of
+// each request/response documented in one place.
+
+async function json(res) {
+  return res.json();
+}
+
+export const api = {
+  listChats: () => fetch("/api/chats").then(json),
+  createChat: (title) =>
+    fetch("/api/chats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(title ? { title } : {}),
+    }).then(json),
+  renameChat: (id, title) =>
+    fetch(`/api/chats/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    }),
+  deleteChat: (id) => fetch(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  chatMessages: (id) => fetch(`/api/chats/${encodeURIComponent(id)}/messages`).then(json),
+
+  stop: (chatId) =>
+    fetch("/api/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId }),
+    }),
+  compact: (chatId) =>
+    fetch("/api/compact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId }),
+    }).then(json),
+  archive: (chatId, title) =>
+    fetch("/api/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId, title }),
+    }).then(json),
+  resume: (chatId, path) =>
+    fetch("/api/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId, path }),
+    }),
+  edit: (chatId) =>
+    fetch("/api/edit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId }),
+    }),
+  status: (chatId) => fetch(`/api/status?chatId=${encodeURIComponent(chatId ?? "")}`).then(json),
+  health: () => fetch("/api/health").then(json),
+  tools: () => fetch("/api/tools").then(json),
+  search: (query) => fetch(`/api/search?q=${encodeURIComponent(query)}`).then(json),
+};
