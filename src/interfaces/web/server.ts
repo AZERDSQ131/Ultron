@@ -19,6 +19,7 @@ import {
 } from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import type { TaskMode } from "../../core/graph.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -167,6 +168,7 @@ async function streamGraphTurn(
   res: ServerResponse,
   chatId: string,
   thinkingMode: ThinkingMode,
+  taskMode: TaskMode,
   input: { messages: HumanMessage[] } | Command,
 ): Promise<void> {
   res.writeHead(200, {
@@ -192,7 +194,7 @@ async function streamGraphTurn(
     // replies with stray tool/report text from the other run.
     await withThreadLock(chatId, async () => {
       const stream = await graph.stream(input, {
-        configurable: { thread_id: chatId, thinking: thinkingMode },
+        configurable: { thread_id: chatId, thinking: thinkingMode, taskMode },
         signal: abortController.signal,
         streamMode: "messages",
       });
@@ -272,7 +274,7 @@ async function streamGraphTurn(
 }
 
 async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ chatId?: string; text?: string; thinking?: ThinkingMode; retry?: boolean }>(req);
+  const payload = await readJson<{ chatId?: string; text?: string; thinking?: ThinkingMode; taskMode?: TaskMode; retry?: boolean }>(req);
   if (!payload) {
     sendJson(res, 400, { error: "invalid JSON body" });
     return;
@@ -280,6 +282,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   if (!requireChat(res, payload.chatId)) return;
   const chatId = payload.chatId as string;
   const thinkingMode: ThinkingMode = payload.thinking ?? "full";
+  const taskMode: TaskMode = payload.taskMode ?? "none";
   const isRetry = payload.retry === true;
   let input = payload.text ?? "";
   debugLog(`turn received chat=${chatId} retry=${isRetry} text=${JSON.stringify(input)}`);
@@ -299,7 +302,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   }
   chats.touch(chatId);
 
-  await streamGraphTurn(req, res, chatId, thinkingMode, { messages: isRetry ? [] : [new HumanMessage(input)] });
+  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(input)] });
 }
 
 // Resumes a thread paused on toolsNode's interrupt() (see graph.ts) with the
@@ -307,7 +310,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
 // the turn — including a further approval_required if another destructive
 // call follows immediately.
 async function handleApprove(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ chatId?: string; thinking?: ThinkingMode; decisions?: ToolApprovalDecision }>(req);
+  const payload = await readJson<{ chatId?: string; thinking?: ThinkingMode; taskMode?: TaskMode; decisions?: ToolApprovalDecision }>(req);
   if (!payload || !requireChat(res, payload.chatId)) return;
   const chatId = payload.chatId as string;
   if (!payload.decisions) {
@@ -315,7 +318,8 @@ async function handleApprove(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
   const thinkingMode: ThinkingMode = payload.thinking ?? "full";
-  await streamGraphTurn(req, res, chatId, thinkingMode, new Command({ resume: payload.decisions }));
+  const taskMode: TaskMode = payload.taskMode ?? "none";
+  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, new Command({ resume: payload.decisions }));
 }
 
 async function handleSetSecurity(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {

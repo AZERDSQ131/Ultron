@@ -97,7 +97,14 @@ mais ne sont pas implémentées.
   sous-agents, et une to-do list par chat (`todo_write`/`todo_read`,
   `src/core/memory/todos.ts`) que le modèle tient à jour sur les tâches
   longues et que l'UI web affiche en direct dans un panneau à droite
-  (`public/js/todos.js`, `GET /api/chats/:id/todos`).
+  (`public/js/todos.js`, `GET /api/chats/:id/todos`). La seule consigne
+  écrite dans `AGENT.md` ne suffisant pas à faire suivre `todo_write` de
+  façon fiable par Nemotron, l'UI web ajoute un sélecteur explicite
+  « task mode » (None / To-Do / Plan, à côté du raisonnement et de la
+  sécurité) qui injecte une directive `<task_mode>` juste avant le tour
+  courant (`taskModeDirective` dans `graph.ts`, propagé par
+  `configurable.taskMode` depuis `/api/turn` et `/api/approve`) — un mode
+  choisi par l'utilisateur plutôt qu'une inférence du modèle.
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
   au démarrage ; ils ne doivent pas être fusionnés.
 - `PLAN.md`, `README.md` et `docs/agent-ia-personnel.md` : périmètre,

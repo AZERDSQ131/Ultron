@@ -27,6 +27,11 @@ const thinkingMenu = document.getElementById("thinking-menu");
 const thinkingOptions = [...thinkingMenu.querySelectorAll(".thinking-option")];
 const thinkingSelectSettings = document.getElementById("thinking-select-settings");
 const THINKING_LABELS = { full: "Full", low: "Low", off: "Off" };
+const taskBtn = document.getElementById("task-btn");
+const taskBtnLabel = document.getElementById("task-btn-label");
+const taskMenu = document.getElementById("task-menu");
+const taskOptions = [...taskMenu.querySelectorAll(".task-option")];
+const TASK_LABELS = { none: "None", todo: "To-Do", plan: "Plan" };
 const securityBtn = document.getElementById("security-btn");
 const securityBtnLabel = document.getElementById("security-btn-label");
 const securityMenu = document.getElementById("security-menu");
@@ -227,6 +232,64 @@ thinkingSelectSettings.addEventListener("change", () => setThinkingMode(thinking
 
 setThinkingMode(state.thinkingMode);
 
+function closeTaskMenu() {
+  taskMenu.hidden = true;
+  taskBtn.setAttribute("aria-expanded", "false");
+}
+
+function openTaskMenu() {
+  taskMenu.hidden = false;
+  taskBtn.setAttribute("aria-expanded", "true");
+  (taskOptions.find((opt) => opt.dataset.value === state.taskMode) ?? taskOptions[0])?.focus();
+}
+
+// Client-side only, same as reasoning mode — it's a per-turn instruction
+// (see taskModeDirective in graph.ts), not a chat-level setting worth
+// persisting server-side.
+export function setTaskMode(mode) {
+  state.taskMode = mode;
+  taskBtn.dataset.mode = mode;
+  taskBtnLabel.textContent = TASK_LABELS[mode] ?? mode;
+  for (const opt of taskOptions) {
+    const active = opt.dataset.value === mode;
+    opt.classList.toggle("active", active);
+    opt.setAttribute("aria-selected", String(active));
+  }
+}
+
+taskBtn.addEventListener("click", () => {
+  taskMenu.hidden ? openTaskMenu() : closeTaskMenu();
+});
+
+taskMenu.addEventListener("keydown", (e) => {
+  const currentIndex = taskOptions.indexOf(document.activeElement);
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    taskOptions[(currentIndex + 1) % taskOptions.length]?.focus();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    taskOptions[(currentIndex - 1 + taskOptions.length) % taskOptions.length]?.focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeTaskMenu();
+    taskBtn.focus();
+  }
+});
+
+for (const opt of taskOptions) {
+  opt.addEventListener("click", () => {
+    setTaskMode(opt.dataset.value);
+    closeTaskMenu();
+    taskBtn.focus();
+  });
+}
+
+document.addEventListener("click", (e) => {
+  if (!taskMenu.hidden && !taskMenu.contains(e.target) && !taskBtn.contains(e.target)) closeTaskMenu();
+});
+
+setTaskMode(state.taskMode);
+
 function closeSecurityMenu() {
   securityMenu.hidden = true;
   securityBtn.setAttribute("aria-expanded", "false");
@@ -370,7 +433,7 @@ export async function streamTurn(body) {
             await fetch("/api/approve", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ chatId: body.chatId, thinking: body.thinking, decisions }),
+              body: JSON.stringify({ chatId: body.chatId, thinking: body.thinking, taskMode: body.taskMode, decisions }),
             }),
           );
         } else if (eventName === "done") {
@@ -501,7 +564,7 @@ export async function attachToRunningChat(chatId) {
 export async function regenerateLast() {
   if (state.generating) return;
   truncateAfterLastUserTurn();
-  await streamTurn({ chatId: state.activeChatId, retry: true, thinking: state.thinkingMode });
+  await streamTurn({ chatId: state.activeChatId, retry: true, thinking: state.thinkingMode, taskMode: state.taskMode });
 }
 
 export async function editLast() {
@@ -668,7 +731,7 @@ composer.addEventListener("submit", (e) => {
   }
 
   addTurn("user").textContent = text;
-  streamTurn({ chatId: state.activeChatId, text, thinking: state.thinkingMode });
+  streamTurn({ chatId: state.activeChatId, text, thinking: state.thinkingMode, taskMode: state.taskMode });
 });
 
 stopBtn.addEventListener("click", async () => {

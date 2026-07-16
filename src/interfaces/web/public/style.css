@@ -1023,6 +1023,7 @@ footer {
 /* height is explicit (not padding-derived) so this and .security-btn line
    up pixel-for-pixel regardless of each label's text metrics. */
 .thinking-btn,
+.task-btn,
 .security-btn {
   box-sizing: border-box;
   height: 34px;
@@ -1112,6 +1113,90 @@ footer {
   font-weight: 700;
 }
 .thinking-option-desc {
+  font-family: var(--sans);
+  font-size: var(--fs-xs);
+  color: var(--text-dimmer);
+}
+
+/* Task mode — same button+popover shape as the reasoning control, but picks
+   how forcefully ULTRON is told to plan with todo_write for this turn (see
+   taskModeDirective in graph.ts). Exists because prose guidance alone in
+   AGENT.md wasn't reliably followed — this is the deterministic override. */
+.task-control {
+  position: relative;
+  flex: none;
+}
+
+.task-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dimmer);
+}
+.task-btn[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  background: var(--accent-soft);
+}
+
+.task-btn-icon {
+  font-size: 8px;
+  color: var(--text-dimmer);
+}
+.task-btn[data-mode="todo"] .task-btn-icon {
+  color: var(--warn);
+}
+.task-btn[data-mode="plan"] .task-btn-icon {
+  color: var(--accent);
+}
+
+.task-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 6px;
+  box-shadow: var(--shadow);
+  animation: rise 0.15s ease both;
+  z-index: 10;
+}
+.task-menu[hidden] {
+  display: none;
+}
+
+.task-option {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.task-option:hover {
+  background: var(--bg-raised);
+}
+.task-option.active {
+  background: var(--accent-soft);
+}
+.task-option-title {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.task-option.active .task-option-title {
+  color: var(--accent);
+  font-weight: 700;
+}
+.task-option-desc {
   font-family: var(--sans);
   font-size: var(--fs-xs);
   color: var(--text-dimmer);

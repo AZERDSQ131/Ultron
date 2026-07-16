@@ -59,10 +59,52 @@ ${agent.instructions?.trim() ? `Your standing persona and instructions:\n${agent
 ${agentNotes}`;
 }
 
-function buildSystemPrompt(threadId?: string): string {
+// Explicit per-turn task-management mode picked from the composer's task
+// selector (next to reasoning/security — see composer.js's task-btn), sent
+// as configurable.taskMode. This exists because prose guidance alone
+// ("call todo_write for multi-step requests") in AGENT.md was not reliably
+// followed by Nemotron — a 3-step request ("search A, search B, compare")
+// went through with no todo_write call at all despite an explicit rule.
+// A user-driven toggle that injects a directive right next to the current
+// turn (not buried earlier in a long system prompt) is the deterministic
+// fallback: the user decides when the model must plan instead of hoping it
+// infers that on its own.
+export type TaskMode = "none" | "todo" | "plan";
+
+function taskModeDirective(mode: TaskMode): string {
+  if (mode === "todo") {
+    return `
+
+---
+
+<task_mode>To-Do</task_mode>
+For THIS turn, the user selected "To-Do" task mode. Before your first tool
+call, you MUST call todo_write with one item per sub-task in the user's
+request — this is mandatory, not a judgment call, even if each sub-task
+looks quick on its own. Keep the list updated (todo_write with the full
+list again) every time a step starts or finishes, and mark the final
+step completed only once you've actually delivered it to the user.`;
+  }
+  if (mode === "plan") {
+    return `
+
+---
+
+<task_mode>Plan</task_mode>
+For THIS turn, the user selected "Plan" task mode — this is a task they
+consider complex. Before your first tool call, you MUST call todo_write
+with a detailed breakdown of the work into concrete steps, erring on the
+side of more and smaller steps rather than fewer and bigger ones. Keep the
+list updated (todo_write with the full list again) every time a step
+starts or finishes.`;
+  }
+  return "";
+}
+
+function buildSystemPrompt(threadId?: string, taskMode: TaskMode = "none"): string {
   const chat = threadId ? chatRegistryForPrompt.get(threadId) : undefined;
   const owner = chat?.agentId ? agentRegistry.getAgent(chat.agentId) : undefined;
-  if (owner) return buildAgentSystemPrompt(owner);
+  if (owner) return buildAgentSystemPrompt(owner) + taskModeDirective(taskMode);
 
   return `${BASE_SYSTEM_PROMPT}
 
@@ -74,7 +116,7 @@ you a stable fact or preference worth remembering:
 
 <memory>
 ${readMemory()}
-</memory>`;
+</memory>${taskModeDirective(taskMode)}`;
 }
 
 // Nemotron's NVIDIA endpoint doesn't return usage in the stream (see
@@ -291,8 +333,9 @@ export function buildGraph() {
   const graph = new StateGraph(MessagesAnnotation)
     .addNode("agent", async (state, runConfig) => {
       const threadId = runConfig.configurable?.thread_id as string | undefined;
+      const taskMode = (runConfig.configurable?.taskMode as TaskMode | undefined) ?? "none";
       const messages = [
-        { role: "system" as const, content: buildSystemPrompt(threadId) },
+        { role: "system" as const, content: buildSystemPrompt(threadId, taskMode) },
         ...sanitizeHistory(state.messages),
       ];
       const thinkingMode = (runConfig.configurable?.thinking as ThinkingMode | undefined) ?? "full";

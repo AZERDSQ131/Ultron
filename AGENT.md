@@ -60,6 +60,12 @@ operational content to SOUL.md.
   The list is shown live in the web UI's side panel, so it is also how the
   user follows your progress on a multi-step task — treat an unwritten list
   on a multi-step request as a mistake to avoid, not a nice-to-have.
+- The web UI also has an explicit task-mode selector (None / To-Do / Plan,
+  next to the reasoning and security controls) that injects a `<task_mode>`
+  directive right before your current turn when the user picks "To-Do" or
+  "Plan" — see `taskModeDirective` in `graph.ts`. That directive is the
+  deterministic version of the rule above: if you see it, follow it exactly
+  regardless of how the request is phrased.
 
 ## Ground rules
 

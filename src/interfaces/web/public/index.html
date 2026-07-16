@@ -70,6 +70,26 @@
             </button>
           </div>
         </div>
+        <div class="task-control">
+          <button type="button" id="task-btn" class="task-btn" title="Task mode" aria-haspopup="listbox" aria-expanded="false">
+            <span class="task-btn-icon" aria-hidden="true">◆</span>
+            <span id="task-btn-label">None</span>
+          </button>
+          <div id="task-menu" class="task-menu" role="listbox" aria-label="Task mode" hidden>
+            <button type="button" class="task-option" data-value="none" role="option">
+              <span class="task-option-title">None</span>
+              <span class="task-option-desc">Basic — no forced planning</span>
+            </button>
+            <button type="button" class="task-option" data-value="todo" role="option">
+              <span class="task-option-title">To-Do</span>
+              <span class="task-option-desc">Slightly elaborate task — tracks a to-do list</span>
+            </button>
+            <button type="button" class="task-option" data-value="plan" role="option">
+              <span class="task-option-title">Plan</span>
+              <span class="task-option-desc">Complex task — detailed breakdown before acting</span>
+            </button>
+          </div>
+        </div>
         <div class="security-control">
           <button type="button" id="security-btn" class="security-btn" title="Tool approval mode" aria-haspopup="listbox" aria-expanded="false">
             <span class="security-btn-icon" aria-hidden="true">◆</span>
