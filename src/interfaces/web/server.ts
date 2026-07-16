@@ -276,6 +276,25 @@ async function handleResume(req: IncomingMessage, res: ServerResponse): Promise<
   }
 }
 
+// Lightweight liveness probe — a real (cheap) DB query but no LLM call — so
+// anything that needs to know the process is up and the shared SQLite file
+// is reachable (a future Telegram bot, a supervisor script) doesn't have to
+// hit a heavier endpoint just to check.
+async function handleHealth(res: ServerResponse): Promise<void> {
+  let databaseReachable = true;
+  try {
+    chats.list();
+  } catch {
+    databaseReachable = false;
+  }
+  sendJson(res, databaseReachable ? 200 : 503, {
+    status: databaseReachable ? "ok" : "degraded",
+    uptimeSeconds: Math.round(process.uptime()),
+    model: config.nemotronModel,
+    databaseReachable,
+  });
+}
+
 async function handleStatus(res: ServerResponse, chatId: string | undefined): Promise<void> {
   const id = chatId && chats.get(chatId) ? chatId : LEGACY_CHAT_ID;
   const contextTokens = await estimateContextUsage(graph, id);
@@ -336,6 +355,10 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/resume") {
     handleResume(req, res).catch((err) => console.error("[ultron-web] resume handler failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/health") {
+    handleHealth(res).catch((err) => console.error("[ultron-web] health handler failed:", err));
     return;
   }
   if (req.method === "GET" && path === "/api/status") {

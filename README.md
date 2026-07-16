@@ -30,7 +30,9 @@ HTML/CSS/JS frontend and no framework. It shares the same chats and memory
 as the CLI through a local SQLite database (`ultron-state.sqlite3`) — a
 message sent from one interface shows up in the other, and `/compact`,
 `/retry` and `/archive` act on the same history no matter which interface
-issued them.
+issued them. `GET /api/health` is a liveness probe (process uptime, model,
+whether the shared SQLite file is reachable) — useful for a future Telegram
+process or a supervisor script to check before assuming ULTRON is up.
 
 Conversations are organized as chats, each with its own id and title,
 listed in the web UI's sidebar (create, rename, delete, switch between
