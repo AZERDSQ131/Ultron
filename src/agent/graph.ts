@@ -4,9 +4,8 @@ import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { AIMessage } from "@langchain/core/messages";
-import type { BaseMessage, BaseMessageLike } from "@langchain/core/messages";
+import type { BaseMessageLike } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
-import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import type { ZodObject, ZodRawShape } from "zod";
 import { createNemotronModel } from "../llm/nemotron.js";
 import { tools } from "../tools/index.js";
@@ -53,21 +52,10 @@ export function estimateTokens(text: string): number {
   return Math.max(1, Math.round(text.length / 4));
 }
 
-function messageTokens(message: BaseMessage): number {
-  const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
-  return estimateTokens(content);
-}
-
-// Reads the persisted thread's current message list back out (no extra
-// model call) and estimates total context size — system prompt included —
-// so index.ts can render a "how full is the context window" gauge.
-export async function estimateContextUsage(
-  graph: { getState(config: RunnableConfig): Promise<{ values: { messages?: BaseMessage[] } }> },
-  threadId: string,
-): Promise<number> {
-  const state = await graph.getState({ configurable: { thread_id: threadId } });
-  const messages = state.values.messages ?? [];
-  return estimateTokens(buildSystemPrompt()) + messages.reduce((sum, m) => sum + messageTokens(m), 0);
+// Without database checkpointing, only the durable MEMORY.md content
+// contributes to the context gauge between turns.
+export function estimateContextUsage(): number {
+  return estimateTokens(buildSystemPrompt());
 }
 
 function routeAfterAgent(state: typeof MessagesAnnotation.State) {
@@ -85,11 +73,9 @@ const RETRY_BASE_DELAY_MS = 1000;
 
 // Nemotron occasionally "calls" a tool by writing its JSON arguments as
 // plain reply text instead of using the real tool_calls mechanism — no
-// tool actually runs, and (worse) that fake exchange gets saved to
-// persistent history, where the model tends to imitate its own past
-// behavior on later turns. Detect the pattern from each tool's own zod
-// schema (so it generalizes as tools are added) and force a fresh retry
-// rather than ever accepting or persisting a malformed "call".
+// tool actually runs. Detect the pattern from each tool's own zod schema
+// (so it generalizes as tools are added) and force a fresh retry rather than
+// ever accepting a malformed "call".
 const toolArgKeySets = tools.map(
   (t) => new Set(Object.keys((t.schema as ZodObject<ZodRawShape>).shape)),
 );
@@ -118,12 +104,8 @@ function looksLikeFakeToolCall(content: unknown): boolean {
 // replies, not any single retry path on its own.
 const MAX_ATTEMPTS = 4;
 
-// Once a fake tool call has been generated it lives on in persisted history
-// (the checkpointer keeps every past turn on the single "ultron-main"
-// thread), and the model tends to imitate its own recent bad behavior —
-// the retry above alone isn't enough once a few of these have accumulated.
-// Scrub qualifying messages out of the prompt on every turn so old
-// pollution can't keep re-poisoning new generations.
+// Scrub qualifying messages out of the current graph state so a malformed
+// tool call cannot poison the rest of the current turn.
 function sanitizeHistory(messages: BaseMessageLike[]): BaseMessageLike[] {
   return messages.filter((m) => {
     if (!(m instanceof AIMessage)) return true;
@@ -132,7 +114,7 @@ function sanitizeHistory(messages: BaseMessageLike[]): BaseMessageLike[] {
   });
 }
 
-export function buildGraph(checkpointer: PostgresSaver) {
+export function buildGraph() {
   const baseModel = createNemotronModel();
   const model = tools.length > 0 ? baseModel.bindTools(tools) : baseModel;
 
@@ -195,5 +177,5 @@ export function buildGraph(checkpointer: PostgresSaver) {
     .addConditionalEdges("agent", routeAfterAgent, ["tools", END])
     .addEdge("tools", "agent");
 
-  return graph.compile({ checkpointer });
+  return graph.compile();
 }

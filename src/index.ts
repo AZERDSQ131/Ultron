@@ -5,15 +5,12 @@ import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import { HumanMessage } from "@langchain/core/messages";
-import { getCheckpointer } from "./memory/checkpointer.js";
 import { buildGraph, estimateContextUsage } from "./agent/graph.js";
 import { config } from "./config.js";
 import { tools } from "./tools/index.js";
 import { MarkdownStreamRenderer } from "./ui/markdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const THREAD_ID = "ultron-main";
-
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
 const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/quit"];
@@ -181,7 +178,7 @@ function renderContextBar(usedTokens: number, maxTokens: number): string {
 function printBanner() {
   const art = readFileSync(join(__dirname, "ascii-art.txt"), "utf-8").trimEnd();
   appendTranscript(
-    `${art}\n\n  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   connected · thread ${THREAD_ID}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n${chalk.dim("  type a message to begin · ctrl+c to stop at any time")}\n\n`,
+    `${art}\n\n  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n${chalk.dim("  type a message to begin · ctrl+c to stop at any time")}\n\n`,
   );
   stdout.write(transcript);
 }
@@ -194,7 +191,7 @@ function printHelp() {
 
 function printStatus() {
   appendTranscript(
-    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   connected · thread ${THREAD_ID}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
+    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
   );
 }
 
@@ -242,8 +239,7 @@ function summarizeToolCall(name: string, rawArgs: string): string {
 async function main() {
   printBanner();
 
-  const checkpointer = await getCheckpointer();
-  const graph = buildGraph(checkpointer);
+  const graph = buildGraph();
 
   let abortController: AbortController | undefined;
   let stopping = false;
@@ -258,7 +254,7 @@ async function main() {
 
   try {
     while (!stopping) {
-      const currentContextTokens = await estimateContextUsage(graph, THREAD_ID);
+      const currentContextTokens = estimateContextUsage();
       const contextLine = renderContextBar(currentContextTokens, config.contextWindowTokens);
       const input = await readInput(contextLine);
       if (stopping) break;
@@ -278,7 +274,7 @@ async function main() {
             printBanner();
             continue;
           case "/context": {
-            const contextTokens = await estimateContextUsage(graph, THREAD_ID);
+            const contextTokens = estimateContextUsage();
             appendTranscript(`${renderContextBar(contextTokens, config.contextWindowTokens)}\n\n`);
             continue;
           }
@@ -298,7 +294,6 @@ async function main() {
         const stream = await graph.stream(
           { messages: [new HumanMessage(input)] },
           {
-            configurable: { thread_id: THREAD_ID },
             signal: abortController.signal,
             streamMode: "messages",
           },
@@ -386,7 +381,6 @@ async function main() {
     }
   } finally {
     cancelActiveInput?.();
-    await checkpointer.end?.();
     appendTranscript(chalk.dim("[ultron] stopped.\n"));
     stdout.write(chalk.dim("[ultron] stopped.\n"));
     process.exit(0);

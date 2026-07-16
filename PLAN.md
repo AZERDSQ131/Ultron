@@ -16,7 +16,6 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 - Terminal chat loop
 - Nemotron (NVIDIA API) as the only model
 - LangGraph as the orchestrator — we own the state and the loop, not a packaged agent harness
-- Persistent conversation history via LangGraph checkpointing on local Postgres
 - Classic durable memory in a human-readable `MEMORY.md`
 - Token-by-token streaming
 - Ctrl+C interrupts cleanly at any point, including mid-response
@@ -25,7 +24,7 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 ## Phase 2 — Telegram interface
 
 - Replace/complement the terminal with a Telegram bot (grammY)
-- Same LangGraph core, same Postgres memory — Telegram is just a new entry point, not a rewrite
+- Same LangGraph core and `MEMORY.md` — Telegram is just a new entry point, not a rewrite
 - Streaming responses via Telegram's Bot API message editing
 
 ## Phase 3 — Tools (in progress)

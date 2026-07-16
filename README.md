@@ -1,7 +1,7 @@
 # ULTRON
 
 ULTRON is a personal AI agent built from scratch with TypeScript, LangGraph,
-Nemotron and PostgreSQL. The goal is simple: keep ownership of the loop, the
+Nemotron and local files. The goal is simple: keep ownership of the loop, the
 state, the memory and the tools instead of hiding them behind an opaque agent
 framework.
 
@@ -14,8 +14,6 @@ enough to inspect, change and understand.
 The current version provides a terminal conversation loop with:
 
 - Nemotron through NVIDIA's OpenAI-compatible API;
-- persistent LangGraph checkpoints in a local PostgreSQL database;
-- one persistent thread, `ultron-main`;
 - a human-readable `MEMORY.md` for durable facts, preferences and context;
 - token streaming, elapsed-time statistics and an estimated context gauge;
 - basic terminal Markdown styling, including `**bold**` text;
@@ -47,14 +45,7 @@ that level of access to.
 
 - Node.js 24 or newer;
 - pnpm 9.15.4 or a compatible pnpm release;
-- PostgreSQL running locally;
 - an NVIDIA API key with access to the configured Nemotron model.
-
-Create the database if needed:
-
-```bash
-createdb ultron
-```
 
 ## Setup
 
@@ -73,7 +64,6 @@ Available configuration:
 | `NVIDIA_API_KEY` | required | NVIDIA API authentication |
 | `NEMOTRON_MODEL` | `nvidia/nemotron-3-super-120b-a12b` | Model identifier |
 | `NEMOTRON_BASE_URL` | `https://integrate.api.nvidia.com/v1` | OpenAI-compatible endpoint |
-| `DATABASE_URL` | `postgresql://localhost:5432/ultron` | PostgreSQL connection |
 | `CONTEXT_WINDOW_TOKENS` | `262144` | CLI context-gauge reference |
 
 ## Run and verify
@@ -87,7 +77,7 @@ pnpm start        # run the compiled application
 
 There are currently no automated tests or lint script. The first tests should
 cover graph routing, retry and fake-tool-call handling, tool behavior,
-interruption and PostgreSQL checkpointing.
+interruption and classic file memory.
 
 ## Repository map
 
@@ -95,7 +85,6 @@ interruption and PostgreSQL checkpointing.
 src/index.ts                 terminal interface and streaming
 src/agent/graph.ts           LangGraph loop and tool routing
 src/llm/nemotron.ts          NVIDIA/Nemotron client
-src/memory/checkpointer.ts   PostgreSQL checkpoint setup
 MEMORY.md                    durable human-readable memory loaded each turn
 src/tools/                   shell, filesystem, web and process tools
 AGENT.md                     operational rules injected into the prompt
@@ -105,7 +94,7 @@ PLAN.md                      project roadmap and scope
 
 ## Roadmap
 
-1. ~~Terminal loop, checkpoint history and classic file memory~~ — done.
+1. ~~Terminal loop and classic file memory~~ — done.
 2. Telegram interface with grammY.
 3. Mail and calendar tools with OAuth.
 4. Background scheduled tasks once the core loop is trusted.
