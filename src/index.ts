@@ -42,14 +42,21 @@ function readInput(contextLine: string): Promise<string> {
       if (afterCursor > 0) stdout.write(`\x1b[${afterCursor}D`);
     };
 
-    const finish = (result: string) => {
+    const finish = (result: string, keepHistory = true) => {
       if (finished) return;
       finished = true;
       stdin.setRawMode?.(false);
       stdin.removeListener("keypress", onKeypress);
       cancelActiveInput = undefined;
-      readline.moveCursor(stdout, 0, 2);
-      stdout.write("\n");
+
+      // Remove the temporary footer from the transcript. Only the submitted
+      // message belongs in the conversation history.
+      readline.moveCursor(stdout, 0, -1);
+      stdout.write("\r\x1b[2K\n");
+      if (keepHistory && result.trim()) stdout.write(`${INPUT_PROMPT}${result}\n`);
+      else stdout.write("\r\x1b[2K");
+      stdout.write("\r\x1b[2K\n");
+      stdout.write("\r\x1b[2K\n");
       resolve(result);
     };
 
@@ -108,7 +115,7 @@ function readInput(contextLine: string): Promise<string> {
       }
     };
 
-    cancelActiveInput = () => finish("");
+    cancelActiveInput = () => finish("", false);
     stdin.on("keypress", onKeypress);
     stdout.write(`${rule()}\n${INPUT_PROMPT}\n${contextLine}\n${rule()}`);
     readline.moveCursor(stdout, 0, -2);
