@@ -5,6 +5,7 @@ import { fetchUrl, httpRequest, webSearch } from "./web.js";
 import { listProcesses, killProcess } from "./process.js";
 import { getCurrentDatetime } from "./datetime.js";
 import { scheduleTask } from "./schedules.js";
+import { spawnAgent } from "./agents.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -22,6 +23,7 @@ export const tools: StructuredToolInterface[] = [
   killProcess,
   getCurrentDatetime,
   scheduleTask,
+  spawnAgent,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -40,4 +42,9 @@ export const toolScopes: Record<string, ToolScope> = {
   kill_process: "destructive",
   get_current_datetime: "read",
   schedule_task: "write",
+  // Kicks off an autonomous sub-agent run with the same tool access as
+  // ULTRON itself (see spawn_agent's MAX_SPAWN_DEPTH guard in agents.ts) —
+  // treated the same as shell/kill_process so "accept_edit"/"manual"
+  // security modes (see chats.ts) pause it for approval.
+  spawn_agent: "destructive",
 };

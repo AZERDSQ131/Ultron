@@ -88,7 +88,8 @@ interface at a time.
 ## Phase 3 — Tools (in progress)
 
 - Tools declared with an explicit scope: `read` / `write` / `destructive` (kept in code for clarity even though confirmation gates are off by default per current settings) — see `src/core/tools/index.ts`
-- Done: `run_shell_command`, `read_file`, `write_file`, `edit_file`, `list_directory`, `search_files`, `fetch_url`, `http_request`, `web_search`, `list_processes`, `kill_process`, `get_current_datetime`, `schedule_task` — the web/process tools are modeled on OpenClaw's own tool categories (`exec`, `web_search`, `web_fetch`, `process`)
+- Done: `run_shell_command`, `read_file`, `write_file`, `edit_file`, `list_directory`, `search_files`, `fetch_url`, `http_request`, `web_search`, `list_processes`, `kill_process`, `get_current_datetime`, `schedule_task`, `spawn_agent` — the web/process tools are modeled on OpenClaw's own tool categories (`exec`, `web_search`, `web_fetch`, `process`)
+- `spawn_agent` (`src/core/tools/agents.ts`) lets ULTRON dispatch a sub-agent on demand: it creates or reuses an Agent record, starts a fresh chat owned by it (inheriting the parent chat's tool-approval mode, see below), and returns immediately — it does **not** block the calling turn. The actual run (`graph.invoke`, same tool access as ULTRON, capped at `MAX_SPAWN_DEPTH = 3` nested spawns) happens fire-and-forget; when it finishes (or fails, or pauses on its own tool-approval interrupt), `runSpawnedAgent` "wakes" the spawning thread by appending a note and re-invoking *that* thread's graph — a real new ULTRON turn lands in the original conversation once each sub-agent reports back, rather than the user having to go check a separate chat. Scoped `destructive` in `toolScopes`, so the "accept_edit"/"manual" tool-approval modes pause *dispatching* it for confirmation like `run_shell_command` (the sub-agent's own subsequent tool calls are separately gated by its inherited mode). Pulled forward from Phase 4 on explicit request; the rest of the vibe-coding app (a dedicated UI orchestrating many such agents) is still deferred. Known gap: nothing pushes this to an already-open browser tab or CLI session in real time — the new turn is visible next time that chat is loaded/refreshed, same as scheduled-task executions today.
 - Web search uses a provider abstraction in `src/core/tools/search.ts`: Tavily is selected automatically when `TAVILY_API_KEY` is present, while DuckDuckGo remains the no-key fallback. `fetch_url` validates HTTP(S) URLs, rejects oversized responses and reports non-2xx status clearly.
 - Still to come: mail, calendar (both need OAuth setup — bigger lift than the filesystem/shell tools)
 - Background scheduled tasks (cron-style) once the core loop is trusted
@@ -108,9 +109,17 @@ interface at a time.
 - `schedule_task` supports both recurring cron expressions and one-time delays such as “in one minute”.
 - A lightweight web-process scheduler wakes due schedules, creates an execution chat under the owning Agent, and runs the task with that Agent's instructions. CLI behavior is unchanged.
 
+## Tool approval modes (done)
+
+- Per-chat `SecurityMode` (`bypass` | `accept_edit` | `manual`, stored on the `chats` row — see `src/core/memory/chats.ts`), added on explicit request on top of the "no confirmation gates" default.
+- `bypass` (default, matches the original posture) runs every tool call immediately. `accept_edit` pauses only `destructive`-scoped calls (`run_shell_command`, `kill_process`, `spawn_agent`) for a human decision. `manual` pauses every call.
+- Implemented as a custom `tools` node in `src/core/graph.ts` (replacing LangGraph's prebuilt `ToolNode`) that calls LangGraph's `interrupt()` to pause a paused thread's checkpointed state and resumes via `Command({ resume: decisions })` — a real pause/resume, not a client-side-only gate.
+- Web UI: a button next to the composer input (same popover shape as the reasoning-mode button) sets the mode per chat; a pending approval renders inline in the thread with Approve/Deny.
+- CLI: `/security bypass|accept_edit|manual` sets it, `/status` shows it; a pending approval prints the batch and asks a single y/n.
+
 ## Ground rules carried across every phase
 
 - Full research and the reasoning behind these choices: [docs/agent-ia-personnel.md](docs/agent-ia-personnel.md) (French)
-- Security posture is intentionally light by user choice (no sandboxing, no confirmations, no logs) — do not silently reintroduce any of it
+- Security posture is intentionally light by user choice (no sandboxing, no logs, and confirmations off by default) — the per-chat tool approval modes above are opt-in, not a silent reintroduction; do not change that default or otherwise reintroduce sandboxing/logging without being asked
 - No sub-agents used to *build* ULTRON itself — this project is coded directly
 - Every code change is committed and pushed as it happens, no batching
