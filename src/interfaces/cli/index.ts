@@ -5,7 +5,15 @@ import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import { HumanMessage } from "@langchain/core/messages";
-import { archiveThread, buildGraph, compactThread, estimateContextUsage, prepareRetry, resumeThread } from "../../core/graph.js";
+import {
+  archiveThread,
+  buildGraph,
+  compactThread,
+  estimateContextUsage,
+  listChatMessages,
+  prepareRetry,
+  resumeThread,
+} from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID } from "../../core/memory/chats.js";
@@ -295,6 +303,19 @@ function pickArchive(contextLine: string): Promise<string | undefined> {
   });
 }
 
+async function showRestoredMessages(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<void> {
+  const messages = await listChatMessages(graph, threadId);
+  transcript = "";
+  printBanner();
+  for (const message of messages) {
+    if (message.role === "human") {
+      appendTranscript(`${INPUT_PROMPT}${message.content}\n`);
+    } else {
+      appendTranscript(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} ${message.content}\n\n`);
+    }
+  }
+}
+
 function contextBarColor(ratio: number): (text: string) => string {
   if (ratio < 0.5) return chalk.greenBright;
   if (ratio < 0.8) return chalk.yellowBright;
@@ -505,6 +526,7 @@ async function main() {
               }
               try {
                 const messageCount = await resumeThread(graph, currentChatId, selectedArchive);
+                await showRestoredMessages(graph, currentChatId);
                 appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages.\n\n`));
               } catch (error) {
                 appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
@@ -513,6 +535,7 @@ async function main() {
             }
             try {
               const messageCount = await resumeThread(graph, currentChatId, commandArgument);
+              await showRestoredMessages(graph, currentChatId);
               appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
             } catch (error) {
               appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
@@ -541,6 +564,7 @@ async function main() {
                 }
                 try {
                   const messageCount = await resumeThread(graph, currentChatId, selectedArchive);
+                  await showRestoredMessages(graph, currentChatId);
                   appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages.\n\n`));
                 } catch (error) {
                   appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
@@ -549,6 +573,7 @@ async function main() {
               }
               try {
                 const messageCount = await resumeThread(graph, currentChatId, commandArgument);
+                await showRestoredMessages(graph, currentChatId);
                 appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
               } catch (error) {
                 appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
