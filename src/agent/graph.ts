@@ -2,13 +2,15 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
-import { MemorySaver, REMOVE_ALL_MESSAGES } from "@langchain/langgraph";
+import { REMOVE_ALL_MESSAGES } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { AIMessage, HumanMessage, RemoveMessage, SystemMessage } from "@langchain/core/messages";
 import type { BaseMessage, BaseMessageLike } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { ZodObject, ZodRawShape } from "zod";
+import { config as appConfig } from "../config.js";
 import { createNemotronModel, type ThinkingMode } from "../llm/nemotron.js";
+import { getCheckpointer } from "../memory/checkpointer.js";
 import { tools } from "../tools/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -53,8 +55,8 @@ export function estimateTokens(text: string): number {
   return Math.max(1, Math.round(text.length / 4));
 }
 
-// Without database checkpointing, only the durable MEMORY.md content
-// contributes to the context gauge between turns.
+// Includes both the durable MEMORY.md content and the checkpointed thread
+// history (shared across the CLI and the web interface via SqliteSaver).
 export async function estimateContextUsage(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<number> {
   const state = await graph.getState({ configurable: { thread_id: threadId } });
   const messages = state.values.messages ?? [];
@@ -127,7 +129,11 @@ export function buildGraph() {
   const fullModel = tools.length > 0 ? fullThinkingModel.bindTools(tools) : fullThinkingModel;
   const lowModel = tools.length > 0 ? lowThinkingModel.bindTools(tools) : lowThinkingModel;
   const noModel = tools.length > 0 ? noThinkingModel.bindTools(tools) : noThinkingModel;
-  const checkpointer = new MemorySaver();
+  // Shared, disk-backed, and keyed by thread_id — the CLI and the web
+  // interface both call buildGraph() and point at the same database file,
+  // so they read and write the same conversation state instead of each
+  // holding its own disconnected in-memory copy.
+  const checkpointer = getCheckpointer(appConfig.databasePath);
 
   const graph = new StateGraph(MessagesAnnotation)
     .addNode("agent", async (state, runConfig) => {

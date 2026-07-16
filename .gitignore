@@ -4,3 +4,4 @@ dist/
 archives/
 *.log
 .DS_Store
+ultron-state.sqlite3*

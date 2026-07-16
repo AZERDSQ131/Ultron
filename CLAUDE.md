@@ -12,8 +12,8 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 
 - **Model**: Nemotron (NVIDIA API) exclusively for now — no multi-provider setup.
 - **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
-- **Memory**: local Postgres (`ultron` database), native LangGraph checkpointing (`@langchain/langgraph-checkpoint-postgres`). Single persistent thread (`ultron-main`) for now.
-- **Interface**: terminal in v0.1, Telegram is next (grammY planned).
+- **Memory**: local SQLite checkpoint database (`ultron-state.sqlite3`), custom `SqliteSaver` in `src/memory/checkpointer.ts` implementing LangGraph's `BaseCheckpointSaver` directly on Node's built-in `node:sqlite` (no `@langchain/langgraph-checkpoint-postgres`/`pg`, no `@langchain/langgraph-checkpoint-sqlite` — neither package's published versions match this project's `@langchain/core` ^0.3 / `langgraph` ^0.2 pin, and `node:sqlite` needs zero extra dependencies since Node 24 is already required). Single persistent thread (`ultron-main`) shared by every entry point.
+- **Interface**: terminal (v0.1) and a local web UI (`src/web/`) — both point at the same SQLite file and thread, so they share memory and slash commands (`/compact`, `/retry`, `/archive`, `/resume`). Telegram is next (grammY planned).
 - **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [AGENT.md](AGENT.md). Do not let it default to English regardless of input language.
 - **System prompt split**: [SOUL.md](SOUL.md) is personality only (voice, tone, examples). [AGENT.md](AGENT.md) is everything else — tool-use protocol, language matching, other operational rules. Don't fold one into the other; `src/agent/graph.ts` concatenates both at startup.
 - **Security intentionally minimal**: the user explicitly asked for **no Docker, no hardened secret management, full bypass of manual permissions/confirmations**. This is NOT an oversight — do not reintroduce sandboxing or confirmation gates without an explicit request.
@@ -47,9 +47,11 @@ TypeScript (Node 24+) / pnpm / LangGraph.js / Postgres / `@langchain/openai` (Op
 
 ULTRON est un agent IA personnel développé directement par l'utilisateur pour
 conserver la maîtrise de la boucle d'exécution, des outils et de la mémoire.
-La version actuelle fournit une conversation terminal persistante sur un fil
-unique (`ultron-main`). Telegram, les intégrations mail/calendrier et
-l'application de vibe-coding sont prévues mais ne sont pas implémentées.
+La version actuelle fournit une conversation persistante sur un fil unique
+(`ultron-main`), accessible depuis deux interfaces qui partagent le même état :
+le terminal (`src/index.ts`) et une interface web locale (`src/web/`). Telegram,
+les intégrations mail/calendrier et l'application de vibe-coding sont prévues
+mais ne sont pas implémentées.
 
 ## Stack technique
 
@@ -57,18 +59,26 @@ l'application de vibe-coding sont prévues mais ne sont pas implémentées.
 - LangGraph.js pour l'état et l'orchestration.
 - `@langchain/openai` contre l'endpoint OpenAI-compatible de NVIDIA.
 - Nemotron exclusivement, modèle par défaut `nvidia/nemotron-3-super-120b-a12b`.
-- PostgreSQL local avec `@langchain/langgraph-checkpoint-postgres`.
-- `chalk`, `dotenv`, `pg` et `zod` pour le CLI, la configuration et les outils.
+- SQLite local (`node:sqlite`, natif à Node — aucune dépendance native
+  supplémentaire) via un `SqliteSaver` écrit à la main dans
+  `src/memory/checkpointer.ts`, partagé par le CLI et le serveur web.
+- `chalk`, `dotenv` et `zod` pour le CLI, la configuration et les outils ;
+  aucun framework serveur (le serveur web utilise `node:http` directement).
 
 ## Architecture du repo
 
 - `src/index.ts` : point d'entrée CLI, affichage, streaming, statistiques,
   jauge de contexte et interruption Ctrl+C.
+- `src/web/server.ts` + `src/web/public/` : interface web locale (HTTP + SSE),
+  même graphe et même fil que le CLI ; frontend HTML/CSS/JS sans framework.
 - `src/agent/graph.ts` : prompt système, graphe agent/outils, routage,
-  nettoyage de l'historique et retries des erreurs transitoires ou faux appels.
+  nettoyage de l'historique, retries des erreurs transitoires ou faux appels,
+  et archive/reprise de conversation (`archiveThread` / `resumeThread`).
 - `src/llm/nemotron.ts` : construction du client ChatOpenAI configuré pour NVIDIA.
-- `src/memory/checkpointer.ts` : initialisation paresseuse et setup du saver
-  PostgreSQL LangGraph.
+- `src/memory/checkpointer.ts` : `SqliteSaver` (implémente `BaseCheckpointSaver`
+  de LangGraph sur `node:sqlite`) — c'est ce fichier qui permet au CLI et au
+  serveur web de partager mémoire et commandes : chaque processus ouvre sa
+  propre connexion vers le même fichier `.sqlite3`.
 - `src/tools/` : onze outils avec scopes déclarés dans `index.ts` : shell,
   fichiers, HTTP/web et processus.
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
@@ -78,29 +88,34 @@ l'application de vibe-coding sont prévues mais ne sont pas implémentées.
 
 ## Exécution locale
 
-Pré-requis : Node.js 24+, pnpm, PostgreSQL démarré avec une base `ultron`, et
-un fichier `.env` basé sur `.env.example` contenant `NVIDIA_API_KEY`.
+Pré-requis : Node.js 24+, pnpm, et un fichier `.env` basé sur `.env.example`
+contenant `NVIDIA_API_KEY`. Aucune base de données externe à démarrer — le
+fichier SQLite est créé automatiquement au premier lancement.
 
 ```bash
 pnpm install
 pnpm typecheck
 pnpm build
-pnpm dev
+pnpm dev        # CLI
+pnpm web        # interface web (http://localhost:4173 par défaut)
 pnpm start
+pnpm start:web
 ```
 
 Il n'existe actuellement ni script de test ni script de lint. Le démarrage
-réel dépend à la fois de PostgreSQL et de l'accès API NVIDIA ; le build et le
-typecheck sont indépendants de ces services.
+réel dépend de l'accès API NVIDIA ; le build et le typecheck en sont
+indépendants.
 
 ## Configuration et secrets
 
 - `NVIDIA_API_KEY` : obligatoire, chargé par `src/config.ts`.
 - `NEMOTRON_MODEL` : optionnel ; valeur par défaut documentée ci-dessus.
 - `NEMOTRON_BASE_URL` : optionnel ; défaut `https://integrate.api.nvidia.com/v1`.
-- `DATABASE_URL` : optionnel ; défaut `postgresql://localhost:5432/ultron`.
+- `DATABASE_PATH` : optionnel ; défaut `ultron-state.sqlite3` à la racine du
+  projet — fichier de checkpoint partagé par le CLI et le serveur web.
+- `WEB_PORT` : optionnel ; défaut `4173`, port de l'interface web locale.
 - `CONTEXT_WINDOW_TOKENS` : optionnel ; défaut `262144`, utilisé uniquement
-  pour la jauge CLI.
+  pour la jauge de contexte.
 - `.env` est ignoré par Git ; `.env.example` est le contrat de configuration.
 
 ## Qualité et tests
@@ -120,8 +135,12 @@ checkpointer PostgreSQL.
    le mécanisme de retry atténue les faux appels mais ne les élimine pas.
 3. Les estimations de tokens sont approximatives, car l'endpoint NVIDIA ne
    fournit pas l'usage dans le streaming.
-4. La mémoire est un fil PostgreSQL unique et persistant ; une corruption ou
-   une pollution d'historique affecte directement les tours suivants.
+4. La mémoire est un fil SQLite unique et persistant, partagé par le CLI et
+   le serveur web ; une corruption ou une pollution d'historique affecte
+   directement les deux interfaces. Le `SqliteSaver` étant écrit à la main
+   (pas de package officiel compatible avec les versions actuelles de
+   `@langchain/core`/`langgraph`), toute divergence avec le comportement
+   attendu de `BaseCheckpointSaver` reste à la charge du projet.
 5. Le parsing HTML et la recherche DuckDuckGo sont volontairement légers et
    peuvent échouer sur des pages dynamiques ou des changements de format.
 

@@ -26,8 +26,11 @@ The current version provides a terminal conversation loop with:
 
 A local web interface (`pnpm web`) is also available: same LangGraph core,
 same streaming and tool-call behavior, served over HTTP with a small vanilla
-HTML/CSS/JS frontend and no framework. It runs on its own thread
-(`ultron-web`), separate from the CLI's `ultron-main`.
+HTML/CSS/JS frontend and no framework. It shares the same conversation
+thread and memory as the CLI through a local SQLite checkpoint database
+(`ultron-state.sqlite3`) — a message sent from one interface shows up in
+the other, and `/compact`, `/retry` and `/archive` act on the same history
+no matter which interface issued them.
 
 Telegram is the next interface planned. Mail and calendar integrations are
 still pending because they require OAuth. The separate Codex-style coding app
@@ -73,6 +76,7 @@ Available configuration:
 | `NEMOTRON_BASE_URL` | `https://integrate.api.nvidia.com/v1` | OpenAI-compatible endpoint |
 | `CONTEXT_WINDOW_TOKENS` | `262144` | CLI context-gauge reference |
 | `WEB_PORT` | `4173` | Local web interface port |
+| `DATABASE_PATH` | `ultron-state.sqlite3` | Shared checkpoint database (CLI + web) |
 
 ## Run and verify
 
@@ -123,8 +127,9 @@ are local and ignored by Git.
 src/index.ts                 terminal interface and streaming
 src/web/server.ts            local web interface (HTTP + SSE streaming)
 src/web/public/              web frontend (vanilla HTML/CSS/JS, no framework)
-src/agent/graph.ts           LangGraph loop and tool routing
+src/agent/graph.ts           LangGraph loop, tool routing, archive/resume
 src/llm/nemotron.ts          NVIDIA/Nemotron client
+src/memory/checkpointer.ts   SQLite checkpoint saver shared by the CLI and the web interface
 MEMORY.md                    durable human-readable memory loaded each turn
 src/tools/                   shell, filesystem, web and process tools
 AGENT.md                     operational rules injected into the prompt

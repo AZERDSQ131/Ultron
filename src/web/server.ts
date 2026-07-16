@@ -3,7 +3,7 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { HumanMessage } from "@langchain/core/messages";
-import { buildGraph, compactThread, estimateContextUsage, prepareRetry } from "../agent/graph.js";
+import { archiveThread, buildGraph, compactThread, estimateContextUsage, prepareRetry, resumeThread } from "../agent/graph.js";
 import { config } from "../config.js";
 import type { ThinkingMode } from "../llm/nemotron.js";
 import { tools } from "../tools/index.js";
@@ -12,10 +12,10 @@ import { summarizeToolCall } from "../tools/summarize.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
 
-// Separate thread from the CLI's "ultron-main" — each entry point runs its
-// own process with its own in-memory MemorySaver, so there is no shared
-// state to protect either way, but a distinct id keeps the two legible.
-const THREAD_ID = "ultron-web";
+// Same thread id as the CLI ("ultron-main") — both point buildGraph() at
+// the same SqliteSaver database file (see src/memory/checkpointer.ts), so
+// a message sent from one interface shows up in the other's history too.
+const THREAD_ID = "ultron-main";
 const graph = buildGraph();
 
 // Single-user local tool: one generation at a time, mirroring the CLI's
@@ -179,6 +179,32 @@ async function handleCompact(res: ServerResponse): Promise<void> {
   sendJson(res, 200, result);
 }
 
+async function handleArchive(res: ServerResponse): Promise<void> {
+  const path = await archiveThread(graph, THREAD_ID);
+  sendJson(res, 200, { path });
+}
+
+async function handleResume(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const raw = await readBody(req);
+  let payload: { path?: string };
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    sendJson(res, 400, { error: "invalid JSON body" });
+    return;
+  }
+  if (!payload.path) {
+    sendJson(res, 400, { error: "archive path is required" });
+    return;
+  }
+  try {
+    const count = await resumeThread(graph, THREAD_ID, payload.path);
+    sendJson(res, 200, { count });
+  } catch (err) {
+    sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 async function handleStatus(res: ServerResponse): Promise<void> {
   const contextTokens = await estimateContextUsage(graph, THREAD_ID);
   sendJson(res, 200, {
@@ -206,6 +232,14 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && url === "/api/compact") {
     handleCompact(res).catch((err) => console.error("[ultron-web] compact handler failed:", err));
+    return;
+  }
+  if (req.method === "POST" && url === "/api/archive") {
+    handleArchive(res).catch((err) => console.error("[ultron-web] archive handler failed:", err));
+    return;
+  }
+  if (req.method === "POST" && url === "/api/resume") {
+    handleResume(req, res).catch((err) => console.error("[ultron-web] resume handler failed:", err));
     return;
   }
   if (req.method === "GET" && url === "/api/status") {

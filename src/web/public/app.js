@@ -191,14 +191,82 @@ async function streamTurn(body) {
   }
 }
 
+const LOCAL_COMMANDS = ["/help", "/compact", "/retry", "/stop", "/archive", "/resume"];
+
+async function runCommand(raw) {
+  const [command, ...rest] = raw.trim().split(/\s+/);
+  const arg = rest.join(" ");
+
+  if (command === "/help") {
+    addSystemNote(
+      "[ultron] commands: /compact · /retry · /stop · /archive · /resume <path>",
+    );
+    return;
+  }
+
+  if (command === "/compact") {
+    const res = await fetch("/api/compact", { method: "POST" });
+    const data = await res.json();
+    addSystemNote(
+      data.compacted
+        ? `[ultron] compacted ${data.before} messages into ${data.after} context messages.`
+        : "[ultron] not enough history to compact yet.",
+    );
+    return;
+  }
+
+  if (command === "/retry") {
+    await streamTurn({ retry: true, thinking: thinkingSelect.value });
+    return;
+  }
+
+  if (command === "/stop") {
+    await fetch("/api/stop", { method: "POST" });
+    return;
+  }
+
+  if (command === "/archive") {
+    const res = await fetch("/api/archive", { method: "POST" });
+    const data = await res.json();
+    addSystemNote(data.path ? `[ultron] archived to ${data.path}` : `[ultron] ${data.error ?? "archive failed"}`);
+    return;
+  }
+
+  if (command === "/resume") {
+    if (!arg) {
+      addSystemNote("[ultron] usage: /resume <archive-path>", true);
+      return;
+    }
+    const res = await fetch("/api/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: arg }),
+    });
+    const data = await res.json();
+    addSystemNote(
+      res.ok ? `[ultron] resumed ${data.count} messages from ${arg}` : `[ultron] ${data.error ?? "resume failed"}`,
+      !res.ok,
+    );
+    return;
+  }
+
+  addSystemNote(`[ultron] unknown command: ${command} — try /help`, true);
+}
+
 composer.addEventListener("submit", (e) => {
   e.preventDefault();
   if (generating) return;
   const text = input.value.trim();
   if (!text) return;
-  addTurn("user").textContent = text;
   input.value = "";
   autoGrow();
+
+  if (text.startsWith("/") && LOCAL_COMMANDS.includes(text.split(/\s+/)[0])) {
+    runCommand(text);
+    return;
+  }
+
+  addTurn("user").textContent = text;
   streamTurn({ text, thinking: thinkingSelect.value });
 });
 
