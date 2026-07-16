@@ -277,6 +277,7 @@ body {
 .automation-dialog { width: min(440px, calc(100vw - 32px)); padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-panel); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
 .automation-dialog h2 { margin: 0 0 16px; font-size: var(--fs-lg); }
 .automation-dialog label { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; color: var(--text-dim); font-size: var(--fs-sm); }
+.automation-dialog [hidden] { display: none !important; }
 .automation-dialog input, .automation-dialog textarea, .automation-dialog select { width: 100%; box-sizing: border-box; padding: 9px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-raised); color: var(--text); font: inherit; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .dialog-actions button { padding: 8px 14px; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--bg-raised); color: var(--text); cursor: pointer; }
