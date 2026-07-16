@@ -21,6 +21,8 @@ let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
 let generationInput = "";
 let generationCursor = 0;
+let pendingRender: { input: string; cursor: number; contextLine: string } | undefined;
+let renderTimer: ReturnType<typeof setTimeout> | undefined;
 
 function appendTranscript(text: string): void {
   transcript += text;
@@ -40,7 +42,7 @@ function commandSuggestion(input: string): string {
   return LOCAL_COMMANDS.find((command) => command.startsWith(input) && command !== input) ?? "";
 }
 
-function renderScreen(input: string, cursor: number, contextLine: string): void {
+function drawScreen(input: string, cursor: number, contextLine: string): void {
   const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
   const suggestion = commandSuggestion(input);
   const suggestionLine = suggestion ? chalk.dim(`↳ ${suggestion}`) : "";
@@ -51,6 +53,27 @@ function renderScreen(input: string, cursor: number, contextLine: string): void 
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${footer}`);
   readline.moveCursor(stdout, 0, -3);
   readline.cursorTo(stdout, INPUT_PROMPT.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + cursor);
+}
+
+function renderScreen(input: string, cursor: number, contextLine: string): void {
+  pendingRender = { input, cursor, contextLine };
+  if (renderTimer) return;
+  renderTimer = setTimeout(() => {
+    renderTimer = undefined;
+    const next = pendingRender;
+    pendingRender = undefined;
+    if (next) drawScreen(next.input, next.cursor, next.contextLine);
+  }, 24);
+}
+
+function flushRender(): void {
+  if (renderTimer) {
+    clearTimeout(renderTimer);
+    renderTimer = undefined;
+  }
+  const next = pendingRender;
+  pendingRender = undefined;
+  if (next) drawScreen(next.input, next.cursor, next.contextLine);
 }
 
 function writeLive(text: string, contextLine: string): void {
