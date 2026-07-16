@@ -1,11 +1,22 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { config } from "../config.js";
 
-export function createNemotronModel(): ChatOpenAI {
+export type ThinkingMode = "off" | "low" | "full";
+
+export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOpenAI {
+  const thinking = thinkingMode !== "off";
+
   return new ChatOpenAI({
     model: config.nemotronModel,
     apiKey: config.nvidiaApiKey,
-    temperature: 0.8,
+    temperature: 1.0,
+    topP: 0.95,
+    modelKwargs: {
+      chat_template_kwargs: {
+        enable_thinking: thinking,
+        ...(thinkingMode === "low" ? { low_effort: true } : {}),
+      },
+    },
     configuration: {
       baseURL: config.nemotronBaseUrl,
     },

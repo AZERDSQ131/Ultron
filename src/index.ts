@@ -5,15 +5,17 @@ import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import { HumanMessage } from "@langchain/core/messages";
-import { buildGraph, estimateContextUsage } from "./agent/graph.js";
+import { buildGraph, compactThread, estimateContextUsage, prepareRetry } from "./agent/graph.js";
 import { config } from "./config.js";
+import type { ThinkingMode } from "./llm/nemotron.js";
 import { tools } from "./tools/index.js";
 import { MarkdownStreamRenderer } from "./ui/markdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const THREAD_ID = "ultron-main";
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/think", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -185,14 +187,44 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show the current context usage\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
-function printStatus() {
+function printStatus(thinkingMode: ThinkingMode, verbose: boolean) {
   appendTranscript(
-    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
+    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · thread ${THREAD_ID}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
   );
+}
+
+function armStopCommand(abort: AbortController): () => void {
+  readline.emitKeypressEvents(stdin);
+  stdin.setRawMode?.(true);
+  let buffer = "";
+  const onKeypress = (input: string, key: readline.Key) => {
+    if (key.ctrl && key.name === "c") {
+      process.emit("SIGINT");
+      return;
+    }
+    if (key.name === "return" || key.name === "enter") {
+      if (buffer.trim().toLowerCase() === "/stop") abort.abort();
+      buffer = "";
+      return;
+    }
+    if (key.name === "backspace") {
+      buffer = buffer.slice(0, -1);
+      return;
+    }
+    if (!key.ctrl && !key.meta && input && !input.includes("\n") && !input.includes("\r")) {
+      buffer += input;
+      if (!"/stop".startsWith(buffer.toLowerCase())) buffer = "";
+    }
+  };
+  stdin.on("keypress", onKeypress);
+  return () => {
+    stdin.removeListener("keypress", onKeypress);
+    stdin.setRawMode?.(false);
+  };
 }
 
 function summarizeToolCall(name: string, rawArgs: string): string {
@@ -243,6 +275,8 @@ async function main() {
 
   let abortController: AbortController | undefined;
   let stopping = false;
+  let thinkingMode: ThinkingMode = "full";
+  let verbose = false;
 
   process.on("SIGINT", () => {
     if (stopping) process.exit(0);
@@ -254,9 +288,9 @@ async function main() {
 
   try {
     while (!stopping) {
-      const currentContextTokens = estimateContextUsage();
+      const currentContextTokens = await estimateContextUsage(graph, THREAD_ID);
       const contextLine = renderContextBar(currentContextTokens, config.contextWindowTokens);
-      const input = await readInput(contextLine);
+      let input = await readInput(contextLine);
       if (stopping) break;
       if (!input.trim()) continue;
 
@@ -267,21 +301,70 @@ async function main() {
             printHelp();
             continue;
           case "/status":
-            printStatus();
+            printStatus(thinkingMode, verbose);
             continue;
           case "/clear":
             transcript = "";
             printBanner();
             continue;
           case "/context": {
-            const contextTokens = estimateContextUsage();
+            const contextTokens = await estimateContextUsage(graph, THREAD_ID);
             appendTranscript(`${renderContextBar(contextTokens, config.contextWindowTokens)}\n\n`);
             continue;
           }
+          case "/stop":
+            appendTranscript(chalk.dim("[ultron] no active generation to stop.\n\n"));
+            continue;
+          case "/retry": {
+            const retryInput = await prepareRetry(graph, THREAD_ID);
+            if (!retryInput) {
+              appendTranscript(chalk.yellow("[ultron] nothing to retry yet.\n\n"));
+              continue;
+            }
+            input = retryInput;
+            break;
+          }
+          case "/compact": {
+            const result = await compactThread(graph, THREAD_ID);
+            appendTranscript(
+              result.compacted
+                ? chalk.dim(`[ultron] compacted ${result.before} messages into ${result.after} context messages.\n\n`)
+                : chalk.dim("[ultron] not enough history to compact yet.\n\n"),
+            );
+            continue;
+          }
+          case "/think":
+            appendTranscript(chalk.dim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
+            continue;
+          case "/verbose":
+            appendTranscript(chalk.dim(`[ultron] verbose is ${verbose ? "on" : "off"} (use /verbose on|off).\n\n`));
+            continue;
           case "/quit":
             stopping = true;
             continue;
           default:
+            if (command.startsWith("/think ")) {
+              const mode = command.slice("/think ".length).trim();
+              if (mode === "on" || mode === "full") thinkingMode = "full";
+              else if (mode === "low") thinkingMode = "low";
+              else if (mode === "off") thinkingMode = "off";
+              else {
+                appendTranscript(chalk.yellow("[ultron] use /think on, /think low or /think off.\n\n"));
+                continue;
+              }
+              appendTranscript(chalk.dim(`[ultron] reasoning mode set to ${thinkingMode}.\n\n`));
+              continue;
+            }
+            if (command === "/verbose on" || command === "/verbose true") {
+              verbose = true;
+              appendTranscript(chalk.dim("[ultron] verbose on.\n\n"));
+              continue;
+            }
+            if (command === "/verbose off" || command === "/verbose false") {
+              verbose = false;
+              appendTranscript(chalk.dim("[ultron] verbose off.\n\n"));
+              continue;
+            }
             appendTranscript(chalk.yellow(`[ultron] unknown command: ${input.trim()} — try /help\n\n`));
             continue;
         }
@@ -289,11 +372,13 @@ async function main() {
 
       abortController = new AbortController();
       const turnStarted = Date.now();
+      const disarmStopCommand = armStopCommand(abortController);
 
       try {
         const stream = await graph.stream(
-          { messages: [new HumanMessage(input)] },
+          { messages: command === "/retry" ? [] : [new HumanMessage(input)] },
           {
+            configurable: { thread_id: THREAD_ID, thinking: thinkingMode },
             signal: abortController.signal,
             streamMode: "messages",
           },
@@ -370,13 +455,16 @@ async function main() {
 
         const elapsedSeconds = (Date.now() - turnStarted) / 1000;
         const generatedTokens = Math.max(1, Math.round(generatedChars / 4));
-        appendTranscript(chalk.dim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ≈${generatedTokens.toLocaleString()} tokens\n\n`));
+        if (verbose) appendTranscript(chalk.dim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ≈${generatedTokens.toLocaleString()} tokens\n\n`));
+        renderScreen("", 0, contextLine);
       } catch (err) {
         if (abortController.signal.aborted) {
           appendTranscript("\n\n");
           break;
         }
         appendTranscript(chalk.red(`[ultron] error: ${err instanceof Error ? err.message : String(err)}\n\n`));
+      } finally {
+        disarmStopCommand();
       }
     }
   } finally {

@@ -2,12 +2,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
+import { MemorySaver, REMOVE_ALL_MESSAGES } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
-import { AIMessage } from "@langchain/core/messages";
-import type { BaseMessageLike } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, RemoveMessage, SystemMessage } from "@langchain/core/messages";
+import type { BaseMessage, BaseMessageLike } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { ZodObject, ZodRawShape } from "zod";
-import { createNemotronModel } from "../llm/nemotron.js";
+import { createNemotronModel, type ThinkingMode } from "../llm/nemotron.js";
 import { tools } from "../tools/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -54,8 +55,13 @@ export function estimateTokens(text: string): number {
 
 // Without database checkpointing, only the durable MEMORY.md content
 // contributes to the context gauge between turns.
-export function estimateContextUsage(): number {
-  return estimateTokens(buildSystemPrompt());
+export async function estimateContextUsage(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<number> {
+  const state = await graph.getState({ configurable: { thread_id: threadId } });
+  const messages = state.values.messages ?? [];
+  return estimateTokens(buildSystemPrompt()) + messages.reduce((sum: number, message: BaseMessage) => {
+    const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+    return sum + estimateTokens(content);
+  }, 0);
 }
 
 function routeAfterAgent(state: typeof MessagesAnnotation.State) {
@@ -115,8 +121,13 @@ function sanitizeHistory(messages: BaseMessageLike[]): BaseMessageLike[] {
 }
 
 export function buildGraph() {
-  const baseModel = createNemotronModel();
-  const model = tools.length > 0 ? baseModel.bindTools(tools) : baseModel;
+  const fullThinkingModel = createNemotronModel("full");
+  const lowThinkingModel = createNemotronModel("low");
+  const noThinkingModel = createNemotronModel("off");
+  const fullModel = tools.length > 0 ? fullThinkingModel.bindTools(tools) : fullThinkingModel;
+  const lowModel = tools.length > 0 ? lowThinkingModel.bindTools(tools) : lowThinkingModel;
+  const noModel = tools.length > 0 ? noThinkingModel.bindTools(tools) : noThinkingModel;
+  const checkpointer = new MemorySaver();
 
   const graph = new StateGraph(MessagesAnnotation)
     .addNode("agent", async (state, runConfig) => {
@@ -124,6 +135,8 @@ export function buildGraph() {
         { role: "system" as const, content: buildSystemPrompt() },
         ...sanitizeHistory(state.messages),
       ];
+      const thinkingMode = (runConfig.configurable?.thinking as ThinkingMode | undefined) ?? "full";
+      const model = thinkingMode === "off" ? noModel : thinkingMode === "low" ? lowModel : fullModel;
 
       // Only the first attempt streams live — runConfig carries the
       // callback manager LangGraph uses to forward per-token chunks to the
@@ -177,5 +190,73 @@ export function buildGraph() {
     .addConditionalEdges("agent", routeAfterAgent, ["tools", END])
     .addEdge("tools", "agent");
 
-  return graph.compile();
+  return graph.compile({ checkpointer });
+}
+
+type CompactionResult = {
+  compacted: boolean;
+  before: number;
+  after: number;
+};
+
+function messageText(message: BaseMessage): string {
+  const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+  return `${message.getType()}: ${content}`;
+}
+
+export async function compactThread(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<CompactionResult> {
+  const config = { configurable: { thread_id: threadId } };
+  const state = await graph.getState(config);
+  const messages = state.values.messages ?? [];
+  const before = messages.length;
+  if (before < 6) return { compacted: false, before, after: before };
+
+  let keepFrom = Math.max(0, before - 6);
+  while (keepFrom > 0 && messages[keepFrom].getType() !== "human") keepFrom--;
+  const oldMessages = messages.slice(0, keepFrom);
+  const recentMessages = messages.slice(keepFrom);
+  if (oldMessages.length < 2) return { compacted: false, before, after: before };
+
+  const summarizer = createNemotronModel("low");
+  const summaryResponse = await summarizer.invoke([
+    new SystemMessage(
+      "Summarize the conversation for future context. Keep concrete facts, decisions, " +
+        "unfinished tasks, file paths, errors and user preferences. Omit greetings, " +
+        "repetition and hidden reasoning. Return only the concise summary in plain text.",
+    ),
+    new HumanMessage(oldMessages.map(messageText).join("\n\n")),
+  ]);
+  const summary = typeof summaryResponse.content === "string" ? summaryResponse.content.trim() : JSON.stringify(summaryResponse.content);
+  await graph.updateState(config, {
+    messages: [
+      new RemoveMessage({ id: REMOVE_ALL_MESSAGES }),
+      new SystemMessage(`[Conversation summary — generated by /compact]\n${summary}`),
+      ...recentMessages,
+    ],
+  });
+
+  return { compacted: true, before, after: recentMessages.length + 1 };
+}
+
+export async function prepareRetry(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<string | undefined> {
+  const config = { configurable: { thread_id: threadId } };
+  const state = await graph.getState(config);
+  const messages = state.values.messages ?? [];
+  let humanIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].getType() === "human") {
+      humanIndex = i;
+      break;
+    }
+  }
+  if (humanIndex < 0) return undefined;
+
+  const content = messages[humanIndex].content;
+  const lastUserMessage = typeof content === "string" ? content : JSON.stringify(content);
+  const removals = messages
+    .slice(humanIndex + 1)
+    .filter((message: BaseMessage) => message.id)
+    .map((message: BaseMessage) => new RemoveMessage({ id: message.id! }));
+  if (removals.length) await graph.updateState(config, { messages: removals });
+  return lastUserMessage;
 }

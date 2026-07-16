@@ -17,6 +17,7 @@ The current version provides a terminal conversation loop with:
 - a human-readable `MEMORY.md` for durable facts, preferences and context;
 - token streaming, elapsed-time statistics and an estimated context gauge;
 - basic terminal Markdown styling, including `**bold**` text;
+- local slash commands for stopping, retrying, compacting and tuning reasoning;
 - eleven tools for shell commands, files, HTTP/web requests and processes;
 - declared tool scopes (`read`, `write`, `destructive`) for architectural clarity;
 - retry handling for transient API errors and malformed plain-text tool calls;
@@ -78,6 +79,27 @@ pnpm start        # run the compiled application
 There are currently no automated tests or lint script. The first tests should
 cover graph routing, retry and fake-tool-call handling, tool behavior,
 interruption and classic file memory.
+
+## Local commands
+
+The terminal handles these commands without sending them to Nemotron:
+
+| Command | Purpose |
+| --- | --- |
+| `/help` | Show available commands |
+| `/status` | Show model, memory, tool and runtime status |
+| `/context` | Show current context usage |
+| `/stop` | Stop the active generation while it is running |
+| `/retry` | Remove the previous assistant turn and run the last user message again |
+| `/compact` | Summarize old session messages and keep the recent turns |
+| `/think on\|low\|off` | Enable full reasoning, low-effort reasoning, or no reasoning |
+| `/verbose on\|off` | Show or hide elapsed time and estimated generated tokens |
+| `/clear` | Clear the terminal display |
+| `/quit` | Exit ULTRON |
+
+Press Tab after starting a slash command to accept its completion. `/stop` can
+also be typed while Nemotron is generating; Ctrl+C remains available as the
+immediate interrupt.
 
 ## Repository map
 
