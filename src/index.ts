@@ -8,6 +8,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { getCheckpointer } from "./memory/checkpointer.js";
 import { buildGraph, estimateContextUsage } from "./agent/graph.js";
 import { config } from "./config.js";
+import { tools } from "./tools/index.js";
 import { MarkdownStreamRenderer } from "./ui/markdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -56,6 +57,24 @@ function printBanner() {
   console.log();
 }
 
+function printHelp() {
+  console.log(chalk.dim("  local commands"));
+  console.log(`  ${chalk.cyanBright("/help")}     show this help`);
+  console.log(`  ${chalk.cyanBright("/status")}   show model, memory and tool status`);
+  console.log(`  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner`);
+  console.log(`  ${chalk.cyanBright("/context")}  show the current context usage`);
+  console.log(`  ${chalk.cyanBright("/quit")}     stop ULTRON`);
+  console.log();
+}
+
+function printStatus() {
+  console.log(`  ${chalk.dim("model")}    ${config.nemotronModel}`);
+  console.log(`  ${chalk.dim("memory")}   connected · thread ${THREAD_ID}`);
+  console.log(`  ${chalk.dim("tools")}    ${tools.length} available`);
+  console.log(`  ${chalk.dim("status")}   ${chalk.greenBright("ready")}`);
+  console.log();
+}
+
 async function main() {
   printBanner();
 
@@ -80,6 +99,34 @@ async function main() {
       const input = await rl.question(`${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `);
       if (stopping) break;
       if (!input.trim()) continue;
+
+      const command = input.trim().toLowerCase();
+      if (command.startsWith("/")) {
+        switch (command) {
+          case "/help":
+            printHelp();
+            continue;
+          case "/status":
+            printStatus();
+            continue;
+          case "/clear":
+            stdout.write("\x1b[2J\x1b[H");
+            printBanner();
+            continue;
+          case "/context": {
+            const contextTokens = await estimateContextUsage(graph, THREAD_ID);
+            console.log(renderContextBar(contextTokens, config.contextWindowTokens));
+            console.log();
+            continue;
+          }
+          case "/quit":
+            stopping = true;
+            continue;
+          default:
+            console.log(chalk.yellow(`[ultron] unknown command: ${input.trim()} — try /help`));
+            continue;
+        }
+      }
 
       abortController = new AbortController();
       const turnStarted = Date.now();
