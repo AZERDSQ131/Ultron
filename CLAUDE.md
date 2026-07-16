@@ -104,7 +104,19 @@ mais ne sont pas implémentées.
   sécurité) qui injecte une directive `<task_mode>` juste avant le tour
   courant (`taskModeDirective` dans `graph.ts`, propagé par
   `configurable.taskMode` depuis `/api/turn` et `/api/approve`) — un mode
-  choisi par l'utilisateur plutôt qu'une inférence du modèle.
+  choisi par l'utilisateur plutôt qu'une inférence du modèle. Un second
+  rappel plus court (`taskModeReminder`) est en plus ajouté après tout
+  l'historique, juste avant l'appel au modèle, car un run réel a montré
+  que la directive seule en tête du system prompt ne suffisait pas
+  toujours (six recherches avant le premier `todo_write`) ; ce rappel
+  change de formulation selon que `todo_write` a déjà été appelé ou non
+  dans le tour courant (`todoStartedThisTurn`). La détection des faux
+  appels d'outils écrits en texte (`extractFakeToolCall`) a aussi été
+  généralisée : elle reconnaît maintenant n'importe quel outil (pas
+  seulement `schedule_task`) sous trois formes, y compris encadré par
+  `<tool_call>...</tool_call>` ou une fence ```json — un vrai `todo_write`
+  émis sous cette forme atterrissait auparavant comme réponse finale
+  cassée au lieu d'être exécuté ou corrigé par un retry.
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
   au démarrage ; ils ne doivent pas être fusionnés.
 - `PLAN.md`, `README.md` et `docs/agent-ia-personnel.md` : périmètre,

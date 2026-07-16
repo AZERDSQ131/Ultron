@@ -101,6 +101,38 @@ starts or finishes.`;
   return "";
 }
 
+// A one-line version of taskModeDirective, appended as the very last
+// message before invoking the model instead of only living inside the
+// (potentially long) system prompt at position 0. Recency matters here: a
+// real run had the directive in place yet still did six web_search calls
+// before ever touching todo_write — the instruction was correct but
+// buried behind a lot of history the model apparently weighted more than
+// a system message from the start of the context. Wording adapts to
+// whether todo_write already ran this turn, so it doesn't keep repeating
+// "before your first tool call" once that's no longer true.
+function taskModeReminder(mode: TaskMode, todoStartedThisTurn: boolean): string {
+  if (mode === "none") return "";
+  if (!todoStartedThisTurn) {
+    return `[ultron:task_mode=${mode}] Reminder: call todo_write now, before any other tool call, laying out the ${mode === "plan" ? "full detailed breakdown" : "sub-tasks"} of this request. Do this before searching, fetching, or running anything else.`;
+  }
+  return `[ultron:task_mode=${mode}] Reminder: keep the to-do list from earlier in this turn current — call todo_write with the full updated list whenever a step's status changes.`;
+}
+
+// Scans back from the end of the thread to the most recent human message,
+// checking whether any AI turn in between already called todo_write — i.e.
+// whether this turn already has a list going, for taskModeReminder above.
+function todoStartedThisTurn(messages: BaseMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.getType() === "human") return false;
+    if (message.getType() === "ai") {
+      const calls = (message as AIMessage).tool_calls ?? [];
+      if (calls.some((call) => call.name === "todo_write")) return true;
+    }
+  }
+  return false;
+}
+
 function buildSystemPrompt(threadId?: string, taskMode: TaskMode = "none"): string {
   const chat = threadId ? chatRegistryForPrompt.get(threadId) : undefined;
   const owner = chat?.agentId ? agentRegistry.getAgent(chat.agentId) : undefined;
@@ -162,42 +194,76 @@ function routeAfterAgent(state: typeof MessagesAnnotation.State) {
 const RETRYABLE_ERROR = /resourceexhausted|rate.?limit/i;
 const RETRY_BASE_DELAY_MS = 1000;
 
-// Nemotron occasionally "calls" a tool by writing its JSON arguments as
-// plain reply text instead of using the real tool_calls mechanism — no
-// tool actually runs. Detect the pattern from each tool's own zod schema
-// (so it generalizes as tools are added) and force a fresh retry rather than
-// ever accepting a malformed "call".
-const toolArgKeySets = tools.map(
-  (t) => new Set(Object.keys((t.schema as ZodObject<ZodRawShape>).shape)),
+// Nemotron occasionally "calls" a tool by writing its arguments as plain
+// reply text instead of using the real tool_calls mechanism — no tool
+// actually runs. Seen in the wild in three shapes, from loosest to most
+// structured:
+//   1. a bare arguments object, e.g. {"items": [...]}
+//   2. Hermes-style, e.g. {"name": "todo_write", "arguments": {"items": [...]}}
+//   3. name-as-key, e.g. {"todo_write": {"items": [...]}}
+// ...optionally wrapped in a literal <tool_call>...</tool_call> tag and/or a
+// ```json fenced code block, which is how it showed up for todo_write
+// specifically (see AGENT.md's task-mode section) — a fake call in that
+// exact wrapped form used to slip past detection entirely (fenced text
+// doesn't start with "{"), landing on screen as a broken "final answer"
+// instead of ever running or getting salvaged.
+const toolArgKeySets = new Map(
+  tools.map((t) => [t.name, new Set(Object.keys((t.schema as ZodObject<ZodRawShape>).shape))]),
 );
 
-function looksLikeFakeToolCall(content: unknown): boolean {
-  if (typeof content !== "string") return false;
-  const trimmed = content.trim();
-  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
+export interface FakeToolCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+function unwrapFakeToolCallText(content: string): string {
+  let text = content.trim();
+  const tagged = text.match(/^<tool_call>\s*([\s\S]*?)\s*<\/tool_call>$/i);
+  if (tagged) text = tagged[1].trim();
+  const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenced) text = fenced[1].trim();
+  return text;
+}
+
+function extractFakeToolCall(content: unknown): FakeToolCall | undefined {
+  if (typeof content !== "string") return undefined;
+  const trimmed = unwrapFakeToolCallText(content);
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return undefined;
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    return false;
+    return undefined;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+  const obj = parsed as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return undefined;
 
-  const keys = Object.keys(parsed);
-  if (keys.length === 0) return false;
-  return toolArgKeySets.some((argKeys) => keys.every((k) => argKeys.has(k)));
+  // Shape 2: Hermes-style {"name": ..., "arguments": {...}}.
+  if (typeof obj.name === "string" && toolArgKeySets.has(obj.name) && typeof obj.arguments === "object" && obj.arguments !== null && !Array.isArray(obj.arguments)) {
+    return { name: obj.name, args: obj.arguments as Record<string, unknown> };
+  }
+
+  // Shape 3: name-as-key {"<toolName>": {...args}}.
+  if (keys.length === 1 && toolArgKeySets.has(keys[0])) {
+    const value = obj[keys[0]];
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      return { name: keys[0], args: value as Record<string, unknown> };
+    }
+  }
+
+  // Shape 1: bare arguments object matching exactly one tool's schema keys.
+  for (const [name, argKeys] of toolArgKeySets) {
+    if (keys.every((k) => argKeys.has(k))) return { name, args: obj };
+  }
+
+  return undefined;
 }
 
-function parseFakeToolArguments(content: unknown): Record<string, unknown> | undefined {
-  if (typeof content !== "string") return undefined;
-  const trimmed = content.trim();
-  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return undefined;
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
-    return parsed as Record<string, unknown>;
-  } catch { return undefined; }
+function looksLikeFakeToolCall(content: unknown): boolean {
+  return extractFakeToolCall(content) !== undefined;
 }
 
 // Shared across both retry reasons (transient API error, fake tool call) so
@@ -334,9 +400,16 @@ export function buildGraph() {
     .addNode("agent", async (state, runConfig) => {
       const threadId = runConfig.configurable?.thread_id as string | undefined;
       const taskMode = (runConfig.configurable?.taskMode as TaskMode | undefined) ?? "none";
+      const history = sanitizeHistory(state.messages);
+      const taskReminder = taskModeReminder(taskMode, todoStartedThisTurn(state.messages));
       const messages = [
         { role: "system" as const, content: buildSystemPrompt(threadId, taskMode) },
-        ...sanitizeHistory(state.messages),
+        ...history,
+        // Appended after the full history, right before invoking the model,
+        // so it's the most recent thing the model sees — see
+        // taskModeReminder's comment for why this exists on top of the
+        // directive already embedded in the system prompt above.
+        ...(taskReminder ? [{ role: "system" as const, content: taskReminder }] : []),
       ];
       const thinkingMode = (runConfig.configurable?.thinking as ThinkingMode | undefined) ?? "full";
       const model = thinkingMode === "off" ? noModel : thinkingMode === "low" ? lowModel : fullModel;
@@ -379,13 +452,15 @@ export function buildGraph() {
         );
       }
 
-      // Nemotron sometimes emits valid tool arguments as JSON text even
-      // after retries. Salvage the structured schedule request into a real
-      // tool call so the task is not silently discarded.
-      const fakeArgs = response ? parseFakeToolArguments(response.content) : undefined;
-      if (fakeArgs && typeof fakeArgs.name === "string" && typeof fakeArgs.instruction === "string" && (typeof fakeArgs.delaySeconds === "number" || typeof fakeArgs.cron === "string")) {
-        debugLog(`salvaging serialized schedule tool call thread=${String(runConfig.configurable?.thread_id ?? "unknown")} args=${JSON.stringify(fakeArgs)}`);
-        response = new AIMessage({ content: "", tool_calls: [{ name: "schedule_task", args: fakeArgs, id: `schedule-${Date.now()}` }] });
+      // Nemotron sometimes emits a well-formed tool call as text even after
+      // retries (any of the three shapes extractFakeToolCall recognizes).
+      // Salvage it into a real tool call — turning it into an executed
+      // tools-node call and looping back to "agent" — instead of ever
+      // discarding a structured request the model clearly intended to make.
+      const fakeCall = response ? extractFakeToolCall(response.content) : undefined;
+      if (fakeCall) {
+        debugLog(`salvaging serialized tool call thread=${String(runConfig.configurable?.thread_id ?? "unknown")} name=${fakeCall.name} args=${JSON.stringify(fakeCall.args)}`);
+        response = new AIMessage({ content: "", tool_calls: [{ name: fakeCall.name, args: fakeCall.args, id: `${fakeCall.name}-${Date.now()}` }] });
       }
 
       // Never surface a fabricated tool call/result as if it were a real
