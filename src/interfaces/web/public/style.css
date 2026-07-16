@@ -280,6 +280,8 @@ body {
 .agent-toggle { width: 18px; padding: 1px; border: 0; background: transparent; color: var(--text-dimmer); cursor: pointer; }
 .agent-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); }
 .schedule-item small { margin-left: auto; color: var(--text-dimmer); font: var(--fs-2xs) var(--mono); }
+.schedule-item.clickable { cursor: pointer; }
+.schedule-item.clickable:hover { background: var(--bg-raised); }
 .schedule-item button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
 .empty-hint { padding: 8px; color: var(--text-dimmer); font-size: var(--fs-xs); }
 
