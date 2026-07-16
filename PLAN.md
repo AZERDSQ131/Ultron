@@ -104,6 +104,7 @@ interface at a time.
 - Web chats may be owned by an Agent (`agent_id`) while remaining ordinary LangGraph threads.
 - The web UI exposes Agent and scheduled-task panels; schedules use five-field cron expressions and can be enabled or disabled.
 - Schedules are created by the model through the `schedule_task` tool; the web panel is intentionally read-only for scheduled tasks.
+- `schedule_task` supports both recurring cron expressions and one-time delays such as “in one minute”.
 - A lightweight web-process scheduler wakes due schedules, creates an execution chat under the owning Agent, and runs the task with that Agent's instructions. CLI behavior is unchanged.
 
 ## Ground rules carried across every phase
