@@ -356,7 +356,12 @@ async function handleCreateAgent(req: IncomingMessage, res: ServerResponse): Pro
   if (!p?.name?.trim()) { sendJson(res, 400, { error: "name is required" }); return; }
   sendJson(res, 200, { agent: agents.createAgent(p.name.trim(), p.description?.trim() ?? "", p.instructions?.trim() ?? "") });
 }
-async function handleDeleteAgent(res: ServerResponse, id: string): Promise<void> { if (!agents.getAgent(id)) { sendJson(res, 404, { error: "unknown agent" }); return; } agents.deleteAgent(id); sendJson(res, 200, { deleted: true }); }
+async function handleDeleteAgent(res: ServerResponse, id: string): Promise<void> {
+  if (!agents.getAgent(id)) { sendJson(res, 404, { error: "unknown agent" }); return; }
+  for (const chat of chats.list().filter((candidate) => candidate.agentId === id)) chats.delete(chat.id);
+  agents.deleteAgent(id);
+  sendJson(res, 200, { deleted: true });
+}
 async function handleSchedules(res: ServerResponse): Promise<void> { sendJson(res, 200, { schedules: agents.listSchedules() }); }
 async function handleCreateSchedule(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const p = await readJson<{ agentId?: string | null; name?: string; instruction?: string; cron?: string; timezone?: string }>(req);

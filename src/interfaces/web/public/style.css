@@ -282,6 +282,10 @@ body {
 .agent-item .agent-chat-btn { opacity: 0; margin-left: auto; border: 0; border-radius: 4px; padding: 2px 5px; background: var(--accent-soft); color: var(--accent); cursor: pointer; transition: opacity .15s ease; }
 .agent-item:hover .agent-chat-btn, .agent-item:focus-within .agent-chat-btn { opacity: 1; }
 .agent-item .agent-chat-btn:hover { background: var(--accent); color: white; }
+.agent-actions { display: flex; margin-left: auto; opacity: 0; }
+.agent-item:hover .agent-actions, .agent-item:focus-within .agent-actions { opacity: 1; }
+.agent-delete-btn { border: 0; background: transparent; color: var(--text-dimmer); cursor: pointer; padding: 2px 4px; }
+.agent-delete-btn:hover { color: var(--accent); }
 .agent-toggle { width: 18px; padding: 1px; border: 0; background: transparent; color: var(--text-dimmer); cursor: pointer; }
 .agent-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); }
 .schedule-item small { margin-left: auto; color: var(--text-dimmer); font: var(--fs-2xs) var(--mono); }
@@ -934,14 +938,104 @@ footer {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-#thinking-mode {
+/* Reasoning mode — a real button that opens a small popover menu, instead
+   of a native <select> that couldn't carry the per-mode description or
+   match the rest of the app's custom controls. */
+.thinking-control {
+  position: relative;
+  flex: none;
+}
+
+.thinking-btn {
   font-family: var(--mono);
   font-size: var(--fs-xs);
+  display: flex;
+  align-items: center;
+  gap: 6px;
   background: transparent;
   color: var(--text-dim);
   border: 1px solid var(--line);
   border-radius: 7px;
-  padding: 6px 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.thinking-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dimmer);
+}
+.thinking-btn[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  background: var(--accent-soft);
+}
+
+.thinking-btn-icon {
+  font-size: 8px;
+  color: var(--accent);
+}
+.thinking-btn[data-mode="off"] .thinking-btn-icon {
+  color: var(--text-dimmer);
+}
+.thinking-btn[data-mode="low"] .thinking-btn-icon {
+  color: var(--warn);
+}
+
+.thinking-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 6px;
+  box-shadow: var(--shadow);
+  animation: rise 0.15s ease both;
+  z-index: 10;
+}
+/* Same (0,1,0)-specificity tie as .overlay[hidden] elsewhere in this file —
+   without this, [hidden] loses to the display: flex above and the "closed"
+   menu stays visible and clickable. */
+.thinking-menu[hidden] {
+  display: none;
+}
+
+.thinking-option {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.thinking-option:hover {
+  background: var(--bg-raised);
+}
+.thinking-option.active {
+  background: var(--accent-soft);
+}
+.thinking-option-title {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.thinking-option.active .thinking-option-title {
+  color: var(--accent);
+  font-weight: 700;
+}
+.thinking-option-desc {
+  font-family: var(--sans);
+  font-size: var(--fs-xs);
+  color: var(--text-dimmer);
 }
 
 #input {
