@@ -264,8 +264,13 @@ body {
 }
 .agent-block { margin-bottom: 5px; }
 .agent-conversations { display: flex; flex-direction: column; gap: 2px; padding: 0 0 4px 20px; }
+.agent-chat-row { display: flex; align-items: center; min-width: 0; border-radius: var(--radius-md); }
 .agent-chat-entry { overflow: hidden; padding: 6px 8px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-dim); cursor: pointer; text-align: left; text-overflow: ellipsis; white-space: nowrap; font: var(--fs-sm) var(--sans); }
 .agent-chat-entry:hover, .agent-chat-entry.active { background: var(--bg-raised); color: var(--text); }
+.agent-chat-actions { display: flex; margin-left: auto; opacity: 0; }
+.agent-chat-row:hover .agent-chat-actions, .agent-chat-row:focus-within .agent-chat-actions { opacity: 1; }
+.agent-chat-actions button { padding: 3px; border: 0; background: transparent; color: var(--text-dimmer); cursor: pointer; }
+.agent-chat-actions button:hover { color: var(--accent); }
 .agent-empty { padding: 3px 8px; color: var(--text-dimmer); font-size: var(--fs-xs); }
 
 #automation-panel { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
