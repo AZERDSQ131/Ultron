@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START } from "@langchain/langgraph";
@@ -18,6 +18,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const soul = readFileSync(join(__dirname, "..", "..", "SOUL.md"), "utf-8");
 const agentNotes = readFileSync(join(__dirname, "..", "..", "AGENT.md"), "utf-8");
 const memoryPath = join(__dirname, "..", "..", "MEMORY.md");
+const debugLogPath = join(__dirname, "..", "..", "ultron-web.log");
+function debugLog(message: string): void {
+  const line = `[${new Date().toISOString()}] [graph] ${message}`;
+  console.error(line);
+  try { appendFileSync(debugLogPath, `${line}\n`); } catch { /* diagnostics must never break the graph */ }
+}
 
 // SOUL.md is personality only; AGENT.md carries the tool-use protocol and
 // every other operational rule. Keep that split — don't fold either back
@@ -159,6 +165,7 @@ export function buildGraph() {
       ];
       const thinkingMode = (runConfig.configurable?.thinking as ThinkingMode | undefined) ?? "full";
       const model = thinkingMode === "off" ? noModel : thinkingMode === "low" ? lowModel : fullModel;
+      debugLog(`agent start thread=${String(runConfig.configurable?.thread_id ?? "unknown")} thinking=${thinkingMode} messages=${state.messages.length}`);
 
       // Only the first attempt streams live — runConfig carries the
       // callback manager LangGraph uses to forward per-token chunks to the
@@ -176,8 +183,10 @@ export function buildGraph() {
         const invokeConfig = attempt === 1 ? runConfig : silentConfig;
         try {
           response = await model.invoke(messages, invokeConfig);
+          debugLog(`model response attempt=${attempt} thread=${String(runConfig.configurable?.thread_id ?? "unknown")} toolCalls=${response.tool_calls?.length ?? 0} content=${JSON.stringify(String(response.content).slice(0, 500))}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
+          debugLog(`model error attempt=${attempt} thread=${String(runConfig.configurable?.thread_id ?? "unknown")} error=${message}`);
           if (!RETRYABLE_ERROR.test(message) || attempt === MAX_ATTEMPTS || runConfig.signal?.aborted) throw err;
           const delay = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
           console.error(
@@ -200,6 +209,7 @@ export function buildGraph() {
       // tool call so the task is not silently discarded.
       const fakeArgs = response ? parseFakeToolArguments(response.content) : undefined;
       if (fakeArgs && typeof fakeArgs.name === "string" && typeof fakeArgs.instruction === "string" && (typeof fakeArgs.delaySeconds === "number" || typeof fakeArgs.cron === "string")) {
+        debugLog(`salvaging serialized schedule tool call thread=${String(runConfig.configurable?.thread_id ?? "unknown")} args=${JSON.stringify(fakeArgs)}`);
         response = new AIMessage({ content: "", tool_calls: [{ name: "schedule_task", args: fakeArgs, id: `schedule-${Date.now()}` }] });
       }
 

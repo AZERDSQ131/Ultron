@@ -1,4 +1,4 @@
-import { createReadStream, existsSync } from "node:fs";
+import { appendFileSync, createReadStream, existsSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -23,6 +23,12 @@ import { summarizeToolCall } from "../../core/tools/summarize.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
+const debugLogPath = join(__dirname, "..", "..", "..", "ultron-web.log");
+function debugLog(message: string): void {
+  const line = `[${new Date().toISOString()}] [web] ${message}`;
+  console.error(line);
+  try { appendFileSync(debugLogPath, `${line}\n`); } catch { /* diagnostics must never break the server */ }
+}
 
 const graph = buildGraph();
 const chats = getChatRegistry(config.databasePath);
@@ -140,10 +146,10 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   }
   if (!requireChat(res, payload.chatId)) return;
   const chatId = payload.chatId as string;
-
   const thinkingMode: ThinkingMode = payload.thinking ?? "full";
   const isRetry = payload.retry === true;
   let input = payload.text ?? "";
+  debugLog(`turn received chat=${chatId} retry=${isRetry} text=${JSON.stringify(input)}`);
 
   if (isRetry) {
     const retryInput = await prepareRetry(graph, chatId);
@@ -195,6 +201,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
 
       if (type === "tool") {
         const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
+        debugLog(`tool result chat=${chatId} name=${toolName} content=${JSON.stringify(String(chunk.content).slice(0, 500))}`);
         const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
         if (pending) {
           sseWrite(res, "tool_call", { name: pending.name, summary: summarizeToolCall(pending.name, pending.args) });
@@ -212,6 +219,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
       ).tool_call_chunks;
 
       if (toolCallChunks?.length) {
+        debugLog(`tool call chunks chat=${chatId} chunks=${JSON.stringify(toolCallChunks)}`);
         for (const tc of toolCallChunks) {
           const key = tc.index ?? tc.id ?? tc.name ?? 0;
           const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
@@ -239,6 +247,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     const contextTokens = await estimateContextUsage(graph, chatId);
     sseWrite(res, "done", { elapsedSeconds, generatedTokens, contextTokens, maxTokens: config.contextWindowTokens });
   } catch (err) {
+    debugLog(`turn error chat=${chatId} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`);
     if (abortController.signal.aborted) {
       sseWrite(res, "aborted", {});
     } else {
@@ -360,12 +369,13 @@ async function handleDeleteSchedule(res: ServerResponse, id: string): Promise<vo
 
 async function runDueSchedules(): Promise<void> {
   for (const task of agents.getDueSchedules()) {
+    debugLog(`scheduler picked id=${task.id} name=${task.name} agent=${task.agentId ?? "ultron"}`);
     agents.markRun(task.id);
     const owner = task.agentId ? agents.getAgent(task.agentId) : undefined;
     const execution = chats.create(`Scheduled: ${task.name}`, task.agentId);
     const prompt = `${owner?.instructions ? `${owner.instructions}\n\n` : ""}This is a scheduled task. Execute it now and report exactly what happened.\n\nTask: ${task.instruction}`;
     try { await graph.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: execution.id, thinking: "low" } }); }
-    catch (err) { console.error(`[ultron-web] scheduled task failed (${task.name}):`, err); }
+    catch (err) { debugLog(`scheduled task failed name=${task.name} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`); }
   }
 }
 
