@@ -136,6 +136,12 @@ export async function createNewChat() {
   await selectChat(data.chat.id);
 }
 
+export async function createAgentChat(agent) {
+  const data = await api.createChat(undefined, agent.id);
+  await loadChats();
+  await selectChat(data.chat.id);
+}
+
 export async function loadChats() {
   const data = await api.listChats();
   state.chatsCache = data.chats;

@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { state } from "./store.js";
+import { createAgentChat } from "./chatList.js";
 
 const panel = document.getElementById("automation-panel");
 const agentList = document.getElementById("agent-list");
@@ -20,7 +21,11 @@ function openDialog() {
 }
 function closeDialog() { dialog.hidden = true; }
 function render() {
-  agentList.innerHTML = agents.length ? agents.map((a) => `<div class="automation-item"><span class="agent-dot"></span><span title="${a.description}">${a.name}</span></div>`).join("") : '<div class="empty-hint">No agents</div>';
+  agentList.innerHTML = agents.length ? agents.map((a) => `<div class="automation-item agent-item"><span class="agent-dot"></span><span class="agent-name" title="${a.description}">${a.name}</span><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">↗</button></div>`).join("") : '<div class="empty-hint">No agents</div>';
+  agentList.querySelectorAll(".agent-chat-btn").forEach((button) => button.addEventListener("click", async () => {
+    const agent = agents.find((candidate) => candidate.id === button.dataset.agentId);
+    if (agent) await createAgentChat(agent);
+  }));
 }
 async function load() {
   const [agentData, scheduleData] = await Promise.all([api.listAgents(), api.listSchedules()]);

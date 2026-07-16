@@ -9,11 +9,11 @@ async function json(res) {
 
 export const api = {
   listChats: () => fetch("/api/chats").then(json),
-  createChat: (title) =>
+  createChat: (title, agentId = null) =>
     fetch("/api/chats", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(title ? { title } : {}),
+      body: JSON.stringify({ ...(title ? { title } : {}), ...(agentId ? { agentId } : {}) }),
     }).then(json),
   renameChat: (id, title) =>
     fetch(`/api/chats/${encodeURIComponent(id)}`, {

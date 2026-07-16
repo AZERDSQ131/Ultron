@@ -269,6 +269,9 @@ body {
 .automation-item { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: var(--radius-md); color: var(--text-dim); font-size: var(--fs-sm); }
 .automation-item:hover { background: var(--bg-raised); }
 .automation-item span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-item .agent-chat-btn { opacity: 0; margin-left: auto; border: 0; border-radius: 4px; padding: 2px 5px; background: var(--accent-soft); color: var(--accent); cursor: pointer; transition: opacity .15s ease; }
+.agent-item:hover .agent-chat-btn, .agent-item:focus-within .agent-chat-btn { opacity: 1; }
+.agent-item .agent-chat-btn:hover { background: var(--accent); color: white; }
 .agent-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); }
 .schedule-item small { margin-left: auto; color: var(--text-dimmer); font: var(--fs-2xs) var(--mono); }
 .schedule-item button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
