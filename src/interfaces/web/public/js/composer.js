@@ -19,8 +19,12 @@ const composer = document.getElementById("composer");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send-btn");
 const stopBtn = document.getElementById("stop-btn");
-const thinkingSelect = document.getElementById("thinking-mode");
+const thinkingBtn = document.getElementById("thinking-btn");
+const thinkingBtnLabel = document.getElementById("thinking-btn-label");
+const thinkingMenu = document.getElementById("thinking-menu");
+const thinkingOptions = [...thinkingMenu.querySelectorAll(".thinking-option")];
 const thinkingSelectSettings = document.getElementById("thinking-select-settings");
+const THINKING_LABELS = { full: "Full", low: "Low", off: "Off" };
 const verboseToggle = document.getElementById("verbose-toggle");
 const commandMenu = document.getElementById("command-menu");
 
@@ -150,14 +154,67 @@ input.addEventListener("blur", () => {
   setTimeout(closeCommandMenu, 120);
 });
 
-thinkingSelect.addEventListener("change", () => {
-  state.thinkingMode = thinkingSelect.value;
-  thinkingSelectSettings.value = thinkingSelect.value;
+function closeThinkingMenu() {
+  thinkingMenu.hidden = true;
+  thinkingBtn.setAttribute("aria-expanded", "false");
+}
+
+function openThinkingMenu() {
+  thinkingMenu.hidden = false;
+  thinkingBtn.setAttribute("aria-expanded", "true");
+  (thinkingOptions.find((opt) => opt.dataset.value === state.thinkingMode) ?? thinkingOptions[0])?.focus();
+}
+
+// Single source of truth for the reasoning mode — keeps the composer
+// button, its popover menu, and the settings panel's mirrored <select> all
+// in sync, and is what /think and the palette-driven command both call
+// into instead of poking each control separately.
+export function setThinkingMode(mode) {
+  state.thinkingMode = mode;
+  thinkingBtn.dataset.mode = mode;
+  thinkingBtnLabel.textContent = THINKING_LABELS[mode] ?? mode;
+  thinkingSelectSettings.value = mode;
+  for (const opt of thinkingOptions) {
+    const active = opt.dataset.value === mode;
+    opt.classList.toggle("active", active);
+    opt.setAttribute("aria-selected", String(active));
+  }
+}
+
+thinkingBtn.addEventListener("click", () => {
+  thinkingMenu.hidden ? openThinkingMenu() : closeThinkingMenu();
 });
-thinkingSelectSettings.addEventListener("change", () => {
-  state.thinkingMode = thinkingSelectSettings.value;
-  thinkingSelect.value = thinkingSelectSettings.value;
+
+thinkingMenu.addEventListener("keydown", (e) => {
+  const currentIndex = thinkingOptions.indexOf(document.activeElement);
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    thinkingOptions[(currentIndex + 1) % thinkingOptions.length]?.focus();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    thinkingOptions[(currentIndex - 1 + thinkingOptions.length) % thinkingOptions.length]?.focus();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeThinkingMenu();
+    thinkingBtn.focus();
+  }
 });
+
+for (const opt of thinkingOptions) {
+  opt.addEventListener("click", () => {
+    setThinkingMode(opt.dataset.value);
+    closeThinkingMenu();
+    thinkingBtn.focus();
+  });
+}
+
+document.addEventListener("click", (e) => {
+  if (!thinkingMenu.hidden && !thinkingMenu.contains(e.target) && e.target !== thinkingBtn) closeThinkingMenu();
+});
+
+thinkingSelectSettings.addEventListener("change", () => setThinkingMode(thinkingSelectSettings.value));
+
+setThinkingMode(state.thinkingMode);
 verboseToggle.addEventListener("change", () => {
   state.verbose = verboseToggle.checked;
 });
@@ -289,7 +346,7 @@ async function runCommand(raw) {
       const data = await api.status(state.activeChatId);
       addSystemNote(
         `[ultron] model ${data.model} · chat ${state.activeChatId} · ${data.toolCount} tools · ` +
-          `think ${thinkingSelect.value} · verbose ${state.verbose ? "on" : "off"} · status ready`,
+          `think ${state.thinkingMode} · verbose ${state.verbose ? "on" : "off"} · status ready`,
       );
     } catch {
       addSystemNote("[ultron] could not reach the server.", true);
@@ -317,7 +374,7 @@ async function runCommand(raw) {
   if (command === "/think") {
     const mode = arg.toLowerCase();
     if (!mode) {
-      addSystemNote(`[ultron] reasoning mode: ${thinkingSelect.value} (use /think on, /think low or /think off).`);
+      addSystemNote(`[ultron] reasoning mode: ${state.thinkingMode} (use /think on, /think low or /think off).`);
       return;
     }
     const next = mode === "on" || mode === "full" ? "full" : mode === "low" ? "low" : mode === "off" ? "off" : undefined;
@@ -325,9 +382,7 @@ async function runCommand(raw) {
       addSystemNote("[ultron] use /think on, /think low or /think off.", true);
       return;
     }
-    thinkingSelect.value = next;
-    thinkingSelectSettings.value = next;
-    state.thinkingMode = next;
+    setThinkingMode(next);
     addSystemNote(`[ultron] reasoning mode set to ${next}.`);
     return;
   }
