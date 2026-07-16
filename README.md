@@ -17,6 +17,7 @@ The current version provides a terminal conversation loop with:
 - persistent LangGraph checkpoints in a local PostgreSQL database;
 - one persistent thread, `ultron-main`;
 - token streaming, elapsed-time statistics and an estimated context gauge;
+- basic terminal Markdown styling, including `**bold**` text;
 - eleven tools for shell commands, files, HTTP/web requests and processes;
 - declared tool scopes (`read`, `write`, `destructive`) for architectural clarity;
 - retry handling for transient API errors and malformed plain-text tool calls;

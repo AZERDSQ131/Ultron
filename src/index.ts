@@ -8,6 +8,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { getCheckpointer } from "./memory/checkpointer.js";
 import { buildGraph, estimateContextUsage } from "./agent/graph.js";
 import { config } from "./config.js";
+import { MarkdownStreamRenderer } from "./ui/markdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const THREAD_ID = "ultron-main";
@@ -97,6 +98,7 @@ async function main() {
         let inToolCall = false;
         let generatedChars = 0;
         const announcedToolCalls = new Set<string | number>();
+        const markdown = new MarkdownStreamRenderer();
 
         for await (const [chunk] of stream) {
           const type = chunk.getType();
@@ -149,9 +151,10 @@ async function main() {
             stdout.write(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `);
             wrotePrefix = true;
           }
-          stdout.write(chunk.content);
+          stdout.write(markdown.push(chunk.content));
           generatedChars += chunk.content.length;
         }
+        stdout.write(markdown.flush());
         stdout.write("\n\n");
 
         const elapsedSeconds = (Date.now() - turnStarted) / 1000;

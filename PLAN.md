@@ -19,7 +19,7 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 - Persistent memory via LangGraph checkpointing on local Postgres
 - Token-by-token streaming
 - Ctrl+C interrupts cleanly at any point, including mid-response
-- No tools, no Docker, no manual confirmations, no audit logs — explicit choices, see [CLAUDE.md](CLAUDE.md)
+- No Docker, no manual confirmations, no audit logs — explicit choices, see [CLAUDE.md](CLAUDE.md)
 
 ## Phase 2 — Telegram interface
 
