@@ -11,6 +11,7 @@ const newChatBtn = document.getElementById("new-chat-btn");
 const activeChatTitle = document.getElementById("active-chat-title");
 
 let handlers = { onAfterSelect: () => {} };
+const collapsedAgents = new Set();
 
 export function initChatList(injectedHandlers) {
   handlers = injectedHandlers;
@@ -34,7 +35,7 @@ function timeAgo(iso) {
 
 function renderChatList() {
   chatListEl.innerHTML = "";
-  if (state.chatsCache.length === 0) {
+  if (state.chatsCache.length === 0 && state.agentsCache.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-hint";
     empty.textContent = "No chats yet";
@@ -42,7 +43,7 @@ function renderChatList() {
     return;
   }
 
-  state.chatsCache.forEach((chat) => {
+  const renderChat = (chat) => {
     const item = document.createElement("div");
     item.className = "chat-item" + (chat.id === state.activeChatId ? " active" : "");
     item.tabIndex = 0;
@@ -85,8 +86,43 @@ function renderChatList() {
     item.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && chat.id !== state.activeChatId) selectChat(chat.id);
     });
-    chatListEl.appendChild(item);
-  });
+    return item;
+  };
+
+  const rootChats = state.chatsCache.filter((chat) => !chat.agentId);
+  if (rootChats.length > 0) {
+    const heading = document.createElement("div");
+    heading.className = "chat-group-heading root-heading";
+    heading.textContent = "ULTRON";
+    chatListEl.appendChild(heading);
+    rootChats.forEach((chat) => chatListEl.appendChild(renderChat(chat)));
+  }
+
+  for (const agent of state.agentsCache) {
+    const chats = state.chatsCache.filter((chat) => chat.agentId === agent.id);
+    const group = document.createElement("section");
+    group.className = "chat-group";
+    const heading = document.createElement("div");
+    heading.className = "chat-group-heading agent-group-heading";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "group-toggle";
+    toggle.textContent = collapsedAgents.has(agent.id) ? "▸" : "▾";
+    toggle.title = collapsedAgents.has(agent.id) ? "Expand conversations" : "Collapse conversations";
+    const label = document.createElement("span");
+    label.textContent = agent.name;
+    const newButton = document.createElement("button");
+    newButton.type = "button";
+    newButton.className = "group-new-chat";
+    newButton.textContent = "+";
+    newButton.title = `New chat with ${agent.name}`;
+    toggle.addEventListener("click", () => { if (collapsedAgents.has(agent.id)) collapsedAgents.delete(agent.id); else collapsedAgents.add(agent.id); renderChatList(); });
+    newButton.addEventListener("click", async () => { await createAgentChat(agent); });
+    heading.append(toggle, label, newButton);
+    group.appendChild(heading);
+    if (!collapsedAgents.has(agent.id)) chats.forEach((chat) => group.appendChild(renderChat(chat)));
+    chatListEl.appendChild(group);
+  }
 }
 
 function startRenameChat(chat, titleEl) {

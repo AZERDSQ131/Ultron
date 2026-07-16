@@ -262,6 +262,13 @@ body {
   overflow-y: auto;
   margin-top: 6px;
 }
+.chat-group { display: flex; flex-direction: column; gap: 2px; }
+.chat-group-heading { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding: 5px 7px 3px; color: var(--text-dimmer); font: 700 var(--fs-2xs) var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.root-heading { margin-top: 4px; }
+.group-toggle, .group-new-chat { border: 0; background: transparent; color: var(--text-dimmer); cursor: pointer; padding: 1px 4px; }
+.group-toggle { width: 18px; }
+.group-new-chat { margin-left: auto; opacity: 0; color: var(--accent); font-size: 15px; }
+.agent-group-heading:hover .group-new-chat, .agent-group-heading:focus-within .group-new-chat { opacity: 1; }
 
 #automation-panel { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; color: var(--text-dimmer); font: 700 var(--fs-2xs) var(--mono); text-transform: uppercase; letter-spacing: .08em; }
