@@ -67,8 +67,13 @@ export async function estimateContextUsage(graph: ReturnType<typeof buildGraph>,
 }
 
 function routeAfterAgent(state: typeof MessagesAnnotation.State) {
-  const last = state.messages.at(-1) as AIMessage;
-  if (last.tool_calls?.length) return "tools";
+  // LangGraph re-evaluates this conditional edge on any updateState() call
+  // that touches the messages channel, not only after the agent node runs
+  // — including prepareEdit() removing every message from a single-turn
+  // chat, which leaves an empty array here. Guard instead of assuming an
+  // AIMessage is always present.
+  const last = state.messages.at(-1);
+  if (last instanceof AIMessage && last.tool_calls?.length) return "tools";
   return END;
 }
 
@@ -267,9 +272,79 @@ export async function prepareRetry(graph: ReturnType<typeof buildGraph>, threadI
   return lastUserMessage;
 }
 
+// Same removal as prepareRetry, plus the trailing human message itself —
+// backs the web UI's "edit" action on the last user turn: the caller gets
+// the original text back to re-populate the composer with, and the thread
+// is left exactly as if that message had never been sent.
+export async function prepareEdit(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<string | undefined> {
+  const config = { configurable: { thread_id: threadId } };
+  const state = await graph.getState(config);
+  const messages = state.values.messages ?? [];
+  let humanIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].getType() === "human") {
+      humanIndex = i;
+      break;
+    }
+  }
+  if (humanIndex < 0) return undefined;
+
+  const content = messages[humanIndex].content;
+  const lastUserMessage = typeof content === "string" ? content : JSON.stringify(content);
+  const removals = messages
+    .slice(humanIndex)
+    .filter((message: BaseMessage) => message.id)
+    .map((message: BaseMessage) => new RemoveMessage({ id: message.id! }));
+  if (removals.length) await graph.updateState(config, { messages: removals });
+  return lastUserMessage;
+}
+
 export interface ChatMessage {
   role: "human" | "ai";
   content: string;
+}
+
+export interface SearchMatch {
+  chatId: string;
+  role: "human" | "ai";
+  snippet: string;
+  matchIndex: number;
+}
+
+const SEARCH_SNIPPET_RADIUS = 60;
+
+// A message-content search, not a SQL query — the checkpointer stores each
+// chat's history as an opaque serialized blob per LangGraph's own format
+// (see checkpointer.ts), so there's no indexed text column to query
+// directly. This reuses listChatMessages per chat instead of adding a
+// parallel storage path; fine at personal-project scale (single user,
+// dozens of chats, not millions).
+export async function searchMessages(
+  graph: ReturnType<typeof buildGraph>,
+  chatIds: string[],
+  query: string,
+  limit = 50,
+): Promise<Map<string, SearchMatch[]>> {
+  const needle = query.trim().toLowerCase();
+  const results = new Map<string, SearchMatch[]>();
+  if (!needle) return results;
+
+  for (const chatId of chatIds) {
+    const messages = await listChatMessages(graph, chatId);
+    const matches: SearchMatch[] = [];
+    for (const message of messages) {
+      const lower = message.content.toLowerCase();
+      const matchIndex = lower.indexOf(needle);
+      if (matchIndex < 0) continue;
+      const start = Math.max(0, matchIndex - SEARCH_SNIPPET_RADIUS);
+      const end = Math.min(message.content.length, matchIndex + needle.length + SEARCH_SNIPPET_RADIUS);
+      const snippet = `${start > 0 ? "…" : ""}${message.content.slice(start, end)}${end < message.content.length ? "…" : ""}`;
+      matches.push({ chatId, role: message.role, snippet, matchIndex: matchIndex - start + (start > 0 ? 1 : 0) });
+    }
+    if (matches.length) results.set(chatId, matches);
+    if (results.size >= limit) break;
+  }
+  return results;
 }
 
 // Simplified message list for replaying a chat's history in a UI (the web

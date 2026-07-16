@@ -9,13 +9,15 @@ import {
   compactThread,
   estimateContextUsage,
   listChatMessages,
+  prepareEdit,
   prepareRetry,
   resumeThread,
+  searchMessages,
 } from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { getChatRegistry, LEGACY_CHAT_ID } from "../../core/memory/chats.js";
-import { tools } from "../../core/tools/index.js";
+import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -302,6 +304,40 @@ async function handleHealth(res: ServerResponse): Promise<void> {
   });
 }
 
+async function handleEdit(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ chatId?: string }>(req);
+  if (!payload || !requireChat(res, payload.chatId)) return;
+  const content = await prepareEdit(graph, payload.chatId as string);
+  if (content === undefined) {
+    sendJson(res, 400, { error: "nothing to edit yet" });
+    return;
+  }
+  sendJson(res, 200, { content });
+}
+
+async function handleSearch(res: ServerResponse, query: string | undefined): Promise<void> {
+  const q = (query ?? "").trim();
+  if (!q) {
+    sendJson(res, 200, { results: [] });
+    return;
+  }
+  const chatById = new Map(chats.list().map((chat) => [chat.id, chat]));
+  const matches = await searchMessages(graph, [...chatById.keys()], q);
+  const results = [...matches.entries()].map(([chatId, chatMatches]) => ({
+    chatId,
+    chatTitle: chatById.get(chatId)?.title ?? "untitled",
+    updatedAt: chatById.get(chatId)?.updatedAt,
+    matches: chatMatches.slice(0, 3),
+  }));
+  sendJson(res, 200, { results });
+}
+
+async function handleTools(res: ServerResponse): Promise<void> {
+  sendJson(res, 200, {
+    tools: tools.map((t) => ({ name: t.name, scope: toolScopes[t.name] ?? "read", description: t.description })),
+  });
+}
+
 async function handleStatus(res: ServerResponse, chatId: string | undefined): Promise<void> {
   const id = chatId && chats.get(chatId) ? chatId : LEGACY_CHAT_ID;
   const contextTokens = await estimateContextUsage(graph, id);
@@ -362,6 +398,18 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/resume") {
     handleResume(req, res).catch((err) => console.error("[ultron-web] resume handler failed:", err));
+    return;
+  }
+  if (req.method === "POST" && path === "/api/edit") {
+    handleEdit(req, res).catch((err) => console.error("[ultron-web] edit handler failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/search") {
+    handleSearch(res, url.searchParams.get("q") ?? undefined).catch((err) => console.error("[ultron-web] search handler failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/tools") {
+    handleTools(res).catch((err) => console.error("[ultron-web] tools handler failed:", err));
     return;
   }
   if (req.method === "GET" && path === "/api/health") {
