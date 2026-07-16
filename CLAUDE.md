@@ -48,9 +48,9 @@ TypeScript (Node 24+) / pnpm / LangGraph.js / SQLite (`node:sqlite`, no external
 
 ULTRON est un agent IA personnel développé directement par l'utilisateur pour
 conserver la maîtrise de la boucle d'exécution, des outils et de la mémoire.
-La version actuelle fournit une conversation persistante sur un fil unique
-(`ultron-main`), accessible depuis deux interfaces qui partagent le même état :
-le terminal (`src/interfaces/cli/index.ts`) et une interface web locale (`src/interfaces/web/`). Telegram,
+La version actuelle fournit plusieurs conversations persistantes, accessibles
+depuis deux interfaces qui partagent le même état : le terminal
+(`src/interfaces/cli/index.ts`) et une interface web locale (`src/interfaces/web/`). Telegram,
 les intégrations mail/calendrier et l'application de vibe-coding sont prévues
 mais ne sont pas implémentées.
 
@@ -132,7 +132,7 @@ Le compilateur TypeScript est strict et `pnpm typecheck` ainsi que `pnpm build`
 passent actuellement. Aucun test automatisé n'est présent. Les zones les plus
 importantes à couvrir seront le routage agent/outils, les retries et le
 nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
-checkpointer PostgreSQL.
+   checkpointer SQLite.
 
 ## Risques techniques
 
@@ -163,5 +163,8 @@ checkpointer PostgreSQL.
    même `thread_id`, sans démarrer la phase vibe-coding.
 3. Concevoir les intégrations mail/calendrier et leur OAuth avant d'ajouter
    leurs outils.
-4. Corriger les écarts documentaires au fur et à mesure de chaque nouveau
+4. Définir le modèle persistant et le cycle de vie des tâches planifiées avant
+   d'implémenter les crons : exécution non interactive, reprise après arrêt,
+   prévention des chevauchements et rattachement à un chat dédié.
+5. Corriger les écarts documentaires au fur et à mesure de chaque nouveau
    changement de code, conformément à `AGENTS.md`.
