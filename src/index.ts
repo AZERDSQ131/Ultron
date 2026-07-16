@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as readline from "node:readline/promises";
+import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import { HumanMessage } from "@langchain/core/messages";
@@ -15,6 +15,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const THREAD_ID = "ultron-main";
 
 const CONTEXT_BAR_WIDTH = 20;
+const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
+
+let cancelActiveInput: (() => void) | undefined;
 
 function ruleWidth(): number {
   return Math.min(stdout.columns || 80, 76);
@@ -22,6 +25,94 @@ function ruleWidth(): number {
 
 function rule(): string {
   return chalk.dim("─".repeat(ruleWidth()));
+}
+
+function readInput(contextLine: string): Promise<string> {
+  readline.emitKeypressEvents(stdin);
+  stdin.setRawMode?.(true);
+
+  return new Promise((resolve) => {
+    let value = "";
+    let cursor = 0;
+    let finished = false;
+
+    const redrawInput = () => {
+      const afterCursor = value.length - cursor;
+      stdout.write(`\r\x1b[2K${INPUT_PROMPT}${value}`);
+      if (afterCursor > 0) stdout.write(`\x1b[${afterCursor}D`);
+    };
+
+    const finish = (result: string) => {
+      if (finished) return;
+      finished = true;
+      stdin.setRawMode?.(false);
+      stdin.removeListener("keypress", onKeypress);
+      cancelActiveInput = undefined;
+      readline.moveCursor(stdout, 0, 2);
+      stdout.write("\n");
+      resolve(result);
+    };
+
+    const onKeypress = (input: string, key: readline.Key) => {
+      if (key.name === "return" || key.name === "enter") {
+        finish(value);
+        return;
+      }
+      if (key.ctrl && key.name === "d") {
+        process.emit("SIGINT");
+        return;
+      }
+      if (key.name === "backspace") {
+        if (cursor > 0) {
+          value = value.slice(0, cursor - 1) + value.slice(cursor);
+          cursor--;
+          redrawInput();
+        }
+        return;
+      }
+      if (key.name === "delete") {
+        if (cursor < value.length) {
+          value = value.slice(0, cursor) + value.slice(cursor + 1);
+          redrawInput();
+        }
+        return;
+      }
+      if (key.name === "left") {
+        if (cursor > 0) {
+          cursor--;
+          stdout.write("\x1b[1D");
+        }
+        return;
+      }
+      if (key.name === "right") {
+        if (cursor < value.length) {
+          cursor++;
+          stdout.write("\x1b[1C");
+        }
+        return;
+      }
+      if (key.name === "home") {
+        cursor = 0;
+        redrawInput();
+        return;
+      }
+      if (key.name === "end") {
+        cursor = value.length;
+        redrawInput();
+        return;
+      }
+      if (!key.ctrl && !key.meta && input && !input.includes("\n") && !input.includes("\r")) {
+        value = value.slice(0, cursor) + input + value.slice(cursor);
+        cursor += input.length;
+        redrawInput();
+      }
+    };
+
+    cancelActiveInput = () => finish("");
+    stdin.on("keypress", onKeypress);
+    stdout.write(`${rule()}\n${INPUT_PROMPT}\n${contextLine}\n${rule()}`);
+    readline.moveCursor(stdout, 0, -2);
+  });
 }
 
 function contextBarColor(ratio: number): (text: string) => string {
@@ -121,7 +212,6 @@ async function main() {
 
   const checkpointer = await getCheckpointer();
   const graph = buildGraph(checkpointer);
-  const rl = readline.createInterface({ input: stdin, output: stdout });
 
   let abortController: AbortController | undefined;
   let stopping = false;
@@ -131,14 +221,13 @@ async function main() {
     stopping = true;
     console.log(chalk.dim("\n[ultron] stopping..."));
     abortController?.abort();
-    rl.close();
+    cancelActiveInput?.();
   });
 
   try {
     while (!stopping) {
       const currentContextTokens = await estimateContextUsage(graph, THREAD_ID);
-      console.log(renderContextBar(currentContextTokens, config.contextWindowTokens));
-      const input = await rl.question(`${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `);
+      const input = await readInput(renderContextBar(currentContextTokens, config.contextWindowTokens));
       if (stopping) break;
       if (!input.trim()) continue;
 
@@ -265,7 +354,7 @@ async function main() {
       }
     }
   } finally {
-    rl.close();
+    cancelActiveInput?.();
     await checkpointer.end?.();
     console.log(chalk.dim("[ultron] stopped."));
     process.exit(0);
