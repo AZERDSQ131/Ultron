@@ -262,13 +262,11 @@ body {
   overflow-y: auto;
   margin-top: 6px;
 }
-.chat-group { display: flex; flex-direction: column; gap: 2px; }
-.chat-group-heading { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding: 5px 7px 3px; color: var(--text-dimmer); font: 700 var(--fs-2xs) var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-.root-heading { margin-top: 4px; }
-.group-toggle, .group-new-chat { border: 0; background: transparent; color: var(--text-dimmer); cursor: pointer; padding: 1px 4px; }
-.group-toggle { width: 18px; }
-.group-new-chat { margin-left: auto; opacity: 0; color: var(--accent); font-size: 15px; }
-.agent-group-heading:hover .group-new-chat, .agent-group-heading:focus-within .group-new-chat { opacity: 1; }
+.agent-block { margin-bottom: 5px; }
+.agent-conversations { display: flex; flex-direction: column; gap: 2px; padding: 0 0 4px 20px; }
+.agent-chat-entry { overflow: hidden; padding: 6px 8px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-dim); cursor: pointer; text-align: left; text-overflow: ellipsis; white-space: nowrap; font: var(--fs-sm) var(--sans); }
+.agent-chat-entry:hover, .agent-chat-entry.active { background: var(--bg-raised); color: var(--text); }
+.agent-empty { padding: 3px 8px; color: var(--text-dimmer); font-size: var(--fs-xs); }
 
 #automation-panel { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; color: var(--text-dimmer); font: 700 var(--fs-2xs) var(--mono); text-transform: uppercase; letter-spacing: .08em; }
@@ -279,6 +277,7 @@ body {
 .agent-item .agent-chat-btn { opacity: 0; margin-left: auto; border: 0; border-radius: 4px; padding: 2px 5px; background: var(--accent-soft); color: var(--accent); cursor: pointer; transition: opacity .15s ease; }
 .agent-item:hover .agent-chat-btn, .agent-item:focus-within .agent-chat-btn { opacity: 1; }
 .agent-item .agent-chat-btn:hover { background: var(--accent); color: white; }
+.agent-toggle { width: 18px; padding: 1px; border: 0; background: transparent; color: var(--text-dimmer); cursor: pointer; }
 .agent-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); }
 .schedule-item small { margin-left: auto; color: var(--text-dimmer); font: var(--fs-2xs) var(--mono); }
 .schedule-item button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }

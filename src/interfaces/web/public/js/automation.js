@@ -1,6 +1,6 @@
 import { api } from "./api.js";
 import { state } from "./store.js";
-import { createAgentChat } from "./chatList.js";
+import { createAgentChat, selectChat } from "./chatList.js";
 
 const panel = document.getElementById("automation-panel");
 const agentList = document.getElementById("agent-list");
@@ -11,6 +11,7 @@ const title = document.getElementById("automation-dialog-title");
 const description = document.getElementById("automation-description");
 const instructions = document.getElementById("automation-instructions");
 let agents = [];
+const collapsedAgents = new Set();
 
 function openDialog() {
   title.textContent = "New agent";
@@ -21,11 +22,18 @@ function openDialog() {
 }
 function closeDialog() { dialog.hidden = true; }
 function render() {
-  agentList.innerHTML = agents.length ? agents.map((a) => `<div class="automation-item agent-item"><span class="agent-dot"></span><span class="agent-name" title="${a.description}">${a.name}</span><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">↗</button></div>`).join("") : '<div class="empty-hint">No agents</div>';
+  agentList.innerHTML = agents.length ? agents.map((a) => {
+    const agentChats = state.chatsCache.filter((chat) => chat.agentId === a.id);
+    const chats = agentChats.map((chat) => `<button class="agent-chat-entry${chat.id === state.activeChatId ? " active" : ""}" data-chat-id="${chat.id}">${chat.title}</button>`).join("");
+    const collapsed = collapsedAgents.has(a.id);
+    return `<div class="agent-block"><div class="automation-item agent-item"><button class="agent-toggle" data-agent-id="${a.id}" title="${collapsed ? "Expand" : "Collapse"} conversations">${collapsed ? "▸" : "▾"}</button><span class="agent-dot"></span><span class="agent-name" title="${a.description}">${a.name}</span><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">+</button></div>${collapsed ? "" : `<div class="agent-conversations">${chats || '<div class="agent-empty">No conversations</div>'}</div>`}</div>`;
+  }).join("") : '<div class="empty-hint">No agents</div>';
   agentList.querySelectorAll(".agent-chat-btn").forEach((button) => button.addEventListener("click", async () => {
     const agent = agents.find((candidate) => candidate.id === button.dataset.agentId);
     if (agent) await createAgentChat(agent);
   }));
+  agentList.querySelectorAll(".agent-toggle").forEach((button) => button.addEventListener("click", () => { const id = button.dataset.agentId; if (collapsedAgents.has(id)) collapsedAgents.delete(id); else collapsedAgents.add(id); render(); }));
+  agentList.querySelectorAll(".agent-chat-entry").forEach((button) => button.addEventListener("click", async () => { await selectChat(button.dataset.chatId); render(); }));
 }
 async function load() {
   const [agentData, scheduleData] = await Promise.all([api.listAgents(), api.listSchedules()]);
@@ -49,4 +57,6 @@ export function initAutomation() {
     await load();
   });
   load().catch(() => { panel.querySelector(".empty-hint")?.replaceChildren(document.createTextNode("Could not load automation")); });
+  window.addEventListener("chats:loaded", render);
+  window.addEventListener("chat:selected", render);
 }

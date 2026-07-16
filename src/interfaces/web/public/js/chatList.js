@@ -98,31 +98,6 @@ function renderChatList() {
     rootChats.forEach((chat) => chatListEl.appendChild(renderChat(chat)));
   }
 
-  for (const agent of state.agentsCache) {
-    const chats = state.chatsCache.filter((chat) => chat.agentId === agent.id);
-    const group = document.createElement("section");
-    group.className = "chat-group";
-    const heading = document.createElement("div");
-    heading.className = "chat-group-heading agent-group-heading";
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "group-toggle";
-    toggle.textContent = collapsedAgents.has(agent.id) ? "▸" : "▾";
-    toggle.title = collapsedAgents.has(agent.id) ? "Expand conversations" : "Collapse conversations";
-    const label = document.createElement("span");
-    label.textContent = agent.name;
-    const newButton = document.createElement("button");
-    newButton.type = "button";
-    newButton.className = "group-new-chat";
-    newButton.textContent = "+";
-    newButton.title = `New chat with ${agent.name}`;
-    toggle.addEventListener("click", () => { if (collapsedAgents.has(agent.id)) collapsedAgents.delete(agent.id); else collapsedAgents.add(agent.id); renderChatList(); });
-    newButton.addEventListener("click", async () => { await createAgentChat(agent); });
-    heading.append(toggle, label, newButton);
-    group.appendChild(heading);
-    if (!collapsedAgents.has(agent.id)) chats.forEach((chat) => group.appendChild(renderChat(chat)));
-    chatListEl.appendChild(group);
-  }
 }
 
 function startRenameChat(chat, titleEl) {
@@ -182,6 +157,7 @@ export async function loadChats() {
   const data = await api.listChats();
   state.chatsCache = data.chats;
   renderChatList();
+  window.dispatchEvent(new Event("chats:loaded"));
 }
 
 export function getChat(id) {
@@ -190,6 +166,7 @@ export function getChat(id) {
 
 export async function selectChat(id) {
   state.activeChatId = id;
+  window.dispatchEvent(new Event("chat:selected"));
   renderChatList();
   clearThread();
   await loadStatus();
