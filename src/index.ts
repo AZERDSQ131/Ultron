@@ -18,6 +18,38 @@ const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
 
 let cancelActiveInput: (() => void) | undefined;
+let liveFooterActive = false;
+
+function drawLiveFooter(contextLine: string, leadingNewline = false): void {
+  stdout.write(`${leadingNewline ? "\n" : ""}${rule()}\n${INPUT_PROMPT}\n${contextLine}\n${rule()}\n`);
+}
+
+function clearLiveFooter(): void {
+  if (!liveFooterActive) return;
+  // The cursor is kept one line below the four-line footer while the model
+  // streams. Clear from the footer's top so it never becomes chat history.
+  readline.moveCursor(stdout, 0, -4);
+  readline.clearScreenDown(stdout);
+  liveFooterActive = false;
+}
+
+function writeLive(text: string): void {
+  if (!text) return;
+  if (!liveFooterActive) {
+    stdout.write(text);
+    return;
+  }
+
+  // Replace the footer with the next piece of response, then draw the footer
+  // immediately after it. This keeps the input visibly at the bottom while
+  // streamed output grows above it.
+  readline.moveCursor(stdout, 0, -4);
+  readline.clearScreenDown(stdout);
+  stdout.write(text);
+  drawLiveFooter(liveFooterContext, true);
+}
+
+let liveFooterContext = "";
 
 function ruleWidth(): number {
   return Math.min(stdout.columns || 80, 76);
@@ -53,10 +85,16 @@ function readInput(contextLine: string): Promise<string> {
       // message belongs in the conversation history.
       readline.moveCursor(stdout, 0, -1);
       stdout.write("\r\x1b[2K\n");
-      if (keepHistory && result.trim()) stdout.write(`${INPUT_PROMPT}${result}\n`);
-      else stdout.write("\r\x1b[2K");
-      stdout.write("\r\x1b[2K\n");
-      stdout.write("\r\x1b[2K\n");
+      if (keepHistory && result.trim()) {
+        stdout.write(`${INPUT_PROMPT}${result}\n`);
+        liveFooterContext = contextLine;
+        liveFooterActive = true;
+        drawLiveFooter(contextLine);
+      } else {
+        stdout.write("\r\x1b[2K");
+        stdout.write("\r\x1b[2K\n");
+        stdout.write("\r\x1b[2K\n");
+      }
       resolve(result);
     };
 
@@ -117,6 +155,7 @@ function readInput(contextLine: string): Promise<string> {
 
     cancelActiveInput = () => finish("", false);
     stdin.on("keypress", onKeypress);
+    clearLiveFooter();
     stdout.write(`${rule()}\n${INPUT_PROMPT}\n${contextLine}\n${rule()}`);
     readline.moveCursor(stdout, 0, -2);
   });
@@ -226,6 +265,7 @@ async function main() {
   process.on("SIGINT", () => {
     if (stopping) process.exit(0);
     stopping = true;
+    clearLiveFooter();
     console.log(chalk.dim("\n[ultron] stopping..."));
     abortController?.abort();
     cancelActiveInput?.();
@@ -240,6 +280,7 @@ async function main() {
 
       const command = input.trim().toLowerCase();
       if (command.startsWith("/")) {
+        clearLiveFooter();
         switch (command) {
           case "/help":
             printHelp();
@@ -290,17 +331,17 @@ async function main() {
 
           if (type === "tool") {
             if (inToolCall) {
-              stdout.write("\n");
+              writeLive("\n");
               inToolCall = false;
             }
             const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
             const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
             if (pending) {
-              stdout.write(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`));
+              writeLive(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`));
               const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
               if (key !== undefined) pendingToolCalls.delete(key);
             }
-            stdout.write(chalk.dim(`[tool result · ${toolName}]\n${chunk.content}\n\n`));
+            writeLive(chalk.dim(`[tool result · ${toolName}]\n${chunk.content}\n\n`));
             continue;
           }
 
@@ -322,7 +363,7 @@ async function main() {
               pendingToolCalls.set(key, pending);
               if (tc.name && isNewToolCall) {
                 if (wrotePrefix) {
-                  stdout.write("\n\n");
+                  writeLive("\n\n");
                   wrotePrefix = false;
                 }
               }
@@ -335,17 +376,18 @@ async function main() {
           if (typeof chunk.content !== "string" || !chunk.content) continue;
 
           if (inToolCall) {
-            stdout.write("\n\n");
+            writeLive("\n\n");
             inToolCall = false;
           }
           if (!wrotePrefix) {
-            stdout.write(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `);
+            writeLive(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `);
             wrotePrefix = true;
           }
-          stdout.write(markdown.push(chunk.content));
+          writeLive(markdown.push(chunk.content));
           generatedChars += chunk.content.length;
         }
-        stdout.write(markdown.flush());
+        writeLive(markdown.flush());
+        clearLiveFooter();
         stdout.write("\n\n");
 
         const elapsedSeconds = (Date.now() - turnStarted) / 1000;
@@ -354,14 +396,17 @@ async function main() {
         console.log();
       } catch (err) {
         if (abortController.signal.aborted) {
+          clearLiveFooter();
           stdout.write("\n\n");
           break;
         }
+        clearLiveFooter();
         console.error(chalk.red("[ultron] error:"), err);
       }
     }
   } finally {
     cancelActiveInput?.();
+    clearLiveFooter();
     await checkpointer.end?.();
     console.log(chalk.dim("[ultron] stopped."));
     process.exit(0);
