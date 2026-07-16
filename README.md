@@ -107,34 +107,37 @@ The terminal handles these commands without sending them to Nemotron:
 | `/compact` | Summarize old session messages and keep the recent turns |
 | `/think on\|low\|off` | Enable full reasoning, low-effort reasoning, or no reasoning |
 | `/verbose on\|off` | Show or hide elapsed time and estimated generated tokens |
+| `/archive` | Save the current session as a readable text file under `archives/` |
+| `/resume <archive-path>` | Restore a previously archived session into the current thread |
 | `/clear` | Clear the terminal display |
 | `/quit` | Exit ULTRON |
 
 Press Tab after starting a slash command to accept its completion. `/stop` can
 also be typed while Nemotron is generating; Ctrl+C remains available as the
-immediate interrupt.
+immediate interrupt. Archive files are local and ignored by Git.
+
+`/compact`, `/retry`, `/archive` and `/resume <path>` are also available from
+the web interface, typed the same way into its message box — see
+[Additional entry point — local web interface](PLAN.md) in PLAN.md.
 
 ## Repository map
 
-### Archive and resume
-
-Use `/archive` to save the current LangGraph session as a readable text file
-under `archives/`. Use `/resume <archive-path>` in a later session to restore
-the archived user and ULTRON messages into the current thread. Archive files
-are local and ignored by Git.
-
 ```text
-src/index.ts                 terminal interface and streaming
-src/web/server.ts            local web interface (HTTP + SSE streaming)
-src/web/public/              web frontend (vanilla HTML/CSS/JS, no framework)
-src/agent/graph.ts           LangGraph loop, tool routing, archive/resume
-src/llm/nemotron.ts          NVIDIA/Nemotron client
-src/memory/checkpointer.ts   SQLite checkpoint saver shared by the CLI and the web interface
-MEMORY.md                    durable human-readable memory loaded each turn
-src/tools/                   shell, filesystem, web and process tools
-AGENT.md                     operational rules injected into the prompt
-SOUL.md                      personality rules injected into the prompt
-PLAN.md                      project roadmap and scope
+src/core/                            shared engine — knows nothing about any interface
+  graph.ts                           LangGraph loop, tool routing, archive/resume
+  llm/nemotron.ts                    NVIDIA/Nemotron client
+  memory/checkpointer.ts             SQLite checkpoint saver shared by every interface
+  tools/                             shell, filesystem, web and process tools
+src/interfaces/                      presentation layers — import from core, never the reverse
+  cli/index.ts                       terminal interface and streaming
+  cli/markdown.ts                    terminal markdown rendering
+  web/server.ts                      local web interface (HTTP + SSE streaming)
+  web/public/                        web frontend (vanilla HTML/CSS/JS, no framework)
+src/config.ts                        shared configuration (env vars, paths)
+MEMORY.md                            durable human-readable memory loaded each turn
+AGENT.md                             operational rules injected into the prompt
+SOUL.md                              personality rules injected into the prompt
+PLAN.md                              project roadmap and scope
 ```
 
 ## Roadmap

@@ -17,7 +17,7 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 - Nemotron (NVIDIA API) as the only model
 - LangGraph as the orchestrator — we own the state and the loop, not a packaged agent harness
 - Classic durable memory in a human-readable `MEMORY.md`
-- Persistent conversation state via a local SQLite checkpoint database (`src/memory/checkpointer.ts`,
+- Persistent conversation state via a local SQLite checkpoint database (`src/core/memory/checkpointer.ts`,
   `ultron-state.sqlite3`) — survives process restarts, not just an in-memory `MemorySaver`
 - Token-by-token streaming
 - Ctrl+C interrupts cleanly at any point, including mid-response
@@ -25,7 +25,7 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 
 ## Additional entry point — local web interface (done)
 
-- `src/web/server.ts` + `src/web/public/` — a local web UI, requested directly by the user
+- `src/interfaces/web/server.ts` + `src/interfaces/web/public/` — a local web UI, requested directly by the user
   alongside the CLI (they work with Codex on the terminal side, ULTRON's web UI covers the browser)
 - Same `buildGraph()` core, same tool set and streaming behavior as the CLI — plain `node:http`
   server (no Express) and a vanilla HTML/CSS/JS frontend (no framework), consistent with owning
@@ -33,7 +33,7 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
 - Shares the CLI's thread (`ultron-main`) and the same SQLite checkpoint database — the CLI and
   the web UI are two views onto one running conversation, not two disconnected sessions. Each
   process opens its own connection to the same file; a write from one is visible to the other on
-  its next read (see `src/memory/checkpointer.ts`)
+  its next read (see `src/core/memory/checkpointer.ts`)
 - `/compact`, `/retry` and `/archive` are exposed as web API routes too (`/api/compact`,
   `/api/turn` with `retry: true`, `/api/archive`, `/api/resume`) and recognized as slash commands
   by the web frontend, so commands behave the same regardless of which interface issues them
@@ -54,7 +54,7 @@ interface at a time.
 
 ## Phase 3 — Tools (in progress)
 
-- Tools declared with an explicit scope: `read` / `write` / `destructive` (kept in code for clarity even though confirmation gates are off by default per current settings) — see `src/tools/index.ts`
+- Tools declared with an explicit scope: `read` / `write` / `destructive` (kept in code for clarity even though confirmation gates are off by default per current settings) — see `src/core/tools/index.ts`
 - Done: `run_shell_command`, `read_file`, `write_file`, `edit_file`, `list_directory`, `search_files`, `fetch_url`, `http_request`, `web_search`, `list_processes`, `kill_process` — the web/process tools are modeled on OpenClaw's own tool categories (`exec`, `web_search`, `web_fetch`, `process`)
 - Still to come: mail, calendar (both need OAuth setup — bigger lift than the filesystem/shell tools)
 - Background scheduled tasks (cron-style) once the core loop is trusted

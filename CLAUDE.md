@@ -12,10 +12,10 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 
 - **Model**: Nemotron (NVIDIA API) exclusively for now — no multi-provider setup.
 - **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
-- **Memory**: local SQLite checkpoint database (`ultron-state.sqlite3`), custom `SqliteSaver` in `src/memory/checkpointer.ts` implementing LangGraph's `BaseCheckpointSaver` directly on Node's built-in `node:sqlite` (no `@langchain/langgraph-checkpoint-postgres`/`pg`, no `@langchain/langgraph-checkpoint-sqlite` — neither package's published versions match this project's `@langchain/core` ^0.3 / `langgraph` ^0.2 pin, and `node:sqlite` needs zero extra dependencies since Node 24 is already required). Single persistent thread (`ultron-main`) shared by every entry point.
-- **Interface**: terminal (v0.1) and a local web UI (`src/web/`) — both point at the same SQLite file and thread, so they share memory and slash commands (`/compact`, `/retry`, `/archive`, `/resume`). Telegram is next (grammY planned).
+- **Memory**: local SQLite checkpoint database (`ultron-state.sqlite3`), custom `SqliteSaver` in `src/core/memory/checkpointer.ts` implementing LangGraph's `BaseCheckpointSaver` directly on Node's built-in `node:sqlite` (no `@langchain/langgraph-checkpoint-postgres`/`pg`, no `@langchain/langgraph-checkpoint-sqlite` — neither package's published versions match this project's `@langchain/core` ^0.3 / `langgraph` ^0.2 pin, and `node:sqlite` needs zero extra dependencies since Node 24 is already required). Single persistent thread (`ultron-main`) shared by every entry point.
+- **Interface**: terminal (v0.1) and a local web UI (`src/interfaces/web/`) — both point at the same SQLite file and thread, so they share memory and slash commands (`/compact`, `/retry`, `/archive`, `/resume`). Telegram is next (grammY planned).
 - **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [AGENT.md](AGENT.md). Do not let it default to English regardless of input language.
-- **System prompt split**: [SOUL.md](SOUL.md) is personality only (voice, tone, examples). [AGENT.md](AGENT.md) is everything else — tool-use protocol, language matching, other operational rules. Don't fold one into the other; `src/agent/graph.ts` concatenates both at startup.
+- **System prompt split**: [SOUL.md](SOUL.md) is personality only (voice, tone, examples). [AGENT.md](AGENT.md) is everything else — tool-use protocol, language matching, other operational rules. Don't fold one into the other; `src/core/graph.ts` concatenates both at startup.
 - **Security intentionally minimal**: the user explicitly asked for **no Docker, no hardened secret management, full bypass of manual permissions/confirmations**. This is NOT an oversight — do not reintroduce sandboxing or confirmation gates without an explicit request.
 - **Logs**: explicitly not required by the user for now. Do not add a logging/audit system without being asked.
 - **Stop**: Ctrl+C must interrupt the loop at any time, including mid LLM call (AbortController).
@@ -26,12 +26,12 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 
 1. Loop + memory (current stage, done)
 2. Telegram interface
-3. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity. In progress: shell + filesystem tools done (`src/tools/`), mail/calendar still pending (need OAuth).
+3. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity. In progress: shell + filesystem tools done (`src/core/tools/`), mail/calendar still pending (need OAuth).
 4. Separate "Codex-style" app for vibe coding, with a main conversation orchestrating background sub-agents to manage projects. Do not start this without an explicit request — it was deliberately deferred during initial design.
 
 ## Stack
 
-TypeScript (Node 24+) / pnpm / LangGraph.js / Postgres / `@langchain/openai` (OpenAI-compatible client pointed at the NVIDIA API).
+TypeScript (Node 24+) / pnpm / LangGraph.js / SQLite (`node:sqlite`, no external database) / `@langchain/openai` (OpenAI-compatible client pointed at the NVIDIA API).
 
 ## Git conventions
 
@@ -49,7 +49,7 @@ ULTRON est un agent IA personnel développé directement par l'utilisateur pour
 conserver la maîtrise de la boucle d'exécution, des outils et de la mémoire.
 La version actuelle fournit une conversation persistante sur un fil unique
 (`ultron-main`), accessible depuis deux interfaces qui partagent le même état :
-le terminal (`src/index.ts`) et une interface web locale (`src/web/`). Telegram,
+le terminal (`src/interfaces/cli/index.ts`) et une interface web locale (`src/interfaces/web/`). Telegram,
 les intégrations mail/calendrier et l'application de vibe-coding sont prévues
 mais ne sont pas implémentées.
 
@@ -61,25 +61,25 @@ mais ne sont pas implémentées.
 - Nemotron exclusivement, modèle par défaut `nvidia/nemotron-3-super-120b-a12b`.
 - SQLite local (`node:sqlite`, natif à Node — aucune dépendance native
   supplémentaire) via un `SqliteSaver` écrit à la main dans
-  `src/memory/checkpointer.ts`, partagé par le CLI et le serveur web.
+  `src/core/memory/checkpointer.ts`, partagé par le CLI et le serveur web.
 - `chalk`, `dotenv` et `zod` pour le CLI, la configuration et les outils ;
   aucun framework serveur (le serveur web utilise `node:http` directement).
 
 ## Architecture du repo
 
-- `src/index.ts` : point d'entrée CLI, affichage, streaming, statistiques,
+- `src/interfaces/cli/index.ts` : point d'entrée CLI, affichage, streaming, statistiques,
   jauge de contexte et interruption Ctrl+C.
-- `src/web/server.ts` + `src/web/public/` : interface web locale (HTTP + SSE),
+- `src/interfaces/web/server.ts` + `src/interfaces/web/public/` : interface web locale (HTTP + SSE),
   même graphe et même fil que le CLI ; frontend HTML/CSS/JS sans framework.
-- `src/agent/graph.ts` : prompt système, graphe agent/outils, routage,
+- `src/core/graph.ts` : prompt système, graphe agent/outils, routage,
   nettoyage de l'historique, retries des erreurs transitoires ou faux appels,
   et archive/reprise de conversation (`archiveThread` / `resumeThread`).
-- `src/llm/nemotron.ts` : construction du client ChatOpenAI configuré pour NVIDIA.
-- `src/memory/checkpointer.ts` : `SqliteSaver` (implémente `BaseCheckpointSaver`
+- `src/core/llm/nemotron.ts` : construction du client ChatOpenAI configuré pour NVIDIA.
+- `src/core/memory/checkpointer.ts` : `SqliteSaver` (implémente `BaseCheckpointSaver`
   de LangGraph sur `node:sqlite`) — c'est ce fichier qui permet au CLI et au
   serveur web de partager mémoire et commandes : chaque processus ouvre sa
   propre connexion vers le même fichier `.sqlite3`.
-- `src/tools/` : onze outils avec scopes déclarés dans `index.ts` : shell,
+- `src/core/tools/` : onze outils avec scopes déclarés dans `index.ts` : shell,
   fichiers, HTTP/web et processus.
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
   au démarrage ; ils ne doivent pas être fusionnés.

@@ -9,9 +9,9 @@ import type { BaseMessage, BaseMessageLike } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { ZodObject, ZodRawShape } from "zod";
 import { config as appConfig } from "../config.js";
-import { createNemotronModel, type ThinkingMode } from "../llm/nemotron.js";
-import { getCheckpointer } from "../memory/checkpointer.js";
-import { tools } from "../tools/index.js";
+import { createNemotronModel, type ThinkingMode } from "./llm/nemotron.js";
+import { getCheckpointer } from "./memory/checkpointer.js";
+import { tools } from "./tools/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

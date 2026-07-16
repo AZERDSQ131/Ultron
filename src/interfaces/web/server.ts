@@ -3,11 +3,11 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { HumanMessage } from "@langchain/core/messages";
-import { archiveThread, buildGraph, compactThread, estimateContextUsage, prepareRetry, resumeThread } from "../agent/graph.js";
-import { config } from "../config.js";
-import type { ThinkingMode } from "../llm/nemotron.js";
-import { tools } from "../tools/index.js";
-import { summarizeToolCall } from "../tools/summarize.js";
+import { archiveThread, buildGraph, compactThread, estimateContextUsage, prepareRetry, resumeThread } from "../../core/graph.js";
+import { config } from "../../config.js";
+import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import { tools } from "../../core/tools/index.js";
+import { summarizeToolCall } from "../../core/tools/summarize.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");

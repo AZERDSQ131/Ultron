@@ -5,12 +5,12 @@ import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import { HumanMessage } from "@langchain/core/messages";
-import { archiveThread, buildGraph, compactThread, estimateContextUsage, prepareRetry, resumeThread } from "./agent/graph.js";
-import { config } from "./config.js";
-import type { ThinkingMode } from "./llm/nemotron.js";
-import { tools } from "./tools/index.js";
-import { summarizeToolCall } from "./tools/summarize.js";
-import { MarkdownStreamRenderer } from "./ui/markdown.js";
+import { archiveThread, buildGraph, compactThread, estimateContextUsage, prepareRetry, resumeThread } from "../../core/graph.js";
+import { config } from "../../config.js";
+import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import { tools } from "../../core/tools/index.js";
+import { summarizeToolCall } from "../../core/tools/summarize.js";
+import { MarkdownStreamRenderer } from "./markdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const THREAD_ID = "ultron-main";
