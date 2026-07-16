@@ -11,7 +11,9 @@ import { config as appConfig } from "../config.js";
 import { createNemotronModel, type ThinkingMode } from "./llm/nemotron.js";
 import { getCheckpointer } from "./memory/checkpointer.js";
 import { getChatRegistry } from "./memory/chats.js";
+import { AgentRegistry, type Agent } from "./memory/agents.js";
 import { tools, toolScopes } from "./tools/index.js";
+import { summarizeToolCall } from "./tools/summarize.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -38,7 +40,30 @@ function readMemory(): string {
   return readFileSync(memoryPath, "utf-8").trim();
 }
 
-function buildSystemPrompt(): string {
+const agentRegistry = new AgentRegistry(appConfig.databasePath);
+const chatRegistryForPrompt = getChatRegistry(appConfig.databasePath);
+
+// A chat owned by an Agent (spawn_agent, schedule_task — see toolScopes'
+// "destructive" note on spawn_agent) must NOT get SOUL.md's "you are
+// ULTRON" identity or MEMORY.md's personal facts about the user: handing a
+// sub-agent that persona while a human message simultaneously tells it
+// "you are a research agent, task: X" produced exactly the confused,
+// off-task replies (the sub-agent describing itself as ULTRON) that this
+// split exists to prevent. AGENT.md's tool-use protocol still applies, since
+// a sub-agent calls tools the same way ULTRON does.
+function buildAgentSystemPrompt(agent: Agent): string {
+  return `You are "${agent.name}", a sub-agent spawned by ULTRON to complete a specific task in your own separate conversation. You are not ULTRON and do not have ULTRON's personality or memory — stay focused on the task you were given and report your findings plainly.
+
+${agent.instructions?.trim() ? `Your standing persona and instructions:\n${agent.instructions.trim()}\n\n` : ""}---
+
+${agentNotes}`;
+}
+
+function buildSystemPrompt(threadId?: string): string {
+  const chat = threadId ? chatRegistryForPrompt.get(threadId) : undefined;
+  const owner = chat?.agentId ? agentRegistry.getAgent(chat.agentId) : undefined;
+  if (owner) return buildAgentSystemPrompt(owner);
+
   return `${BASE_SYSTEM_PROMPT}
 
 ---
@@ -66,7 +91,7 @@ export function estimateTokens(text: string): number {
 export async function estimateContextUsage(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<number> {
   const state = await graph.getState({ configurable: { thread_id: threadId } });
   const messages = state.values.messages ?? [];
-  return estimateTokens(buildSystemPrompt()) + messages.reduce((sum: number, message: BaseMessage) => {
+  return estimateTokens(buildSystemPrompt(threadId)) + messages.reduce((sum: number, message: BaseMessage) => {
     const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
     return sum + estimateTokens(content);
   }, 0);
@@ -265,8 +290,9 @@ export function buildGraph() {
 
   const graph = new StateGraph(MessagesAnnotation)
     .addNode("agent", async (state, runConfig) => {
+      const threadId = runConfig.configurable?.thread_id as string | undefined;
       const messages = [
-        { role: "system" as const, content: buildSystemPrompt() },
+        { role: "system" as const, content: buildSystemPrompt(threadId) },
         ...sanitizeHistory(state.messages),
       ];
       const thinkingMode = (runConfig.configurable?.thinking as ThinkingMode | undefined) ?? "full";
@@ -435,8 +461,9 @@ export async function prepareEdit(graph: ReturnType<typeof buildGraph>, threadId
 }
 
 export interface ChatMessage {
-  role: "human" | "ai";
+  role: "human" | "ai" | "tool_call" | "tool_result";
   content: string;
+  name?: string;
 }
 
 export interface SearchMatch {
@@ -465,7 +492,11 @@ export async function searchMessages(
   if (!needle) return results;
 
   for (const chatId of chatIds) {
-    const messages = await listChatMessages(graph, chatId);
+    // Tool calls/results are excluded from search — this indexes what the
+    // conversation actually said, not the tool chatter behind it.
+    const messages = (await listChatMessages(graph, chatId)).filter(
+      (message): message is ChatMessage & { role: "human" | "ai" } => message.role === "human" || message.role === "ai",
+    );
     const matches: SearchMatch[] = [];
     for (const message of messages) {
       const lower = message.content.toLowerCase();
@@ -482,20 +513,35 @@ export async function searchMessages(
   return results;
 }
 
-// Simplified message list for replaying a chat's history in a UI (the web
-// sidebar switching between chats) — human/ai turns only, tool calls and
-// system/summary messages omitted since a UI transcript only needs to show
-// the conversation itself.
+// Message list for replaying a chat's history in a UI (the web sidebar
+// switching between chats, or reattaching to a spawn_agent execution once
+// it's already finished — see runs.ts) — human/ai text plus tool calls and
+// their results, in order, so a chat that mostly *did things* (a spawned
+// research agent, say) doesn't read as empty. System/summary messages are
+// still omitted; they're framing for the model, not part of the visible
+// conversation.
 export async function listChatMessages(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<ChatMessage[]> {
   const state = await graph.getState({ configurable: { thread_id: threadId } });
   const messages = (state.values.messages ?? []) as BaseMessage[];
-  return messages
-    .filter((message) => message.getType() === "human" || message.getType() === "ai")
-    .map((message) => ({
-      role: message.getType() as "human" | "ai",
-      content: typeof message.content === "string" ? message.content : JSON.stringify(message.content),
-    }))
-    .filter((message) => message.content.trim() !== "");
+  const out: ChatMessage[] = [];
+
+  for (const message of messages) {
+    const type = message.getType();
+    if (type === "human" || type === "ai") {
+      const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+      if (content.trim()) out.push({ role: type, content });
+      if (type === "ai") {
+        for (const call of (message as AIMessage).tool_calls ?? []) {
+          out.push({ role: "tool_call", name: call.name, content: summarizeToolCall(call.name, JSON.stringify(call.args ?? {})) });
+        }
+      }
+    } else if (type === "tool") {
+      const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+      out.push({ role: "tool_result", name: (message as ToolMessage).name ?? "tool", content });
+    }
+  }
+
+  return out;
 }
 
 function archiveMessageContent(message: BaseMessage): string {

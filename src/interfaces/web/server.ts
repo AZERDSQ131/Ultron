@@ -23,6 +23,7 @@ import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/m
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
+import { abortRun, isRunning, subscribeToRun } from "../../core/runs.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
@@ -138,7 +139,10 @@ async function handleDeleteChat(res: ServerResponse, chatId: string): Promise<vo
 async function handleChatMessages(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   const messages = await listChatMessages(graph, chatId);
-  sendJson(res, 200, { messages });
+  // Tells the client whether to open GET /api/chats/:id/stream (see
+  // handleAttachToRun) right after loading this history — true for a
+  // spawn_agent execution chat (see tools/agents.ts) still in progress.
+  sendJson(res, 200, { messages, running: isRunning(chatId) });
 }
 
 // Shared by a fresh turn (HumanMessage input) and an approval resume
@@ -311,7 +315,48 @@ async function handleStop(res: ServerResponse, chatId: string | undefined): Prom
   if (!requireChat(res, chatId)) return;
   const wasActive = activeAborts.has(chatId);
   activeAborts.get(chatId)?.abort();
-  sendJson(res, 200, { stopped: wasActive });
+  // Covers both kinds of run this server can have going on a chat: a
+  // request-scoped turn (activeAborts, above) and a spawn_agent background
+  // run registered in runs.ts — same Stop button either way.
+  const wasBackgroundRun = abortRun(chatId);
+  sendJson(res, 200, { stopped: wasActive || wasBackgroundRun });
+}
+
+// Lets the web UI open a chat that's currently running as a background
+// spawn_agent execution (see tools/agents.ts) and see it live — tool calls,
+// text, the works — instead of only the finished result once someone
+// happens to refresh. If the chat isn't running, this just says so and
+// closes; the client already has (or fetches) the static history for that
+// case via GET /api/chats/:id/messages.
+async function handleAttachToRun(res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+
+  if (!isRunning(chatId)) {
+    sseWrite(res, "not_running", {});
+    res.end();
+    return;
+  }
+
+  sseWrite(res, "attached", {});
+  const unsubscribe = subscribeToRun(chatId, (event) => {
+    sseWrite(res, event.type, event);
+    if (event.type === "done" || event.type === "aborted" || event.type === "error") res.end();
+  });
+  // subscribeToRun can't return undefined here (isRunning just confirmed a
+  // handle exists), but the run can still finish between those two calls —
+  // guard defensively rather than assume the race can't happen.
+  if (!unsubscribe) {
+    sseWrite(res, "not_running", {});
+    res.end();
+    return;
+  }
+  res.on("close", unsubscribe);
 }
 
 async function handleCompact(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -425,10 +470,13 @@ async function runDueSchedules(): Promise<void> {
   for (const task of agents.getDueSchedules()) {
     debugLog(`scheduler picked id=${task.id} name=${task.name} agent=${task.agentId ?? "ultron"}`);
     agents.markRun(task.id);
-    const owner = task.agentId ? agents.getAgent(task.agentId) : undefined;
     const execution = chats.create(`Scheduled: ${task.name}`, task.agentId, task.id);
     agents.setLastRunChat(task.id, execution.id);
-    const prompt = `${owner?.instructions ? `${owner.instructions}\n\n` : ""}This is a scheduled task. Execute it now and report exactly what happened.\n\nTask: ${task.instruction}`;
+    // Owner instructions (if any) are no longer prefixed here — a chat
+    // owned by an Agent already gets them as its system prompt (see
+    // buildAgentSystemPrompt in graph.ts), which also keeps this execution
+    // out of ULTRON's own SOUL.md persona and memory.
+    const prompt = `This is a scheduled task. Execute it now and report exactly what happened.\n\nTask: ${task.instruction}`;
     try { await graph.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: execution.id, thinking: "low" } }); }
     catch (err) { debugLog(`scheduled task failed name=${task.name} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`); }
   }
@@ -460,6 +508,11 @@ const server = createServer((req, res) => {
   }
   if (chatMatch && chatMatch[2] === "/messages" && req.method === "GET") {
     handleChatMessages(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] chat messages failed:", err));
+    return;
+  }
+  const streamMatch = path.match(/^\/api\/chats\/([^/]+)\/stream$/);
+  if (streamMatch && req.method === "GET") {
+    handleAttachToRun(res, decodeURIComponent(streamMatch[1])).catch((err) => console.error("[ultron-web] attach to run failed:", err));
     return;
   }
   if (chatMatch && !chatMatch[2] && req.method === "PATCH") {

@@ -11,6 +11,8 @@ import { AgentRegistry } from "../memory/agents.js";
 // what makes this safe under ESM's circular-import rules. A dynamic
 // import() would dodge the cycle too, but there is nothing to dodge here.
 import { buildGraph, getPendingApproval } from "../graph.js";
+import { beginRun } from "../runs.js";
+import { summarizeToolCall } from "./summarize.js";
 
 const agentsRegistry = new AgentRegistry(config.databasePath);
 const chats = getChatRegistry(config.databasePath);
@@ -45,31 +47,77 @@ function logError(prefix: string, err: unknown): void {
 // parent thread the same way a success would be.
 async function runSpawnedAgent(opts: {
   parentThreadId: string;
-  ownerId: string;
   ownerName: string;
-  ownerInstructions: string;
   executionChatId: string;
   task: string;
   thinking: "full" | "low" | "off";
   spawnDepth: number;
 }): Promise<void> {
   const graph = getSubGraph();
+  // Registers this chat as "running" (see runs.ts) so the web UI's Stop
+  // button works on it and, if the user opens this chat while it's still
+  // going, GET /api/chats/:id/stream (server.ts) can attach to `emit`'s
+  // events instead of only showing whatever was there before the run
+  // started — the same tool-call/text events a normal streamed turn emits.
+  const run = beginRun(opts.executionChatId);
   let note: string;
+  let aborted = false;
 
   try {
-    const prompt = `${opts.ownerInstructions ? `${opts.ownerInstructions}\n\n` : ""}You were spawned by ULTRON to complete a specific task in your own conversation, separate from the one that spawned you. Work autonomously, use your tools as needed, and finish with a clear final report of what you did and the result — that final message is what gets relayed back to ULTRON and, through it, to the user.\n\nTask: ${opts.task}`;
+    // opts.ownerInstructions is not repeated here — the execution chat is
+    // owned by this Agent, so graph.ts's buildAgentSystemPrompt already
+    // gives it those instructions as its system prompt (and keeps it out of
+    // ULTRON's own SOUL.md persona and memory).
+    const prompt = `You were spawned by ULTRON to complete a specific task in your own conversation, separate from the one that spawned you. Work autonomously, use your tools as needed, and finish with a clear final report of what you did and the result — that final message is what gets relayed back to ULTRON and, through it, to the user.\n\nTask: ${opts.task}`;
 
-    await graph.invoke(
+    const stream = await graph.stream(
       { messages: [new HumanMessage(prompt)] },
-      { configurable: { thread_id: opts.executionChatId, thinking: opts.thinking, spawnDepth: opts.spawnDepth } },
+      {
+        configurable: { thread_id: opts.executionChatId, thinking: opts.thinking, spawnDepth: opts.spawnDepth },
+        signal: run.signal,
+        streamMode: "messages",
+      },
     );
+
+    const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
+    for await (const [chunk] of stream) {
+      const type = chunk.getType();
+
+      if (type === "tool") {
+        const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
+        const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
+        if (pending) {
+          run.emit({ type: "tool_call", name: pending.name, summary: summarizeToolCall(pending.name, pending.args) });
+          const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
+          if (key !== undefined) pendingToolCalls.delete(key);
+        }
+        run.emit({ type: "tool_result", name: toolName, content: String(chunk.content) });
+        continue;
+      }
+      if (type !== "ai") continue;
+
+      const toolCallChunks = (chunk as unknown as { tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[] }).tool_call_chunks;
+      if (toolCallChunks?.length) {
+        for (const tc of toolCallChunks) {
+          const key = tc.index ?? tc.id ?? tc.name ?? 0;
+          const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
+          pending.name = tc.name ?? pending.name;
+          pending.args += tc.args ?? "";
+          pendingToolCalls.set(key, pending);
+        }
+        continue;
+      }
+
+      if (typeof chunk.content !== "string" || !chunk.content) continue;
+      run.emit({ type: "text", delta: chunk.content });
+    }
 
     // A non-"bypass" security mode (inherited from the parent chat, see
     // spawnAgent below) can pause the sub-agent mid-run on its own
-    // toolsNode interrupt() (graph.ts) — graph.invoke() then returns
+    // toolsNode interrupt() (graph.ts) — the stream then simply ends
     // without a real final answer. Nobody is watching that chat to resolve
-    // it, so say so plainly instead of relaying whatever half-formed
-    // message was left on top of the stack as if it were a finished report.
+    // it on their own, so say so plainly instead of relaying whatever
+    // half-formed message was left on top of the stack as a finished report.
     const pendingApproval = await getPendingApproval(graph, opts.executionChatId);
     if (pendingApproval) {
       note = `[spawn_agent] Agent "${opts.ownerName}" (chat ${opts.executionChatId}) is paused waiting for tool approval before it can continue (${pendingApproval.calls.map((c) => c.name).join(", ")}). It inherited this conversation's tool-approval mode. Open its chat to approve or deny, or tell the user it's waiting.`;
@@ -80,8 +128,19 @@ async function runSpawnedAgent(opts: {
       note = `[spawn_agent] Agent "${opts.ownerName}" finished (chat ${opts.executionChatId}). Its report:\n\n${report}\n\nRelay the relevant result to the user now, in your own words.`;
     }
   } catch (err) {
-    logError(`spawn_agent background run failed for agent=${opts.ownerName} chat=${opts.executionChatId}`, err);
-    note = `[spawn_agent] Agent "${opts.ownerName}" (chat ${opts.executionChatId}) failed before finishing: ${err instanceof Error ? err.message : String(err)}`;
+    if (run.signal.aborted) {
+      aborted = true;
+      run.emit({ type: "aborted" });
+      note = `[spawn_agent] Agent "${opts.ownerName}" (chat ${opts.executionChatId}) was stopped before finishing.`;
+    } else {
+      logError(`spawn_agent background run failed for agent=${opts.ownerName} chat=${opts.executionChatId}`, err);
+      const message = err instanceof Error ? err.message : String(err);
+      run.emit({ type: "error", message });
+      note = `[spawn_agent] Agent "${opts.ownerName}" (chat ${opts.executionChatId}) failed before finishing: ${message}`;
+    }
+  } finally {
+    if (!aborted) run.emit({ type: "done" });
+    run.end();
   }
 
   try {
@@ -135,9 +194,7 @@ export const spawnAgent = tool(
       // its doc comment.
       void runSpawnedAgent({
         parentThreadId,
-        ownerId: owner.id,
         ownerName: owner.name,
-        ownerInstructions: owner.instructions,
         executionChatId: execution.id,
         task,
         thinking: effectiveThinking,

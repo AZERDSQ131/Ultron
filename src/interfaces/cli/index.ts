@@ -314,8 +314,12 @@ async function showRestoredMessages(graph: ReturnType<typeof buildGraph>, thread
   for (const message of messages) {
     if (message.role === "human") {
       appendTranscript(`${INPUT_PROMPT}${message.content}\n`);
-    } else {
+    } else if (message.role === "ai") {
       appendTranscript(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} ${message.content}\n\n`);
+    } else if (message.role === "tool_call") {
+      appendTranscript(chalk.dim(`[${message.content}]\n`));
+    } else {
+      appendTranscript(chalk.dim(`[tool result · ${message.name}]\n${message.content}\n\n`));
     }
   }
 }

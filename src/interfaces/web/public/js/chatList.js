@@ -1,9 +1,9 @@
 import { api } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { state } from "./store.js";
-import { addTurn, addSystemNote, clearThread, updateTurnActions } from "./thread.js";
+import { addTurn, addToolBlock, addSystemNote, clearThread, updateTurnActions } from "./thread.js";
 import { loadStatus } from "./statusBar.js";
-import { syncSecurityMode } from "./composer.js";
+import { attachToRunningChat, setGenerating, syncSecurityMode } from "./composer.js";
 
 const sidebar = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebar-toggle");
@@ -177,16 +177,40 @@ export async function selectChat(id) {
   syncSecurityMode(chat?.securityMode ?? "bypass");
   try {
     const data = await api.chatMessages(id);
+    // tool_call/tool_result entries (see listChatMessages in graph.ts)
+    // render as the same collapsible blocks a live turn uses (addToolBlock,
+    // composer.js's streamTurn) — a chat replay that skipped them would
+    // look empty for a chat that mostly ran tools, e.g. a spawned agent.
+    let openToolBlock = null;
     for (const message of data.messages) {
-      const body = addTurn(message.role === "human" ? "user" : "assistant");
-      if (message.role === "human") {
-        body.textContent = message.content;
-      } else {
-        body.dataset.raw = message.content;
-        body.innerHTML = renderMarkdown(message.content);
+      if (message.role === "human" || message.role === "ai") {
+        const body = addTurn(message.role === "human" ? "user" : "assistant");
+        if (message.role === "human") {
+          body.textContent = message.content;
+        } else {
+          body.dataset.raw = message.content;
+          body.innerHTML = renderMarkdown(message.content);
+        }
+        openToolBlock = null;
+      } else if (message.role === "tool_call") {
+        openToolBlock = addToolBlock(message.name, message.content);
+        openToolBlock.dataset.name = message.name;
+      } else if (message.role === "tool_result") {
+        const match = openToolBlock && openToolBlock.dataset.name === message.name ? openToolBlock : null;
+        if (match) match.textContent = message.content;
+        openToolBlock = null;
       }
     }
     updateTurnActions();
+    // The chat may still be a spawn_agent execution in progress (see
+    // runs.ts) — attach to its live output instead of leaving the view
+    // frozen on whatever history had been written by the time this loaded.
+    // Otherwise, force-clear any stale "generating" state a still-finishing
+    // attach to the *previous* chat left behind (it only clears itself if
+    // it's still the active chat when its stream ends — see
+    // attachToRunningChat's stillViewing() guard in composer.js).
+    if (data.running) attachToRunningChat(id);
+    else setGenerating(false);
   } catch {
     addSystemNote("[ultron] could not load chat history.", true);
   }

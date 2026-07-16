@@ -36,6 +36,8 @@ export function summarizeToolCall(name: string, rawArgs: string): string {
       return "List processes";
     case "kill_process":
       return typeof args.pid === "number" ? `Signal process ${args.pid}` : "Signal process";
+    case "spawn_agent":
+      return typeof args.name === "string" ? `Spawn agent "${args.name}"` : "Spawn agent";
     default:
       return name;
   }

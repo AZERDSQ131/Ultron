@@ -38,7 +38,7 @@ export function focusInput() {
   input.focus();
 }
 
-function setGenerating(value) {
+export function setGenerating(value) {
   state.generating = value;
   sendBtn.hidden = value;
   stopBtn.hidden = !value;
@@ -403,6 +403,95 @@ export async function streamTurn(body) {
     setGenerating(false);
     // Refreshes the sidebar so an auto-derived title (first message of a
     // "New chat") and the recency ordering pick up this turn.
+    loadChats();
+  }
+}
+
+// Joins a chat that's currently a spawn_agent background execution (see
+// runs.ts/tools/agents.ts) via GET /api/chats/:id/stream instead of only
+// ever seeing it once it's finished — same event vocabulary as a normal
+// turn (text/tool_call/tool_result/done/aborted/error), so it reuses the
+// same rendering calls, but there's no POST body / turn stats here, so it's
+// kept separate from streamTurn's pump rather than forced to share it.
+export async function attachToRunningChat(chatId) {
+  setGenerating(true);
+  let assistantBody = null;
+  let assistantText = "";
+  let cursorEl = null;
+  const finishAssistant = () => {
+    if (cursorEl) cursorEl.remove();
+    cursorEl = null;
+  };
+  // If the user switches to a different chat before this stream ends,
+  // stop rendering into it — the DOM it was writing to may belong to
+  // whatever chat is showing now.
+  const stillViewing = () => state.activeChatId === chatId;
+
+  try {
+    const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/stream`);
+    if (!res.ok || !res.body) return;
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!stillViewing()) {
+        await reader.cancel();
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+
+      for (const raw of events) {
+        const lines = raw.split("\n");
+        const eventLine = lines.find((l) => l.startsWith("event: "));
+        const dataLine = lines.find((l) => l.startsWith("data: "));
+        if (!eventLine || !dataLine) continue;
+        const eventName = eventLine.slice("event: ".length);
+        const data = JSON.parse(dataLine.slice("data: ".length));
+
+        if (eventName === "not_running" || eventName === "attached") {
+          continue;
+        } else if (eventName === "text") {
+          if (!assistantBody) {
+            assistantBody = addTurn("assistant");
+            cursorEl = document.createElement("span");
+            cursorEl.className = "cursor";
+          }
+          assistantText += data.delta;
+          assistantBody.dataset.raw = assistantText;
+          assistantBody.innerHTML = renderMarkdown(assistantText);
+          if (cursorEl) assistantBody.appendChild(cursorEl);
+          scrollToEnd();
+        } else if (eventName === "tool_call") {
+          finishAssistant();
+          const pre = addToolBlock(data.name, data.summary);
+          pre.dataset.name = data.name;
+        } else if (eventName === "tool_result") {
+          const blocks = [...document.querySelectorAll(".tool-block pre")];
+          const match = [...blocks].reverse().find((p) => p.dataset.name === data.name && p.textContent === "…");
+          if (match) match.textContent = data.content;
+        } else if (eventName === "aborted") {
+          finishAssistant();
+          addSystemNote("[ultron] generation stopped.");
+        } else if (eventName === "error") {
+          finishAssistant();
+          addSystemNote(`[ultron] error: ${data.message}`, true);
+        } else if (eventName === "done") {
+          finishAssistant();
+        }
+      }
+    }
+  } catch (err) {
+    if (stillViewing()) addSystemNote(`[ultron] connection error: ${err.message}`, true);
+  } finally {
+    finishAssistant();
+    if (stillViewing()) setGenerating(false);
     loadChats();
   }
 }
