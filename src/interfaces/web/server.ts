@@ -372,7 +372,8 @@ async function runDueSchedules(): Promise<void> {
     debugLog(`scheduler picked id=${task.id} name=${task.name} agent=${task.agentId ?? "ultron"}`);
     agents.markRun(task.id);
     const owner = task.agentId ? agents.getAgent(task.agentId) : undefined;
-    const execution = chats.create(`Scheduled: ${task.name}`, task.agentId);
+    const execution = chats.create(`Scheduled: ${task.name}`, task.agentId, task.id);
+    agents.setLastRunChat(task.id, execution.id);
     const prompt = `${owner?.instructions ? `${owner.instructions}\n\n` : ""}This is a scheduled task. Execute it now and report exactly what happened.\n\nTask: ${task.instruction}`;
     try { await graph.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: execution.id, thinking: "low" } }); }
     catch (err) { debugLog(`scheduled task failed name=${task.name} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`); }

@@ -35,7 +35,8 @@ function timeAgo(iso) {
 
 function renderChatList() {
   chatListEl.innerHTML = "";
-  if (state.chatsCache.length === 0 && state.agentsCache.length === 0) {
+  const visibleChats = state.chatsCache.filter((chat) => !chat.scheduleId);
+  if (visibleChats.length === 0 && state.agentsCache.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-hint";
     empty.textContent = "No chats yet";
@@ -89,7 +90,7 @@ function renderChatList() {
     return item;
   };
 
-  const rootChats = state.chatsCache.filter((chat) => !chat.agentId);
+  const rootChats = visibleChats.filter((chat) => !chat.agentId);
   if (rootChats.length > 0) {
     const heading = document.createElement("div");
     heading.className = "chat-group-heading root-heading";

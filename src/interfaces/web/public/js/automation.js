@@ -23,7 +23,7 @@ function openDialog() {
 function closeDialog() { dialog.hidden = true; }
 function render() {
   agentList.innerHTML = agents.length ? agents.map((a) => {
-    const agentChats = state.chatsCache.filter((chat) => chat.agentId === a.id);
+    const agentChats = state.chatsCache.filter((chat) => chat.agentId === a.id && !chat.scheduleId);
     const chats = agentChats.map((chat) => `<button class="agent-chat-entry${chat.id === state.activeChatId ? " active" : ""}" data-chat-id="${chat.id}">${chat.title}</button>`).join("");
     const collapsed = collapsedAgents.has(a.id);
     return `<div class="agent-block"><div class="automation-item agent-item"><button class="agent-toggle" data-agent-id="${a.id}" title="${collapsed ? "Expand" : "Collapse"} conversations">${collapsed ? "▸" : "▾"}</button><span class="agent-dot"></span><span class="agent-name" title="${a.description}">${a.name}</span><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">+</button></div>${collapsed ? "" : `<div class="agent-conversations">${chats || '<div class="agent-empty">No conversations</div>'}</div>`}</div>`;
@@ -41,7 +41,8 @@ async function load() {
   state.agentsCache = agents;
   window.dispatchEvent(new Event("agents:loaded"));
   render();
-  scheduleList.innerHTML = scheduleData.schedules.length ? scheduleData.schedules.map((s) => `<div class="automation-item schedule-item"><span title="${s.instruction}">${s.name}</span><small>${s.cron}</small><button data-id="${s.id}" data-enabled="${s.enabled}" title="Enable/disable">${s.enabled ? "●" : "○"}</button></div>`).join("") : '<div class="empty-hint">No schedules</div>';
+  scheduleList.innerHTML = scheduleData.schedules.length ? scheduleData.schedules.map((s) => `<div class="automation-item schedule-item${s.lastRunChatId ? " clickable" : ""}" data-chat-id="${s.lastRunChatId ?? ""}"><span title="${s.instruction}">${s.name}</span><small>${s.cron === "@once" ? "once" : s.cron}</small><button data-id="${s.id}" data-enabled="${s.enabled}" title="Enable/disable">${s.enabled ? "●" : "○"}</button></div>`).join("") : '<div class="empty-hint">No schedules</div>';
+  scheduleList.querySelectorAll(".schedule-item[data-chat-id]").forEach((item) => item.addEventListener("click", async (event) => { if (event.target.closest("button")) return; await selectChat(item.dataset.chatId); }));
   scheduleList.querySelectorAll("button").forEach((button) => button.addEventListener("click", async () => { await api.toggleSchedule(button.dataset.id, button.dataset.enabled !== "true"); load(); }));
 }
 export function initAutomation() {

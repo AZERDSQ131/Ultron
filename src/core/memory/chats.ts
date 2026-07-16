@@ -26,6 +26,7 @@ export interface Chat {
   createdAt: string;
   updatedAt: string;
   agentId: string | null;
+  scheduleId: string | null;
 }
 
 interface ChatRow {
@@ -34,10 +35,11 @@ interface ChatRow {
   created_at: string;
   updated_at: string;
   agent_id?: string | null;
+  schedule_id?: string | null;
 }
 
 function toChat(row: ChatRow): Chat {
-  return { id: row.id, title: row.title, createdAt: row.created_at, updatedAt: row.updated_at, agentId: row.agent_id ?? null };
+  return { id: row.id, title: row.title, createdAt: row.created_at, updatedAt: row.updated_at, agentId: row.agent_id ?? null, scheduleId: row.schedule_id ?? null };
 }
 
 export function deriveTitle(text: string): string {
@@ -61,6 +63,7 @@ export class ChatRegistry {
       )
     `);
     try { this.db.exec("ALTER TABLE chats ADD COLUMN agent_id TEXT"); } catch { /* already migrated */ }
+    try { this.db.exec("ALTER TABLE chats ADD COLUMN schedule_id TEXT"); } catch { /* already migrated */ }
   }
 
   list(): Chat[] {
@@ -73,12 +76,12 @@ export class ChatRegistry {
     return row ? toChat(row) : undefined;
   }
 
-  create(title: string = DEFAULT_CHAT_TITLE, agentId: string | null = null): Chat {
+  create(title: string = DEFAULT_CHAT_TITLE, agentId: string | null = null, scheduleId: string | null = null): Chat {
     const now = new Date().toISOString();
-    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId };
+    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId, scheduleId };
     this.db
-      .prepare("INSERT INTO chats (id, title, created_at, updated_at, agent_id) VALUES (?, ?, ?, ?, ?)")
-      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.agentId);
+      .prepare("INSERT INTO chats (id, title, created_at, updated_at, agent_id, schedule_id) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.agentId, chat.scheduleId);
     return chat;
   }
 
@@ -89,7 +92,7 @@ export class ChatRegistry {
     const existing = this.get(id);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null };
+    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null, scheduleId: null };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt);
