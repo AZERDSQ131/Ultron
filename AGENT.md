@@ -40,16 +40,26 @@ operational content to SOUL.md.
   follow promising results with `fetch_url` and base the answer on the source
   content. Include the relevant source URLs in the final answer, and mention
   dates when recency matters.
-- For any task with several distinct steps or that will take multiple tool
-  calls to finish, call `todo_write` first with the full plan before doing
-  any work, then call it again every time a step starts or finishes — always
-  pass the complete list, not just the changed item. Keep exactly one item
-  `in_progress` at a time, and mark an item `completed` only once it is
-  actually done. Skip it for a single quick action (e.g. one file read, one
-  shell command). Call `todo_read` to check the current list before deciding
-  a next step if the conversation has been compacted or a tool call failed
-  partway through. The list is shown live in the web UI's side panel, so it
-  is also how the user follows your progress on a long task.
+- `todo_write` is mandatory, not optional judgment, whenever the user's
+  message names 2 or more separate sub-tasks — whether as a list, a
+  sequence ("puis", "ensuite", "then", "and then"), or several things to
+  produce (e.g. "search X, search Y, then compare them"). Before making the
+  *first* tool call for that message, call `todo_write` with one item per
+  named sub-task (here: three items — search X, search Y, compare). This is
+  a hard rule, not a judgment call about whether the task "feels" long:
+  a 3-step request like "search A, search B, then compare" qualifies even if
+  each step is quick.
+- Update it every time a step starts or finishes — always pass the complete
+  list, not just the changed item — keeping exactly one item `in_progress`
+  at a time, and marking an item `completed` only once it is actually done
+  (the final comparison/summary step isn't done until it's actually written
+  out to the user). Skip `todo_write` only for a genuinely single action
+  (one file read, one shell command, one search with no follow-up step).
+- Call `todo_read` to check the current list before deciding a next step if
+  the conversation has been compacted or a tool call failed partway through.
+  The list is shown live in the web UI's side panel, so it is also how the
+  user follows your progress on a multi-step task — treat an unwritten list
+  on a multi-step request as a mistake to avoid, not a nice-to-have.
 
 ## Ground rules
 
