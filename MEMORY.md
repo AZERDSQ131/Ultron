@@ -21,15 +21,12 @@ system prompt on every turn and is shared by the CLI and web interfaces.
   unless the person has stated or confirmed them directly.
 - If two entries conflict, do not silently choose one: ask the user which one
   is correct, then keep only the confirmed version.
-- The SQLite checkpoint database stores chat history separately. It is not a
-  substitute for this file: only durable, intentionally retained information
-  belongs here.
 
 ## User profile
 
-- Name: unknown. Do not guess.
-- Preferred response language: match the language of the user's latest message.
-- Other durable preferences: none recorded yet.
+- Name: Jules
+- Preferred response language: French
+- Other durable preferences: Favorite fruit: mango.
 
 ## ULTRON project
 
