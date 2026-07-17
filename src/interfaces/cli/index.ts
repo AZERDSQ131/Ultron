@@ -141,10 +141,16 @@ function mentionPanelState(input: string, cursor: number): { mention: MentionMat
   const local = listSkills().filter((skill) => skill.name.toLowerCase().includes(query));
   const localNames = new Set(local.map((skill) => skill.name));
   const hub = hubSkillsCache.filter((skill) => !localNames.has(skill.name) && skill.name.toLowerCase().includes(query));
+  // Full list, not sliced to the visible window here — slicing before
+  // wrapping selection around matches.length was the bug: with more than
+  // MENTION_MAX_VISIBLE results, arrow navigation could never reach
+  // anything past the first window. drawScreen computes a scrolling
+  // sub-window around mentionSelected for display; selection itself always
+  // covers every match.
   const matches: MentionEntry[] = [
     ...local.map((skill) => ({ name: skill.name, description: skill.description, source: "local" as const })),
     ...hub.map((skill) => ({ name: skill.name, description: skill.description, source: "hub" as const })),
-  ].slice(0, MENTION_MAX_VISIBLE);
+  ];
   mentionSelected = matches.length ? Math.min(mentionSelected, matches.length - 1) : 0;
   return { mention, matches };
 }
@@ -250,14 +256,26 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   const mentionLines: string[] =
     mentionPanel && !mentionDismissed
       ? [
-          uiDim("skills · type to filter · ↑/↓ select · Enter/Tab insert · Esc dismiss"),
+          `${uiDim("skills · type to filter · ↑/↓ select · Enter/Tab insert · Esc dismiss")}${mentionPanel.matches.length > MENTION_MAX_VISIBLE ? uiDim(` · ${mentionSelected + 1}/${mentionPanel.matches.length}`) : ""}`,
           ...(mentionPanel.matches.length
-            ? mentionPanel.matches.map((entry, index) => {
-                const marker = index === mentionSelected ? chalk.greenBright("›") : " ";
-                const label = index === mentionSelected ? chalk.cyanBright.bold(entry.name) : entry.name;
-                const tag = entry.source === "hub" ? ` ${uiDim("(hub)")}` : "";
-                return `  ${marker} ${label}${tag}  ${uiDim(entry.description)}`;
-              })
+            ? (() => {
+                // Scrolling window centered on the selection so arrowing
+                // past the bottom of the visible rows keeps moving instead
+                // of wrapping within a fixed slice — see mentionPanelState's
+                // comment for why matches itself is never pre-sliced.
+                const total = mentionPanel.matches.length;
+                const windowStart =
+                  total <= MENTION_MAX_VISIBLE
+                    ? 0
+                    : Math.min(Math.max(0, mentionSelected - Math.floor(MENTION_MAX_VISIBLE / 2)), total - MENTION_MAX_VISIBLE);
+                return mentionPanel.matches.slice(windowStart, windowStart + MENTION_MAX_VISIBLE).map((entry, i) => {
+                  const index = windowStart + i;
+                  const marker = index === mentionSelected ? chalk.greenBright("›") : " ";
+                  const label = index === mentionSelected ? chalk.cyanBright.bold(entry.name) : entry.name;
+                  const tag = entry.source === "hub" ? ` ${uiDim("(hub)")}` : "";
+                  return `  ${marker} ${label}${tag}`;
+                });
+              })()
             : [uiDim("  no matching skills")]),
         ]
       : [];
