@@ -6,8 +6,6 @@ const overlay = document.getElementById("inspector-overlay");
 const closeBtn = document.getElementById("inspector-close");
 const tabs = [...document.querySelectorAll(".inspector-tab")];
 const toolLegend = document.getElementById("tool-legend");
-const settingsBtn = document.getElementById("settings-btn");
-const shortcutsBtn = document.getElementById("shortcuts-btn");
 
 function showTab(name) {
   tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === name));
@@ -47,14 +45,14 @@ async function loadToolLegend() {
   }
 }
 
+// No header button triggers this directly (removed — see index.html); it's
+// reachable only via ⌘, / ⌘/ (shortcuts.js).
 export function initInspector() {
   tabs.forEach((tab) => tab.addEventListener("click", () => showTab(tab.dataset.tab)));
   closeBtn.addEventListener("click", close);
   overlay.addEventListener("mousedown", (e) => {
     if (e.target === overlay) close();
   });
-  settingsBtn.addEventListener("click", () => (isOpen() && document.querySelector('.inspector-tab[data-tab="settings"]').classList.contains("active") ? close() : open("settings")));
-  shortcutsBtn.addEventListener("click", () => (isOpen() && document.querySelector('.inspector-tab[data-tab="shortcuts"]').classList.contains("active") ? close() : open("shortcuts")));
 
   initTheme({
     toggleBtn: document.getElementById("theme-toggle-btn"),

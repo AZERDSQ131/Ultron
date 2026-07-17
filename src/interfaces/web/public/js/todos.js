@@ -12,7 +12,16 @@ const countEl = document.getElementById("todo-count");
 const STATUS_LABEL = { pending: "To do", in_progress: "In progress", completed: "Done" };
 
 export function initTodos() {
-  window.addEventListener("chat:selected", refreshTodos);
+  // Clears synchronously on chat switch, before the fetch below even
+  // starts — each chat's list is correctly scoped server-side already
+  // (todos are stored per chat_id, see memory/todos.ts), but without this
+  // the panel kept showing the previous chat's items for the length of one
+  // network round trip, which reads as "the new chat has a to-do" for a
+  // beat. A brand new chat has no list at all, so it should never show one.
+  window.addEventListener("chat:selected", () => {
+    renderTodos([]);
+    refreshTodos();
+  });
 }
 
 export async function refreshTodos() {
