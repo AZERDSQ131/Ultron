@@ -15,7 +15,7 @@ function required(name: string): string {
 
 export const config = {
   nvidiaApiKey: required("NVIDIA_API_KEY"),
-  nemotronModel: process.env.NEMOTRON_MODEL ?? "nvidia/nemotron-3-super-120b-a12b",
+  nemotronModel: process.env.NEMOTRON_MODEL ?? "z-ai/glm-5.2",
   nemotronBaseUrl: process.env.NEMOTRON_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
   webSearchProvider: process.env.WEB_SEARCH_PROVIDER ?? "auto",
   tavilyApiKey: process.env.TAVILY_API_KEY,
