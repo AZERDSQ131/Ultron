@@ -340,9 +340,14 @@ export async function runComputerUseLoop(options: ComputerUseOptions): Promise<C
 
   const shotRef = { current: await captureScreenshot() };
   const { all: toolList, byName } = buildTools(shotRef);
-  const model = createVisionModel(config.computerUseModel).bindTools(toolList);
+  // tool_choice: "required" pushes the API to actually use OpenAI-style
+  // function calling instead of narrating intent as plain text — it cut
+  // down on, but did not eliminate, meta/llama-3.2-90b-vision-instruct
+  // skipping tool_calls entirely, hence the retry loop below on top of it.
+  const model = createVisionModel(config.computerUseModel).bindTools(toolList, { tool_choice: "required" });
 
   const history: BaseMessage[] = [new SystemMessage(SYSTEM_PROMPT)];
+  const MAX_TOOL_CALL_RETRIES = 2;
 
   for (let step = 1; step <= maxSteps; step++) {
     if (signal.aborted) return { status: "aborted", summary: "Stopped by user.", steps: step - 1 };
@@ -350,29 +355,44 @@ export async function runComputerUseLoop(options: ComputerUseOptions): Promise<C
     const caption = step === 1 ? `Task: ${instruction}\n\nCurrent screen:` : "Result of the last action — current screen:";
     const callMessages = [...history, screenshotMessage(shotRef.current, caption)];
 
-    let response: AIMessage;
-    try {
-      response = await model.invoke(callMessages, { signal });
-    } catch (error) {
-      if (signal.aborted) return { status: "aborted", summary: "Stopped by user.", steps: step - 1 };
-      return {
-        status: "failed",
-        summary: `Model call failed: ${error instanceof Error ? error.message : String(error)}`,
-        steps: step - 1,
-      };
+    let call: { name: string; args: Record<string, unknown>; id?: string } | undefined;
+    let lastText = "";
+    for (let attempt = 0; attempt <= MAX_TOOL_CALL_RETRIES; attempt++) {
+      if (attempt > 0) {
+        callMessages.push(
+          new HumanMessage(
+            "You did not call a tool. You must call exactly one of the available computer_* tools now — do not respond with plain text.",
+          ),
+        );
+      }
+
+      let response: AIMessage;
+      try {
+        response = await model.invoke(callMessages, { signal });
+      } catch (error) {
+        if (signal.aborted) return { status: "aborted", summary: "Stopped by user.", steps: step - 1 };
+        return {
+          status: "failed",
+          summary: `Model call failed: ${error instanceof Error ? error.message : String(error)}`,
+          steps: step - 1,
+        };
+      }
+
+      const toolCalls = response.tool_calls ?? [];
+      if (toolCalls.length > 0) {
+        call = toolCalls[0];
+        break;
+      }
+      const fake = extractFakeToolCall(response.content);
+      if (fake && (byName[fake.name] || fake.name === "computer_finish" || fake.name === "computer_fail")) {
+        call = { name: fake.name, args: fake.args, id: `fake_${step}` };
+        break;
+      }
+      lastText = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
     }
 
-    const toolCalls = response.tool_calls ?? [];
-    let call: { name: string; args: Record<string, unknown>; id?: string };
-    if (toolCalls.length > 0) {
-      call = toolCalls[0];
-    } else {
-      const fake = extractFakeToolCall(response.content);
-      if (!fake || (!byName[fake.name] && fake.name !== "computer_finish" && fake.name !== "computer_fail")) {
-        const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
-        return { status: "failed", summary: text || "Model did not call a tool or produce a summary.", steps: step - 1 };
-      }
-      call = { name: fake.name, args: fake.args, id: `fake_${step}` };
+    if (!call) {
+      return { status: "failed", summary: lastText || "Model did not call a tool or produce a summary.", steps: step - 1 };
     }
     history.push(new AIMessage({ content: "", tool_calls: [call] }));
 
