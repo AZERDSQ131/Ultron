@@ -39,12 +39,17 @@ export const config = {
   // /computer-use (CLI-only, see src/core/computerUse.ts): a separate model
   // from the main chat model (config.nemotronModel), dedicated to this
   // mechanical read-tree/call-one-tool loop. Reads the macOS accessibility
-  // tree as text (native/computer-use/main.swift), not screenshots — an
-  // earlier vision/pixel-clicking version needed a vision-capable model and
-  // is why this used to be pinned to a model verified to accept images;
-  // that requirement no longer applies, so this is back to the user's
-  // original choice, DeepSeek V4 Flash.
-  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "deepseek-ai/deepseek-v4-flash",
+  // tree as text (native/computer-use/main.swift), not screenshots, so it
+  // doesn't need a vision-capable model. DeepSeek V4 Flash (the original
+  // choice) was tried and ruled out: reproduced live on NVIDIA's endpoint,
+  // it reliably degenerates on the SECOND tool-calling turn — after seeing
+  // its own prior tool_calls + a ToolMessage in history, tool_choice:
+  // "required" makes it echo the JSON Schema's type name ("string") as the
+  // literal argument value instead of a real one, even using the API's own
+  // raw AIMessage unmodified (not a serialization bug on ULTRON's side).
+  // meta/llama-3.2-90b-vision-instruct does not reproduce this across
+  // repeated multi-turn tests and reasons sensibly about tool errors.
+  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "meta/llama-3.2-90b-vision-instruct",
   // Hard cap on agent-loop iterations (one tree read + one action each) so
   // a confused loop that keeps re-reading the same state can't run forever.
   computerUseMaxSteps: Number(process.env.COMPUTER_USE_MAX_STEPS ?? 30),

@@ -295,6 +295,7 @@ export async function runComputerUseLoop(options: ComputerUseOptions): Promise<C
     const callMessages = [...history, treeMessage(current.appName, current.treeText, caption)];
 
     let call: { name: string; args: Record<string, unknown>; id?: string } | undefined;
+    let realResponse: AIMessage | undefined;
     let lastText = "";
     for (let attempt = 0; attempt <= MAX_TOOL_CALL_RETRIES; attempt++) {
       if (attempt > 0) {
@@ -320,6 +321,7 @@ export async function runComputerUseLoop(options: ComputerUseOptions): Promise<C
       const toolCalls = response.tool_calls ?? [];
       if (toolCalls.length > 0) {
         call = toolCalls[0];
+        realResponse = response;
         break;
       }
       const fake = extractFakeToolCall(response.content);
@@ -333,7 +335,11 @@ export async function runComputerUseLoop(options: ComputerUseOptions): Promise<C
     if (!call) {
       return { status: "failed", summary: lastText || "Model did not call a tool or produce a summary.", steps: step - 1 };
     }
-    history.push(new AIMessage({ content: "", tool_calls: [call] }));
+    // Push the real API response when we have one — preserves its id/
+    // response_metadata for the next turn instead of a hand-built stand-in.
+    // Only the text-embedded fallback path (no genuine tool_calls) needs a
+    // synthetic AIMessage.
+    history.push(realResponse ?? new AIMessage({ content: "", tool_calls: [call] }));
 
     if (call.name === "computer_finish" || call.name === "computer_fail") {
       const summary = typeof call.args.summary === "string" ? call.args.summary : (call.args.reason as string) ?? "";
