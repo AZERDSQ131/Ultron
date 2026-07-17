@@ -23,6 +23,8 @@ import { withThreadLock } from "../../core/threadLock.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
+import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
+import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
 import { disableConsoleEcho } from "../../core/logger.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
@@ -31,7 +33,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/security", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/security", "/goal", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -469,13 +471,31 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo or plan\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo or plan\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/goal")}     set/inspect a standing goal: /goal <objective>, /goal status, /goal pause, /goal resume, /goal clear\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
-function printStatus(thinkingMode: ThinkingMode, taskMode: TaskMode, verbose: boolean, chatId: string, securityMode: SecurityMode) {
+// Shared by /status and /goal (bare or "status") — same one-liner either
+// way so the two surfaces never drift into describing the goal differently.
+function goalStatusLine(goal: Goal | undefined): string {
+  if (!goal || goal.status === "cleared") return "no active goal — set one with /goal <objective>";
+  const turns = `${goal.turnsUsed}/${goal.maxTurns} turns`;
+  if (goal.status === "active") return `active (${turns}): ${goal.objective}`;
+  if (goal.status === "paused") return `paused${goal.lastReason ? ` — ${goal.lastReason}` : ""} (${turns}): ${goal.objective}`;
+  if (goal.status === "complete") return `✓ complete${goal.lastReason ? ` — ${goal.lastReason}` : ""}: ${goal.objective}`;
+  return `${goal.status}: ${goal.objective}`;
+}
+
+function printStatus(
+  thinkingMode: ThinkingMode,
+  taskMode: TaskMode,
+  verbose: boolean,
+  chatId: string,
+  securityMode: SecurityMode,
+  goal: Goal | undefined,
+) {
   appendTranscript(
-    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · chat ${chatId}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("task")}     ${taskMode}\n  ${chalk.dim("security")} ${securityMode}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
+    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · chat ${chatId}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("task")}     ${taskMode}\n  ${chalk.dim("security")} ${securityMode}\n  ${chalk.dim("goal")}     ${goalStatusLine(goal)}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
   );
 }
 
@@ -546,6 +566,7 @@ async function main() {
 
   const graph = buildGraph();
   const chats = getChatRegistry(config.databasePath);
+  const goals = getGoalRegistry(config.databasePath);
   // Registers the CLI's original hardcoded thread (from before chats
   // existed) so its history shows up in the registry instead of being
   // orphaned — same migration the web server runs on its own startup.
@@ -591,6 +612,243 @@ async function main() {
     cancelActiveInput?.();
   });
 
+  // One full turn: send turnInput, stream the reply, and loop through any
+  // number of tool-approval interrupts until the model produces a final
+  // answer (or the turn is aborted/errored). Factored out of the main loop
+  // so /goal's driveGoalLoop (below) can replay this exact same path for
+  // its own auto-continuation turns — a goal-loop turn is not a second,
+  // simplified code path, it's the same turn a human-typed message gets,
+  // approval prompts included.
+  async function executeTurn(
+    chatId: string,
+    turnInput: { messages: HumanMessage[] } | Command,
+    contextLine: string,
+  ): Promise<{ finalText: string; aborted: boolean; errored: boolean }> {
+    abortController = new AbortController();
+    const controller = abortController;
+    const turnStarted = Date.now();
+    generationInput = "";
+    generationCursor = 0;
+    const disarmStopCommand = armStopCommand(controller, contextLine);
+    let finalText = "";
+
+    try {
+      let nextInput: { messages: HumanMessage[] } | Command = turnInput;
+
+      let wrotePrefix = false;
+      let inToolCall = false;
+      let generatedChars = 0;
+      let outputTokens: number | undefined;
+      const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
+      const markdown = new MarkdownStreamRenderer();
+
+      // Loops more than once only when toolsNode's interrupt() (see
+      // graph.ts) pauses the thread for approval — resumed below with a
+      // Command carrying the user's decision, same as the web UI's
+      // /api/approve round trip.
+      for (;;) {
+        // Serialized per chatId (see threadLock.ts), released again as soon
+        // as this iteration's stream finishes — not held across the
+        // human-approval prompt below, so a spawn_agent wake-up note
+        // (tools/agents.ts) targeting this same chat isn't stuck behind the
+        // user thinking about a y/n. Without this lock, that wake-up racing
+        // a still-live stream on the same checkpoint thread was exactly
+        // what let stray tool/report text bleed into an unrelated reply.
+        await withThreadLock(chatId, async () => {
+          const stream = await graph.stream(nextInput, {
+            configurable: { thread_id: chatId, thinking: thinkingMode, taskMode },
+            signal: controller.signal,
+            streamMode: "messages",
+            recursionLimit: config.graphRecursionLimit,
+          });
+
+          for await (const [chunk] of stream) {
+            const type = chunk.getType();
+
+            if (type === "tool") {
+              if (inToolCall) {
+                writeLive("\n", contextLine);
+                inToolCall = false;
+              }
+              const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
+              const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
+              if (pending) {
+                writeLive(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`), contextLine);
+                const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
+                if (key !== undefined) pendingToolCalls.delete(key);
+              }
+              writeLive(`${formatToolResult(toolName, String(chunk.content))}\n\n`, contextLine);
+              continue;
+            }
+
+            if (type !== "ai") continue;
+
+            const toolCallChunks = (
+              chunk as unknown as {
+                tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[];
+              }
+            ).tool_call_chunks;
+
+            if (toolCallChunks?.length) {
+              for (const tc of toolCallChunks) {
+                const key = tc.index ?? tc.id ?? tc.name ?? 0;
+                const isNewToolCall = !pendingToolCalls.has(key);
+                const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
+                pending.name = tc.name ?? pending.name;
+                pending.args += tc.args ?? "";
+                pendingToolCalls.set(key, pending);
+                if (tc.name && isNewToolCall) {
+                  if (wrotePrefix) {
+                    writeLive("\n\n", contextLine);
+                    wrotePrefix = false;
+                  }
+                }
+                if (tc.args) generatedChars += tc.args.length;
+              }
+              inToolCall = true;
+              continue;
+            }
+
+            const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
+            if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+
+            if (typeof chunk.content !== "string" || !chunk.content) continue;
+
+            if (inToolCall) {
+              writeLive("\n\n", contextLine);
+              inToolCall = false;
+            }
+            if (!wrotePrefix) {
+              writeLive(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `, contextLine);
+              wrotePrefix = true;
+            }
+            writeLive(markdown.push(chunk.content), contextLine);
+            generatedChars += chunk.content.length;
+            // Raw (unstyled) accumulation of the final answer text, kept
+            // alongside the markdown-rendered transcript output above — this
+            // is what /goal's judge reads, so it sees plain text rather than
+            // ANSI-styled markdown fragments.
+            finalText += chunk.content;
+          }
+        });
+
+        const pendingApproval = await getPendingApproval(graph, chatId);
+        if (!pendingApproval) break;
+        if (inToolCall) {
+          writeLive("\n", contextLine);
+          inToolCall = false;
+        }
+        const decisions = await promptToolApproval(contextLine, pendingApproval.calls);
+        nextInput = new Command({ resume: decisions });
+      }
+
+      writeLive(markdown.flush(), contextLine);
+      appendTranscript("\n\n");
+
+      const elapsedSeconds = (Date.now() - turnStarted) / 1000;
+      // Nemotron's endpoint returns real usage on the stream's final chunk
+      // (see nemotron.ts); fall back to the chars/4 estimate only if a
+      // turn was interrupted before that chunk arrived.
+      const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
+      const tokenLabel = outputTokens !== undefined ? `${generatedTokens.toLocaleString()} tokens` : `≈${generatedTokens.toLocaleString()} tokens`;
+      if (verbose) appendTranscript(chalk.dim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ${tokenLabel}\n\n`));
+      renderScreen("", 0, contextLine);
+      return { finalText, aborted: false, errored: false };
+    } catch (err) {
+      if (controller.signal.aborted) {
+        appendTranscript(chalk.dim("[ultron] generation stopped.\n\n"));
+        renderScreen("", 0, contextLine);
+        return { finalText, aborted: true, errored: false };
+      }
+      appendTranscript(chalk.red(`[ultron] error: ${err instanceof Error ? err.message : String(err)}\n\n`));
+      return { finalText, aborted: false, errored: true };
+    } finally {
+      disarmStopCommand();
+    }
+  }
+
+  // The /goal auto-continuation loop: after a turn completes, ask a
+  // separate, narrow-context judge (see goalJudge.ts) whether the goal is
+  // actually done — reading the worker's final reply and the real state of
+  // the code on disk, not the worker's own say-so. "continue" replays
+  // executeTurn with a corrective message and checks again; "done" or
+  // "blocked" stops the loop and hands control back to the prompt. Bounded
+  // by config.goalMaxTurns so a goal that never resolves pauses itself
+  // instead of running forever.
+  async function driveGoalLoop(chatId: string, contextLine: string, initialFinalText: string): Promise<void> {
+    let lastFinalText = initialFinalText;
+    for (;;) {
+      if (stopping) return;
+      const goal = goals.get(chatId);
+      if (!goal || goal.status !== "active") return;
+      if (goal.turnsUsed >= goal.maxTurns) {
+        goals.pause(chatId, `turn budget (${goal.maxTurns}) exhausted`);
+        appendTranscript(
+          chalk.yellow(
+            `[ultron] goal paused — turn budget (${goal.maxTurns}) reached without a "done" verdict. /goal resume to give it more room, or /goal clear to drop it.\n\n`,
+          ),
+        );
+        renderScreen("", 0, contextLine);
+        return;
+      }
+
+      appendTranscript(chalk.dim("[ultron] checking goal completion…\n"));
+      renderScreen("", 0, contextLine);
+      flushRender();
+
+      // Reuses the same outer abortController slot as executeTurn so
+      // Ctrl+C (the SIGINT handler above) can interrupt a judge call too,
+      // not just a model turn.
+      const judgeController = new AbortController();
+      abortController = judgeController;
+      let verdict: Awaited<ReturnType<typeof judgeGoal>>;
+      try {
+        verdict = await judgeGoal(
+          { objective: goal.objective, finalMessage: lastFinalText, codeContext: gatherCodeContext() },
+          judgeController.signal,
+        );
+      } catch (err) {
+        if (judgeController.signal.aborted) return;
+        appendTranscript(
+          chalk.red(`[ultron] goal check failed (${err instanceof Error ? err.message : String(err)}) — pausing rather than looping blind.\n\n`),
+        );
+        goals.pause(chatId, "goal check failed");
+        renderScreen("", 0, contextLine);
+        return;
+      }
+      if (judgeController.signal.aborted || stopping) return;
+
+      if (verdict.verdict === "done") {
+        goals.markDone(chatId, verdict.reason);
+        appendTranscript(chalk.greenBright(`[ultron] ✓ goal achieved — ${verdict.reason}\n\n`));
+        renderScreen("", 0, contextLine);
+        return;
+      }
+      if (verdict.verdict === "blocked") {
+        goals.pause(chatId, verdict.reason);
+        appendTranscript(
+          chalk.yellow(`[ultron] ⏸ goal blocked — ${verdict.reason}\n[ultron] resume with /goal resume once that's addressed.\n\n`),
+        );
+        renderScreen("", 0, contextLine);
+        return;
+      }
+
+      goals.recordTurn(chatId);
+      appendTranscript(
+        chalk.dim(`[ultron] not done yet — ${verdict.reason}\n[ultron] continuing (turn ${goal.turnsUsed + 1}/${goal.maxTurns})…\n\n`),
+      );
+      renderScreen("", 0, contextLine);
+
+      const turn = await executeTurn(
+        chatId,
+        { messages: [new HumanMessage(buildContinuationPrompt(goal.objective, verdict.reason))] },
+        contextLine,
+      );
+      if (turn.aborted || turn.errored || stopping) return;
+      lastFinalText = turn.finalText;
+    }
+  }
+
   try {
     while (!stopping) {
       const currentContextTokens = await estimateContextUsage(graph, currentChatId);
@@ -609,7 +867,7 @@ async function main() {
             printHelp();
             continue;
           case "/status":
-            printStatus(thinkingMode, taskMode, verbose, currentChatId, chats.getSecurityMode(currentChatId));
+            printStatus(thinkingMode, taskMode, verbose, currentChatId, chats.getSecurityMode(currentChatId), goals.get(currentChatId));
             continue;
           case "/clear":
             transcript = "";
@@ -750,6 +1008,61 @@ async function main() {
               appendTranscript(chalk.dim(`[ultron] tool approval set to ${mode}.\n\n`));
               continue;
             }
+            if (commandName === "/goal") {
+              const goalArgument = commandArgument;
+              const [subRaw, ...restWords] = goalArgument.split(/\s+/);
+              const sub = (subRaw ?? "").toLowerCase();
+
+              if (!goalArgument || sub === "status") {
+                appendTranscript(chalk.dim(`[ultron] goal: ${goalStatusLine(goals.get(currentChatId))}\n\n`));
+                continue;
+              }
+              if (sub === "clear") {
+                goals.clear(currentChatId);
+                appendTranscript(chalk.dim("[ultron] goal cleared.\n\n"));
+                continue;
+              }
+              if (sub === "pause") {
+                const goal = goals.get(currentChatId);
+                if (!goal || goal.status !== "active") {
+                  appendTranscript(chalk.yellow("[ultron] no active goal to pause.\n\n"));
+                  continue;
+                }
+                goals.pause(currentChatId, restWords.join(" ") || "user-paused");
+                appendTranscript(chalk.dim("[ultron] goal paused.\n\n"));
+                continue;
+              }
+              if (sub === "resume") {
+                const resumed = goals.resume(currentChatId);
+                if (!resumed) {
+                  appendTranscript(chalk.yellow("[ultron] no paused goal to resume.\n\n"));
+                  continue;
+                }
+                appendTranscript(chalk.dim(`[ultron] goal resumed: ${resumed.objective}\n\n`));
+                // Falls through to the normal send path below, same as
+                // /retry — this becomes a real turn in the chat, not a
+                // silent internal replay.
+                input = buildContinuationPrompt(resumed.objective, "resumed by the user — pick up where you left off");
+                break;
+              }
+
+              // Anything else: the whole argument is a new objective.
+              const existing = goals.get(currentChatId);
+              if (existing && (existing.status === "active" || existing.status === "paused")) {
+                appendTranscript(
+                  chalk.yellow(`[ultron] a goal is already ${existing.status} — /goal clear it first, or /goal pause/resume it.\n\n`),
+                );
+                continue;
+              }
+              goals.set(currentChatId, goalArgument, config.goalMaxTurns);
+              appendTranscript(
+                chalk.greenBright(
+                  `[ultron] goal set — I'll work it and self-check until it's done or blocked (max ${config.goalMaxTurns} turns).\n\n`,
+                ),
+              );
+              input = goalArgument;
+              break;
+            }
             if (command === "/verbose on" || command === "/verbose true") {
               verbose = true;
               appendTranscript(chalk.dim("[ultron] verbose on.\n\n"));
@@ -768,141 +1081,17 @@ async function main() {
       if (command !== "/retry") chats.maybeAutoTitle(currentChatId, input);
       chats.touch(currentChatId);
 
-      abortController = new AbortController();
-      const controller = abortController;
-      const turnStarted = Date.now();
-      generationInput = "";
-      generationCursor = 0;
-      const disarmStopCommand = armStopCommand(controller, contextLine);
-
-      try {
-        let nextInput: { messages: HumanMessage[] } | Command = {
-          messages: command === "/retry" ? [] : [new HumanMessage(input)],
-        };
-
-        let wrotePrefix = false;
-        let inToolCall = false;
-        let generatedChars = 0;
-        let outputTokens: number | undefined;
-        const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
-        const markdown = new MarkdownStreamRenderer();
-
-        // Loops more than once only when toolsNode's interrupt() (see
-        // graph.ts) pauses the thread for approval — resumed below with a
-        // Command carrying the user's decision, same as the web UI's
-        // /api/approve round trip.
-        for (;;) {
-          // Serialized per currentChatId (see threadLock.ts), released
-          // again as soon as this iteration's stream finishes — not held
-          // across the human-approval prompt below, so a spawn_agent
-          // wake-up note (tools/agents.ts) targeting this same chat isn't
-          // stuck behind the user thinking about a y/n. Without this lock,
-          // that wake-up racing a still-live stream on the same checkpoint
-          // thread was exactly what let stray tool/report text bleed into
-          // an unrelated reply.
-          await withThreadLock(currentChatId, async () => {
-            const stream = await graph.stream(nextInput, {
-              configurable: { thread_id: currentChatId, thinking: thinkingMode, taskMode },
-              signal: controller.signal,
-              streamMode: "messages",
-              recursionLimit: config.graphRecursionLimit,
-            });
-
-            for await (const [chunk] of stream) {
-              const type = chunk.getType();
-
-              if (type === "tool") {
-                if (inToolCall) {
-                  writeLive("\n", contextLine);
-                  inToolCall = false;
-                }
-                const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
-                const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
-                if (pending) {
-                  writeLive(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`), contextLine);
-                  const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
-                  if (key !== undefined) pendingToolCalls.delete(key);
-                }
-                writeLive(`${formatToolResult(toolName, String(chunk.content))}\n\n`, contextLine);
-                continue;
-              }
-
-              if (type !== "ai") continue;
-
-              const toolCallChunks = (
-                chunk as unknown as {
-                  tool_call_chunks?: { name?: string; args?: string; index?: number; id?: string }[];
-                }
-              ).tool_call_chunks;
-
-              if (toolCallChunks?.length) {
-                for (const tc of toolCallChunks) {
-                  const key = tc.index ?? tc.id ?? tc.name ?? 0;
-                  const isNewToolCall = !pendingToolCalls.has(key);
-                  const pending = pendingToolCalls.get(key) ?? { name: tc.name ?? "tool", args: "" };
-                  pending.name = tc.name ?? pending.name;
-                  pending.args += tc.args ?? "";
-                  pendingToolCalls.set(key, pending);
-                  if (tc.name && isNewToolCall) {
-                    if (wrotePrefix) {
-                      writeLive("\n\n", contextLine);
-                      wrotePrefix = false;
-                    }
-                  }
-                  if (tc.args) generatedChars += tc.args.length;
-                }
-                inToolCall = true;
-                continue;
-              }
-
-              const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
-              if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
-
-              if (typeof chunk.content !== "string" || !chunk.content) continue;
-
-              if (inToolCall) {
-                writeLive("\n\n", contextLine);
-                inToolCall = false;
-              }
-              if (!wrotePrefix) {
-                writeLive(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `, contextLine);
-                wrotePrefix = true;
-              }
-              writeLive(markdown.push(chunk.content), contextLine);
-              generatedChars += chunk.content.length;
-            }
-          });
-
-          const pendingApproval = await getPendingApproval(graph, currentChatId);
-          if (!pendingApproval) break;
-          if (inToolCall) {
-            writeLive("\n", contextLine);
-            inToolCall = false;
-          }
-          const decisions = await promptToolApproval(contextLine, pendingApproval.calls);
-          nextInput = new Command({ resume: decisions });
-        }
-
-        writeLive(markdown.flush(), contextLine);
-        appendTranscript("\n\n");
-
-        const elapsedSeconds = (Date.now() - turnStarted) / 1000;
-        // Nemotron's endpoint returns real usage on the stream's final chunk
-        // (see nemotron.ts); fall back to the chars/4 estimate only if a
-        // turn was interrupted before that chunk arrived.
-        const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
-        const tokenLabel = outputTokens !== undefined ? `${generatedTokens.toLocaleString()} tokens` : `≈${generatedTokens.toLocaleString()} tokens`;
-        if (verbose) appendTranscript(chalk.dim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ${tokenLabel}\n\n`));
-        renderScreen("", 0, contextLine);
-      } catch (err) {
-        if (abortController.signal.aborted) {
-          appendTranscript(chalk.dim("[ultron] generation stopped.\n\n"));
-          renderScreen("", 0, contextLine);
-          continue;
-        }
-        appendTranscript(chalk.red(`[ultron] error: ${err instanceof Error ? err.message : String(err)}\n\n`));
-      } finally {
-        disarmStopCommand();
+      const turnInput: { messages: HumanMessage[] } | Command = {
+        messages: command === "/retry" ? [] : [new HumanMessage(input)],
+      };
+      const result = await executeTurn(currentChatId, turnInput, contextLine);
+      // A goal stays "active" in the DB across an aborted/interrupted turn
+      // (see driveGoalLoop's early returns) — checked fresh here rather than
+      // trusting a stale in-memory flag, so /goal, /goal resume, and a plain
+      // message sent while a goal happens to be active all converge on the
+      // same auto-continuation path.
+      if (!result.aborted && !result.errored && goals.get(currentChatId)?.status === "active") {
+        await driveGoalLoop(currentChatId, contextLine, result.finalText);
       }
     }
   } finally {

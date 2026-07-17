@@ -31,6 +31,10 @@ export const config = {
   // multi-step research turn needs; still bounded so a truly runaway loop
   // (e.g. the model retrying a failing tool forever) terminates eventually.
   graphRecursionLimit: Number(process.env.GRAPH_RECURSION_LIMIT ?? 150),
+  // /goal mode (CLI-only, see src/core/goalJudge.ts): how many worker turns
+  // the auto-continuation loop gets before pausing itself rather than
+  // burning tokens forever on a goal that never resolves.
+  goalMaxTurns: Number(process.env.GOAL_MAX_TURNS ?? 20),
   webPort: Number(process.env.WEB_PORT ?? 4173),
   // Shared checkpoint database: the CLI and the web interface each open
   // their own connection to this same file, which is how they end up
