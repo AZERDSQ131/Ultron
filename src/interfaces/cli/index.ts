@@ -43,6 +43,7 @@ let generationCursor = 0;
 let pendingRender: { input: string; cursor: number; contextLine: string } | undefined;
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
 let activePrompt = INPUT_PROMPT;
+let activeModeLabel = "None";
 
 function appendTranscript(text: string): void {
   transcript += text;
@@ -71,7 +72,8 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
   const suggestion = commandSuggestion(input);
   const suggestionLine = suggestion ? chalk.dim(`↳ ${suggestion}`) : "";
-  const footer = `${rule()}\n${activePrompt}${input}\n${suggestionLine}\n${contextLine}\n${rule()}`;
+  const displayContextLine = `${contextLine}  ${chalk.dim("mode")} ${activeModeLabel}`;
+  const footer = `${rule()}\n${activePrompt}${input}\n${suggestionLine}\n${displayContextLine}\n${rule()}`;
   const footerRows = footer.split("\n").reduce((rows, line) => rows + wrappedRows(line), 0);
   const rows = stdout.rows || 24;
   const padding = Math.max(0, rows - transcriptRows(content) - footerRows);
@@ -83,11 +85,11 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${rule()}\n${inputLine}`);
   const promptWidth = stripAnsi(activePrompt).length + cursor;
   const width = Math.max(1, stdout.columns || 80);
-  stdout.write(`\n${suggestionLine}\n${contextLine}\n${rule()}`);
+  stdout.write(`\n${suggestionLine}\n${displayContextLine}\n${rule()}`);
   // The cursor is now on the last footer line. Return to the input by the
   // number of footer lines actually written; avoid save/restore sequences,
   // which are not restored consistently by every terminal emulator.
-  const footerAfterInputRows = wrappedRows(suggestionLine) + wrappedRows(contextLine) + wrappedRows(rule());
+  const footerAfterInputRows = wrappedRows(suggestionLine) + wrappedRows(displayContextLine) + wrappedRows(rule());
   readline.moveCursor(stdout, 0, -footerAfterInputRows);
   readline.cursorTo(stdout, promptWidth % width);
 }
@@ -1021,6 +1023,7 @@ async function main() {
                 continue;
               }
               taskMode = mode;
+              activeModeLabel = mode === "todo" ? "To-Do" : mode === "plan" ? "Plan" : "None";
               // Task mode applies to the next user request. Drop any list
               // left by an earlier request now, before it can be mistaken
               // for the plan of the new one.
@@ -1049,6 +1052,7 @@ async function main() {
               }
               if (sub === "clear") {
                 goals.clear(currentChatId);
+                activeModeLabel = taskMode === "todo" ? "To-Do" : taskMode === "plan" ? "Plan" : "None";
                 appendTranscript(chalk.dim("[ultron] goal cleared.\n\n"));
                 continue;
               }
@@ -1068,6 +1072,7 @@ async function main() {
                   appendTranscript(chalk.yellow("[ultron] no paused goal to resume.\n\n"));
                   continue;
                 }
+                activeModeLabel = "Goal";
                 appendTranscript(chalk.dim(`[ultron] goal resumed: ${resumed.objective}\n\n`));
                 // Falls through to the normal send path below, same as
                 // /retry — this becomes a real turn in the chat, not a
@@ -1085,6 +1090,7 @@ async function main() {
                 continue;
               }
               goals.set(currentChatId, goalArgument, config.goalMaxTurns);
+              activeModeLabel = "Goal";
               appendTranscript(
                 chalk.greenBright(
                   `[ultron] goal set — I'll work it and self-check until it's done or blocked (max ${config.goalMaxTurns} turns).\n\n`,
