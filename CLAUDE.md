@@ -114,7 +114,14 @@ mais ne sont pas implémentées.
   pour que le chat archivé reste consultable depuis la sidebar web.
 - `src/core/tools/` : outils avec scopes déclarés dans `index.ts` : shell,
   fichiers, HTTP/web, processus, date/heure courante, tâches planifiées,
-  sous-agents, et une to-do list par chat (`todo_write`/`todo_read`,
+  sous-agents, `open_app`/`applescript_run` (`macos.ts` — lancer une app
+  macOS par son nom via `open -a`, ou piloter une app qui expose un
+  dictionnaire AppleScript/JXA comme Finder, Notes, Calendar, System
+  Events — préférés à un agent générique de contrôle GUI par clics/pixels,
+  abandonné après plusieurs tentatives : les modèles disponibles via
+  l'API NVIDIA n'étaient pas assez fiables pour du clic à l'aveugle
+  autonome, voir l'historique git de `src/core/computerUse.ts` supprimé),
+  et une to-do list par chat (`todo_write`/`todo_read`,
   `src/core/memory/todos.ts`) que le modèle tient à jour sur les tâches
   longues et que l'UI web affiche en direct dans un panneau à droite
   (`public/js/todos.js`, `GET /api/chats/:id/todos`). La seule consigne

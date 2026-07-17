@@ -10,6 +10,7 @@ import { todoWrite, todoUpdate, todoRead } from "./todos.js";
 import { planPropose } from "./plan.js";
 import { memoryWrite } from "./memory.js";
 import { skillRead } from "./skills.js";
+import { openApp, runAppleScript } from "./macos.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -34,6 +35,8 @@ export const tools: StructuredToolInterface[] = [
   planPropose,
   memoryWrite,
   skillRead,
+  openApp,
+  runAppleScript,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -67,4 +70,12 @@ export const toolScopes: Record<string, ToolScope> = {
   plan_propose: "write",
   memory_write: "write",
   skill_read: "read",
+  // Launches a process — a real effect, but bounded to "open this app"
+  // with no further reach.
+  open_app: "write",
+  // Arbitrary AppleScript/JXA can do essentially anything a shell command
+  // can (control other apps, System Events, delete files via Finder
+  // scripting) — same scope as run_shell_command, not the narrower
+  // open_app.
+  applescript_run: "destructive",
 };
