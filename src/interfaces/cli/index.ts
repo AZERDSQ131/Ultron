@@ -408,7 +408,12 @@ function pickArchive(contextLine: string): Promise<string | undefined> {
   });
 }
 
-async function listNvidiaModels(): Promise<string[]> {
+interface NvidiaModelInfo {
+  id: string;
+  contextWindowTokens?: number;
+}
+
+async function listNvidiaModels(): Promise<NvidiaModelInfo[]> {
   const baseUrl = config.nemotronBaseUrl.replace(/\/+$/, "");
   const response = await fetch(`${baseUrl}/models`, {
     headers: {
@@ -417,22 +422,38 @@ async function listNvidiaModels(): Promise<string[]> {
     },
   });
   if (!response.ok) throw new Error(`NVIDIA returned HTTP ${response.status}`);
-  const payload = (await response.json()) as { data?: { id?: unknown }[] };
+  const payload = (await response.json()) as {
+    data?: { id?: unknown; max_model_len?: unknown; max_context_length?: unknown }[];
+  };
   return (payload.data ?? [])
-    .map((model) => (typeof model.id === "string" ? model.id : ""))
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b));
+    .map((model) => {
+      if (typeof model.id !== "string" || !model.id) return undefined;
+      const rawContext = model.max_model_len ?? model.max_context_length;
+      const contextWindowTokens = typeof rawContext === "number"
+        ? rawContext
+        : typeof rawContext === "string" && /^\d+$/.test(rawContext)
+          ? Number(rawContext)
+          : undefined;
+      return {
+        id: model.id,
+        ...(contextWindowTokens && Number.isSafeInteger(contextWindowTokens) && contextWindowTokens > 0
+          ? { contextWindowTokens }
+          : {}),
+      };
+    })
+    .filter((model): model is NvidiaModelInfo => Boolean(model))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-function pickModel(contextLine: string, models: string[], currentModel: string): Promise<string | undefined> {
+function pickModel(contextLine: string, models: NvidiaModelInfo[], currentModel: string): Promise<NvidiaModelInfo | undefined> {
   const MAX_VISIBLE_MODELS = 18;
 
   return new Promise((resolve) => {
     let query = "";
-    let selected = Math.max(0, models.indexOf(currentModel));
+    let selected = Math.max(0, models.findIndex((model) => model.id === currentModel));
     let finished = false;
 
-    const getMatches = () => models.filter((model) => model.toLowerCase().includes(query.toLowerCase()));
+    const getMatches = () => models.filter((model) => model.id.toLowerCase().includes(query.toLowerCase()));
 
     const redraw = () => {
       const matches = getMatches();
@@ -442,9 +463,10 @@ function pickModel(contextLine: string, models: string[], currentModel: string):
         ? visible
             .map((model, index) => {
               const marker = index === selected ? chalk.greenBright("›") : " ";
-              const label = index === selected ? chalk.cyanBright.bold(model) : model;
-              const current = model === currentModel ? ` ${uiDim("(current)")}` : "";
-              return `  ${marker} ${label}${current}`;
+              const label = index === selected ? chalk.cyanBright.bold(model.id) : model.id;
+              const context = model.contextWindowTokens ? ` ${uiDim(`· ${model.contextWindowTokens.toLocaleString()} tokens`)}` : "";
+              const current = model.id === currentModel ? ` ${uiDim("(current)")}` : "";
+              return `  ${marker} ${label}${context}${current}`;
             })
             .join("\n")
         : uiDim("  no matching NVIDIA models");
@@ -459,7 +481,7 @@ function pickModel(contextLine: string, models: string[], currentModel: string):
       readline.cursorTo(stdout, stripAnsi(prompt).length + query.length);
     };
 
-    const finish = (value?: string) => {
+    const finish = (value?: NvidiaModelInfo) => {
       if (finished) return;
       finished = true;
       activePickerRedraw = undefined;
@@ -889,6 +911,11 @@ async function main() {
   let thinkingMode: ThinkingMode = "full";
   let taskMode: TaskMode = "none";
   let verbose = false;
+  const fallbackContextWindowTokens = config.contextWindowTokens;
+
+  const applyModelContext = (model: NvidiaModelInfo | undefined): void => {
+    config.contextWindowTokens = model?.contextWindowTokens ?? fallbackContextWindowTokens;
+  };
 
   const changeModel = async (contextLine: string): Promise<void> => {
     appendTranscript(uiDim("[ultron] loading NVIDIA models…\n"));
@@ -901,14 +928,32 @@ async function main() {
         return;
       }
       const selected = await pickModel(contextLine, models, config.nemotronModel);
-      if (!selected || selected === config.nemotronModel) return;
-      config.nemotronModel = selected;
+      if (!selected) return;
+      if (selected.id === config.nemotronModel) {
+        applyModelContext(selected);
+        return;
+      }
+      config.nemotronModel = selected.id;
+      applyModelContext(selected);
       graph = buildGraph();
-      appendTranscript(uiDim(`[ultron] model set to ${selected}.\n\n`));
+      const contextLabel = selected.contextWindowTokens
+        ? ` · context ${selected.contextWindowTokens.toLocaleString()} tokens`
+        : " · context fallback in use";
+      appendTranscript(uiDim(`[ultron] model set to ${selected.id}${contextLabel}.\n\n`));
     } catch (error) {
       appendTranscript(chalk.red(`[ultron] could not list NVIDIA models: ${error instanceof Error ? error.message : String(error)}\n\n`));
     }
   };
+
+  // Use the served model's advertised limit for the initial context gauge as
+  // well. If the endpoint is unavailable or omits the field, retain the
+  // explicit CONTEXT_WINDOW_TOKENS fallback from the environment.
+  try {
+    const models = await listNvidiaModels();
+    applyModelContext(models.find((model) => model.id === config.nemotronModel));
+  } catch {
+    // The model can still be used with the configured fallback window.
+  }
 
   const archiveCurrentChat = async (contextLine: string, requestedTitle?: string): Promise<void> => {
     let title = requestedTitle?.trim();
