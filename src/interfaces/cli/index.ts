@@ -29,7 +29,8 @@ import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../cor
 import { disableConsoleEcho } from "../../core/logger.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
-import { listSkills, readSkill, type SkillMeta } from "../../core/skills.js";
+import { listSkills, readSkill } from "../../core/skills.js";
+import { listHubSkills, installHubSkill, type HubSkill } from "../../core/skillsHub.js";
 import { MarkdownStreamRenderer } from "./markdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -71,6 +72,12 @@ interface MentionMatch {
   query: string;
 }
 
+interface MentionEntry {
+  name: string;
+  description: string;
+  source: "local" | "hub";
+}
+
 // A mention token is "@" plus following non-whitespace, anchored at the
 // start of the input or right after whitespace, with the cursor still
 // inside it — so "foo@bar" mid-word doesn't trigger it, and moving the
@@ -85,13 +92,39 @@ function activeMentionQuery(input: string, cursor: number): MentionMatch | undef
   return { start: at, query };
 }
 
+// listHubSkills() has its own hour-long cache/in-flight dedup (see
+// skillsHub.ts), but it's still a network round trip on first use — kept
+// out of the synchronous render path entirely. Fetched once per process,
+// then merged into mentionPanelState's local filtering; the panel just
+// shows local-only results until this resolves, then redraws once via
+// latestRender (the module's "last known render call", already used by
+// flushRender) so hub results appear without the user needing to type
+// another character.
+let hubSkillsCache: HubSkill[] = [];
+let hubSkillsLoaded = false;
+
+function ensureHubSkillsLoaded(): void {
+  if (hubSkillsLoaded) return;
+  hubSkillsLoaded = true;
+  listHubSkills()
+    .then((skills) => {
+      hubSkillsCache = skills;
+      renderScreen(latestRender.input, latestRender.cursor, latestRender.contextLine);
+    })
+    .catch(() => {
+      /* offline or GitHub unreachable — listHubSkills() already resolves []
+         on failure instead of rejecting; this catch is just a safety net. */
+    });
+}
+
 // Single source of truth for both drawScreen (rendering) and onKeypress
 // (deciding whether to intercept up/down/enter/tab/escape) — computing it
 // twice per keystroke with separate logic would risk the two drifting out
 // of sync. Resets selection/dismissal state as a side effect whenever the
 // query text changes, so an in-progress selection doesn't survive typing
-// more characters.
-function mentionPanelState(input: string, cursor: number): { mention: MentionMatch; matches: SkillMeta[] } | undefined {
+// more characters. Local skills are shown before hub ones, and a hub skill
+// already installed locally is deduplicated in favor of the local entry.
+function mentionPanelState(input: string, cursor: number): { mention: MentionMatch; matches: MentionEntry[] } | undefined {
   const mention = activeMentionQuery(input, cursor);
   if (!mention) {
     lastMentionQuery = undefined;
@@ -103,9 +136,15 @@ function mentionPanelState(input: string, cursor: number): { mention: MentionMat
     mentionSelected = 0;
     mentionDismissed = false;
   }
-  const matches = listSkills()
-    .filter((skill) => skill.name.toLowerCase().includes(mention.query.toLowerCase()))
-    .slice(0, MENTION_MAX_VISIBLE);
+  ensureHubSkillsLoaded();
+  const query = mention.query.toLowerCase();
+  const local = listSkills().filter((skill) => skill.name.toLowerCase().includes(query));
+  const localNames = new Set(local.map((skill) => skill.name));
+  const hub = hubSkillsCache.filter((skill) => !localNames.has(skill.name) && skill.name.toLowerCase().includes(query));
+  const matches: MentionEntry[] = [
+    ...local.map((skill) => ({ name: skill.name, description: skill.description, source: "local" as const })),
+    ...hub.map((skill) => ({ name: skill.name, description: skill.description, source: "hub" as const })),
+  ].slice(0, MENTION_MAX_VISIBLE);
   mentionSelected = matches.length ? Math.min(mentionSelected, matches.length - 1) : 0;
   return { mention, matches };
 }
@@ -114,11 +153,11 @@ function applyMentionSelection(
   value: string,
   cursor: number,
   mention: MentionMatch,
-  skill: SkillMeta,
+  name: string,
 ): { value: string; cursor: number } {
   const before = value.slice(0, mention.start);
   const after = value.slice(cursor);
-  const inserted = `@${skill.name} `;
+  const inserted = `@${name} `;
   return { value: before + inserted + after, cursor: before.length + inserted.length };
 }
 
@@ -213,10 +252,11 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
       ? [
           uiDim("skills · type to filter · ↑/↓ select · Enter/Tab insert · Esc dismiss"),
           ...(mentionPanel.matches.length
-            ? mentionPanel.matches.map((skill, index) => {
+            ? mentionPanel.matches.map((entry, index) => {
                 const marker = index === mentionSelected ? chalk.greenBright("›") : " ";
-                const label = index === mentionSelected ? chalk.cyanBright.bold(skill.name) : skill.name;
-                return `  ${marker} ${label}  ${uiDim(skill.description)}`;
+                const label = index === mentionSelected ? chalk.cyanBright.bold(entry.name) : entry.name;
+                const tag = entry.source === "hub" ? ` ${uiDim("(hub)")}` : "";
+                return `  ${marker} ${label}${tag}  ${uiDim(entry.description)}`;
               })
             : [uiDim("  no matching skills")]),
         ]
@@ -318,7 +358,12 @@ function readInput(
       resolve(result);
     };
 
-    const onKeypress = (input: string, key: readline.Key) => {
+    // async: the "insert a hub skill" branch below awaits installHubSkill()
+    // (a network fetch) before finishing the keystroke. Node's EventEmitter
+    // doesn't await listeners, so other keypresses can still arrive and run
+    // while this is in flight — acceptable for a single-user local CLI, and
+    // installHubSkill() itself is a plain overwrite, safe to double-fire.
+    const onKeypress = async (input: string, key: readline.Key) => {
       // Intercept navigation/selection keys while a skills panel is showing
       // (main composer only — mentionPanelState no-ops elsewhere since
       // activePrompt won't be INPUT_PROMPT). Uses value/cursor as they stood
@@ -344,8 +389,23 @@ function readInput(
               return;
             }
             if (key.name === "tab" || key.name === "return" || key.name === "enter") {
-              const skill = activeMention.matches[mentionSelected];
-              const applied = applyMentionSelection(value, cursor, activeMention.mention, skill);
+              const entry = activeMention.matches[mentionSelected];
+              // A hub skill isn't on disk yet — install it (writes
+              // skills/<name>/SKILL.md, see skillsHub.ts) before inserting
+              // the mention, so expandSkillMentions can find it at send
+              // time the same way it finds any other local skill.
+              if (entry.source === "hub") {
+                appendTranscript(uiDim(`[ultron] installing skill "${entry.name}" from anthropics/skills…\n`));
+                renderScreen(value, cursor, contextLine);
+                flushRender();
+                const installed = await installHubSkill(entry.name);
+                appendTranscript(
+                  installed
+                    ? uiDim(`[ultron] skill "${entry.name}" installed to skills/${entry.name}/SKILL.md.\n\n`)
+                    : chalk.yellow(`[ultron] failed to install skill "${entry.name}" — inserted as text only.\n\n`),
+                );
+              }
+              const applied = applyMentionSelection(value, cursor, activeMention.mention, entry.name);
               value = applied.value;
               cursor = applied.cursor;
               renderScreen(value, cursor, contextLine);
