@@ -34,7 +34,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -49,6 +49,7 @@ let activeModeLabel = "None";
 let activePermissionLabel: SecurityMode = "bypass";
 type TerminalTheme = "auto" | "light" | "dark";
 let terminalTheme: TerminalTheme = "auto";
+let activePickerRedraw: (() => void) | undefined;
 
 function isLightTerminal(): boolean {
   if (terminalTheme === "light") return true;
@@ -376,6 +377,111 @@ function pickArchive(contextLine: string): Promise<string | undefined> {
   });
 }
 
+async function listNvidiaModels(): Promise<string[]> {
+  const baseUrl = config.nemotronBaseUrl.replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/models`, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${config.nvidiaApiKey}`,
+    },
+  });
+  if (!response.ok) throw new Error(`NVIDIA returned HTTP ${response.status}`);
+  const payload = (await response.json()) as { data?: { id?: unknown }[] };
+  return (payload.data ?? [])
+    .map((model) => (typeof model.id === "string" ? model.id : ""))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function pickModel(contextLine: string, models: string[], currentModel: string): Promise<string | undefined> {
+  const MAX_VISIBLE_MODELS = 18;
+
+  return new Promise((resolve) => {
+    let query = "";
+    let selected = Math.max(0, models.indexOf(currentModel));
+    let finished = false;
+
+    const getMatches = () => models.filter((model) => model.toLowerCase().includes(query.toLowerCase()));
+
+    const redraw = () => {
+      const matches = getMatches();
+      const visible = matches.slice(0, MAX_VISIBLE_MODELS);
+      selected = Math.min(selected, Math.max(0, visible.length - 1));
+      const rows = visible.length
+        ? visible
+            .map((model, index) => {
+              const marker = index === selected ? chalk.greenBright("›") : " ";
+              const label = index === selected ? chalk.cyanBright.bold(model) : model;
+              const current = model === currentModel ? ` ${uiDim("(current)")}` : "";
+              return `  ${marker} ${label}${current}`;
+            })
+            .join("\n")
+        : uiDim("  no matching NVIDIA models");
+      const count = matches.length > MAX_VISIBLE_MODELS ? ` · showing ${MAX_VISIBLE_MODELS}/${matches.length}` : "";
+      const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
+      const picker = `${uiDim(`NVIDIA models · type to search · ↑/↓ select · Enter confirm · Esc cancel${count}`)}\n${rows}`;
+      const prompt = `${chalk.magentaBright.bold("model")} ${uiDim("›")} `;
+      const footer = `${rule()}\n${prompt}${query}\n${statusContextLine(contextLine)}\n${rule()}`;
+      const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
+      stdout.write(`\x1b[2J\x1b[H${content}${picker}\n${"\n".repeat(padding)}${footer}`);
+      readline.moveCursor(stdout, 0, -2);
+      readline.cursorTo(stdout, stripAnsi(prompt).length + query.length);
+    };
+
+    const finish = (value?: string) => {
+      if (finished) return;
+      finished = true;
+      activePickerRedraw = undefined;
+      stdin.setRawMode?.(false);
+      stdin.removeListener("keypress", onKeypress);
+      cancelActiveInput = undefined;
+      renderScreen("", 0, contextLine);
+      flushRender();
+      resolve(value);
+    };
+
+    const onKeypress = (input: string, key: readline.Key) => {
+      const matches = getMatches().slice(0, MAX_VISIBLE_MODELS);
+      if (key.name === "return" || key.name === "enter") {
+        finish(matches[selected]);
+        return;
+      }
+      if (key.name === "escape") {
+        finish();
+        return;
+      }
+      if (key.name === "up") {
+        if (matches.length) selected = (selected - 1 + matches.length) % matches.length;
+        redraw();
+        return;
+      }
+      if (key.name === "down") {
+        if (matches.length) selected = (selected + 1) % matches.length;
+        redraw();
+        return;
+      }
+      if (key.name === "backspace") {
+        query = query.slice(0, -1);
+        selected = 0;
+        redraw();
+        return;
+      }
+      if (!key.ctrl && !key.meta && input && !input.includes("\n") && !input.includes("\r")) {
+        query += input;
+        selected = 0;
+        redraw();
+      }
+    };
+
+    cancelActiveInput = () => finish();
+    activePickerRedraw = redraw;
+    readline.emitKeypressEvents(stdin);
+    stdin.setRawMode?.(true);
+    stdin.on("keypress", onKeypress);
+    redraw();
+  });
+}
+
 const PERMISSION_OPTIONS: { value: SecurityMode; description: string }[] = [
   { value: "bypass", description: "run every tool immediately" },
   { value: "accept_edit", description: "ask before destructive tools" },
@@ -628,6 +734,10 @@ function refreshBanner() {
 }
 
 stdout.on("resize", () => {
+  if (activePickerRedraw) {
+    activePickerRedraw();
+    return;
+  }
   refreshBanner();
   renderScreen(latestRender.input, latestRender.cursor, latestRender.contextLine);
   flushRender();
@@ -635,7 +745,7 @@ stdout.on("resize", () => {
 
 function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -729,7 +839,7 @@ async function main() {
   disableConsoleEcho();
   printBanner();
 
-  const graph = buildGraph();
+  let graph = buildGraph();
   const chats = getChatRegistry(config.databasePath);
   const goals = getGoalRegistry(config.databasePath);
   const todos = getTodoRegistry(config.databasePath);
@@ -748,6 +858,26 @@ async function main() {
   let thinkingMode: ThinkingMode = "full";
   let taskMode: TaskMode = "none";
   let verbose = false;
+
+  const changeModel = async (contextLine: string): Promise<void> => {
+    appendTranscript(uiDim("[ultron] loading NVIDIA models…\n"));
+    renderScreen("", 0, contextLine);
+    flushRender();
+    try {
+      const models = await listNvidiaModels();
+      if (models.length === 0) {
+        appendTranscript(chalk.yellow("[ultron] NVIDIA returned no models.\n\n"));
+        return;
+      }
+      const selected = await pickModel(contextLine, models, config.nemotronModel);
+      if (!selected || selected === config.nemotronModel) return;
+      config.nemotronModel = selected;
+      graph = buildGraph();
+      appendTranscript(uiDim(`[ultron] model set to ${selected}.\n\n`));
+    } catch (error) {
+      appendTranscript(chalk.red(`[ultron] could not list NVIDIA models: ${error instanceof Error ? error.message : String(error)}\n\n`));
+    }
+  };
 
   const archiveCurrentChat = async (contextLine: string, requestedTitle?: string): Promise<void> => {
     let title = requestedTitle?.trim();
@@ -1037,6 +1167,9 @@ async function main() {
         switch (command) {
           case "/help":
             printHelp();
+            continue;
+          case "/model":
+            await changeModel(contextLine);
             continue;
           case "/status":
             printStatus(thinkingMode, taskMode, verbose, currentChatId, chats.getSecurityMode(currentChatId), goals.get(currentChatId));
