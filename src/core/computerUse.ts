@@ -284,6 +284,47 @@ function buildTools(shotRef: { current: Screenshot }) {
   };
 }
 
+interface FakeToolCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+// Some vision models on this endpoint (meta/llama-3.2-90b-vision-instruct
+// observed doing this) don't reliably use OpenAI-style function calling
+// even when tools are bound — they narrate intent and then write the call
+// as JSON in the message text instead, e.g. `I will use computer_type...
+// {"name": "computer_type", "parameters": {"text": "..."}}`. Same problem
+// graph.ts's extractFakeToolCall works around for the main chat model,
+// simplified here since this loop's tool set is small and unambiguous.
+function extractFakeToolCall(content: unknown): FakeToolCall | undefined {
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((part) => (typeof part === "string" ? part : typeof part?.text === "string" ? part.text : ""))
+            .join("\n")
+        : "";
+  if (!text) return undefined;
+
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return undefined;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.name !== "string") return undefined;
+
+  const argsRaw = obj.arguments ?? obj.parameters ?? obj.args ?? obj.input ?? {};
+  if (typeof argsRaw !== "object" || argsRaw === null || Array.isArray(argsRaw)) return undefined;
+  return { name: obj.name, args: argsRaw as Record<string, unknown> };
+}
+
 function screenshotMessage(shot: Screenshot, caption: string): HumanMessage {
   return new HumanMessage({
     content: [
@@ -322,12 +363,17 @@ export async function runComputerUseLoop(options: ComputerUseOptions): Promise<C
     }
 
     const toolCalls = response.tool_calls ?? [];
-    if (toolCalls.length === 0) {
-      const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
-      return { status: "failed", summary: text || "Model did not call a tool or produce a summary.", steps: step - 1 };
+    let call: { name: string; args: Record<string, unknown>; id?: string };
+    if (toolCalls.length > 0) {
+      call = toolCalls[0];
+    } else {
+      const fake = extractFakeToolCall(response.content);
+      if (!fake || (!byName[fake.name] && fake.name !== "computer_finish" && fake.name !== "computer_fail")) {
+        const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+        return { status: "failed", summary: text || "Model did not call a tool or produce a summary.", steps: step - 1 };
+      }
+      call = { name: fake.name, args: fake.args, id: `fake_${step}` };
     }
-
-    const call = toolCalls[0];
     history.push(new AIMessage({ content: "", tool_calls: [call] }));
 
     if (call.name === "computer_finish" || call.name === "computer_fail") {
