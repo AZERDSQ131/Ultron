@@ -49,10 +49,14 @@
       <div id="command-menu" class="command-menu" hidden></div>
       <form id="composer">
         <div class="model-picker">
-          <button type="button" id="model-picker-btn" class="model-label" aria-haspopup="listbox" aria-expanded="false" title="Select model">Model</button>
+          <button type="button" id="model-picker-btn" class="model-picker-btn" aria-haspopup="listbox" aria-expanded="false" title="Select model">
+            <span class="model-picker-icon" aria-hidden="true">✦</span><span>Models</span><span class="model-picker-chevron" aria-hidden="true">⌃</span>
+          </button>
           <div id="model-menu" class="model-menu" role="listbox" aria-label="NVIDIA models" hidden>
-            <input id="model-search" type="search" placeholder="Search models…" autocomplete="off" />
-            <div id="model-options"></div>
+            <div class="model-menu-header"><div><strong>Models</strong><span id="model-count" class="model-count"></span></div><span class="model-menu-hint">NVIDIA API</span></div>
+            <div class="model-current"><span class="model-current-label">Active</span><strong id="active-model-name">—</strong></div>
+            <label class="model-search-wrap"><span aria-hidden="true">⌕</span><input id="model-search" type="search" placeholder="Search models…" autocomplete="off" /></label>
+            <div id="model-options" class="model-options"></div>
           </div>
         </div>
         <div class="thinking-control">
@@ -182,10 +186,6 @@
 
         <section class="inspector-section">
           <h3>Model</h3>
-          <div class="field-row">
-            <label for="model-select">Model</label>
-            <select id="model-select"><option value="">Loading…</option></select>
-          </div>
           <div class="field-row">
             <label for="thinking-select-settings">Reasoning</label>
             <select id="thinking-select-settings">

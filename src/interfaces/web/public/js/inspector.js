@@ -6,7 +6,6 @@ const overlay = document.getElementById("inspector-overlay");
 const closeBtn = document.getElementById("inspector-close");
 const tabs = [...document.querySelectorAll(".inspector-tab")];
 const toolLegend = document.getElementById("tool-legend");
-const modelSelect = document.getElementById("model-select");
 
 function showTab(name) {
   tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === name));
@@ -46,22 +45,6 @@ async function loadToolLegend() {
   }
 }
 
-async function loadModels() {
-  try {
-    const data = await api.models();
-    modelSelect.innerHTML = "";
-    for (const model of data.models) {
-      const option = document.createElement("option");
-      option.value = model.id;
-      option.textContent = model.id;
-      modelSelect.appendChild(option);
-    }
-    modelSelect.value = data.current;
-  } catch {
-    modelSelect.innerHTML = '<option value="">Could not load models</option>';
-  }
-}
-
 // No header button triggers this directly (removed — see index.html); it's
 // reachable only via ⌘, / ⌘/ (shortcuts.js).
 export function initInspector() {
@@ -77,14 +60,4 @@ export function initInspector() {
   });
 
   loadToolLegend();
-  loadModels();
-  modelSelect.addEventListener("change", async () => {
-    if (!modelSelect.value) return;
-    try {
-      await api.setModel(modelSelect.value);
-      window.dispatchEvent(new Event("model:changed"));
-    } catch {
-      await loadModels();
-    }
-  });
 }

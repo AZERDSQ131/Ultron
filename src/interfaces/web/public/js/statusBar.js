@@ -10,7 +10,10 @@ const modelMenu = document.getElementById("model-menu");
 const modelSearch = document.getElementById("model-search");
 const modelOptions = document.getElementById("model-options");
 const modelPickerButton = document.getElementById("model-picker-btn");
+const activeModelName = document.getElementById("active-model-name");
+const modelCount = document.getElementById("model-count");
 let availableModels = [];
+let activeModel = "";
 
 export function updateContextGauge(usedTokens, maxTokens) {
   const ratio = Math.min(usedTokens / maxTokens, 1);
@@ -24,11 +27,13 @@ export function updateContextGauge(usedTokens, maxTokens) {
 export async function loadStatus() {
   try {
     const data = await api.status(state.activeChatId);
+    activeModel = data.model;
     modelLabel.textContent = data.model;
-    modelPickerButton.textContent = data.model;
+    activeModelName.textContent = data.model;
     settingsModel.textContent = data.model;
     settingsToolCount.textContent = String(data.toolCount);
     updateContextGauge(data.contextTokens, data.maxTokens);
+    if (availableModels.length) renderModelOptions(modelSearch.value);
     return data;
   } catch {
     modelLabel.textContent = "offline";
@@ -38,15 +43,33 @@ export async function loadStatus() {
 
 function renderModelOptions(query = "") {
   const matches = availableModels.filter((model) => model.id.toLowerCase().includes(query.toLowerCase()));
-  modelOptions.innerHTML = matches.length ? "" : '<div class="model-empty">No matching NVIDIA models</div>';
+  modelCount.textContent = `${matches.length} ${matches.length === 1 ? "model" : "models"}`;
+  modelOptions.innerHTML = "";
+  if (!matches.length) {
+    modelOptions.innerHTML = '<div class="model-empty">No matching models</div>';
+    return;
+  }
   for (const model of matches) {
     const option = document.createElement("button");
     option.type = "button";
-    option.className = "model-option";
+    option.className = `model-option${model.id === activeModel ? " active" : ""}`;
     option.setAttribute("role", "option");
-    option.innerHTML = `<span>${model.id}</span><small>${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString()} tokens` : "context unknown"}</small>`;
+    option.setAttribute("aria-selected", String(model.id === activeModel));
+    const check = document.createElement("span");
+    check.className = "model-option-check";
+    check.textContent = model.id === activeModel ? "✓" : "";
+    const name = document.createElement("span");
+    name.className = "model-option-name";
+    name.textContent = model.id;
+    const context = document.createElement("small");
+    context.textContent = model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString()} context` : "context unknown";
+    const meta = document.createElement("span");
+    meta.className = "model-option-meta";
+    meta.append(context);
+    option.append(check, name, meta);
     option.addEventListener("click", async () => {
-    await api.setModel(model.id);
+      await api.setModel(model.id);
+      activeModel = model.id;
       modelMenu.hidden = true;
       modelPickerButton.setAttribute("aria-expanded", "false");
       await loadStatus();
@@ -58,6 +81,7 @@ function renderModelOptions(query = "") {
 async function loadModelPicker() {
   try {
     availableModels = (await api.models()).models;
+    if (!activeModel) activeModel = availableModels.find((model) => model.id === (modelLabel.textContent ?? ""))?.id ?? "";
     renderModelOptions();
   } catch {
     modelOptions.innerHTML = '<div class="model-empty">Could not load models</div>';
