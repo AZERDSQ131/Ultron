@@ -77,16 +77,14 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   const padding = Math.max(0, rows - transcriptRows(content) - footerRows);
 
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${footer}`);
-  // The old fixed -3 assumed a five-line footer and broke as soon as the
-  // prompt wrapped. Move to the actual prompt row and account for wrapped
-  // input so redraws cannot land in the banner or splice text into an
-  // earlier line.
-  readline.moveCursor(stdout, 0, -(footerRows - 1));
+  // Position absolutely inside the freshly drawn frame. Relative cursor
+  // moves from the final rule are terminal-dependent once the transcript or
+  // footer wraps, which was placing the visible cursor one line above the
+  // input even though keystrokes still went to the right value.
   const promptWidth = stripAnsi(activePrompt).length + cursor;
   const width = Math.max(1, stdout.columns || 80);
-  readline.cursorTo(stdout, 0);
-  readline.moveCursor(stdout, 0, Math.floor(promptWidth / width));
-  readline.cursorTo(stdout, promptWidth % width);
+  const promptRow = transcriptRows(content) + padding;
+  readline.cursorTo(stdout, promptWidth % width, promptRow + Math.floor(promptWidth / width));
 }
 
 function renderScreen(input: string, cursor: number, contextLine: string): void {
