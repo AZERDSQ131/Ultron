@@ -83,7 +83,10 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   // input even though keystrokes still went to the right value.
   const promptWidth = stripAnsi(activePrompt).length + cursor;
   const width = Math.max(1, stdout.columns || 80);
-  const promptRow = transcriptRows(content) + padding;
+  // transcriptRows counts the empty slot after content's final newline;
+  // the footer rule occupies that slot, so the prompt starts one row below
+  // it rather than at the raw count.
+  const promptRow = transcriptRows(content) + padding - 1;
   readline.cursorTo(stdout, promptWidth % width, promptRow + Math.floor(promptWidth / width));
 }
 
