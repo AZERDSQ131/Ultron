@@ -29,6 +29,7 @@ import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../cor
 import { disableConsoleEcho } from "../../core/logger.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
+import { listSkills, readSkill, type SkillMeta } from "../../core/skills.js";
 import { MarkdownStreamRenderer } from "./markdown.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -51,6 +52,93 @@ let activePermissionLabel: SecurityMode = "bypass";
 type TerminalTheme = "auto" | "light" | "dark";
 let terminalTheme: TerminalTheme = "auto";
 let activePickerRedraw: (() => void) | undefined;
+
+// Inline "@skill" mention picker for the main composer only (gated on
+// activePrompt === INPUT_PROMPT in drawScreen/onKeypress below) — unlike the
+// other pickers (chat/model/permissions), this lives inside the normal
+// readInput loop instead of taking it over, since typing must keep working
+// normally around it. mentionSelected/mentionDismissed are read and written
+// from both drawScreen (render) and onKeypress (navigation), mirroring how
+// the rest of this file already shares render state across module-level
+// mutable variables rather than threading it through every call.
+let mentionSelected = 0;
+let mentionDismissed = false;
+let lastMentionQuery: string | undefined;
+const MENTION_MAX_VISIBLE = 6;
+
+interface MentionMatch {
+  start: number;
+  query: string;
+}
+
+// A mention token is "@" plus following non-whitespace, anchored at the
+// start of the input or right after whitespace, with the cursor still
+// inside it — so "foo@bar" mid-word doesn't trigger it, and moving the
+// cursor past the token (e.g. by typing a space) closes the panel.
+function activeMentionQuery(input: string, cursor: number): MentionMatch | undefined {
+  const uptoCursor = input.slice(0, cursor);
+  const at = uptoCursor.lastIndexOf("@");
+  if (at === -1) return undefined;
+  if (at > 0 && !/\s/.test(uptoCursor[at - 1])) return undefined;
+  const query = uptoCursor.slice(at + 1);
+  if (/\s/.test(query)) return undefined;
+  return { start: at, query };
+}
+
+// Single source of truth for both drawScreen (rendering) and onKeypress
+// (deciding whether to intercept up/down/enter/tab/escape) — computing it
+// twice per keystroke with separate logic would risk the two drifting out
+// of sync. Resets selection/dismissal state as a side effect whenever the
+// query text changes, so an in-progress selection doesn't survive typing
+// more characters.
+function mentionPanelState(input: string, cursor: number): { mention: MentionMatch; matches: SkillMeta[] } | undefined {
+  const mention = activeMentionQuery(input, cursor);
+  if (!mention) {
+    lastMentionQuery = undefined;
+    mentionDismissed = false;
+    return undefined;
+  }
+  if (mention.query !== lastMentionQuery) {
+    lastMentionQuery = mention.query;
+    mentionSelected = 0;
+    mentionDismissed = false;
+  }
+  const matches = listSkills()
+    .filter((skill) => skill.name.toLowerCase().includes(mention.query.toLowerCase()))
+    .slice(0, MENTION_MAX_VISIBLE);
+  mentionSelected = matches.length ? Math.min(mentionSelected, matches.length - 1) : 0;
+  return { mention, matches };
+}
+
+function applyMentionSelection(
+  value: string,
+  cursor: number,
+  mention: MentionMatch,
+  skill: SkillMeta,
+): { value: string; cursor: number } {
+  const before = value.slice(0, mention.start);
+  const after = value.slice(cursor);
+  const inserted = `@${skill.name} `;
+  return { value: before + inserted + after, cursor: before.length + inserted.length };
+}
+
+// Expands every "@skill-name" mention still present in a message about to
+// be sent into the skill's full body, injected as its own tagged block
+// right after the user's text — deterministic, not a hope that the model
+// calls skill_read on its own. Mirrors the task-mode directive pattern: the
+// user's explicit choice (picking a skill from the panel, or just typing
+// its name) drives behavior instead of model inference. Unmatched "@word"
+// tokens (not a real skill name) are left as plain text.
+function expandSkillMentions(message: string): string {
+  const names = new Set(listSkills().map((skill) => skill.name));
+  const mentioned = new Set<string>();
+  for (const match of message.matchAll(/(?:^|\s)@([\w-]+)/g)) {
+    if (names.has(match[1])) mentioned.add(match[1]);
+  }
+  if (!mentioned.size) return message;
+  const blocks = [...mentioned].map((name) => `<skill name="${name}">\n${readSkill(name)}\n</skill>`);
+  return `${message}\n\n---\n${blocks.join("\n\n")}`;
+}
 
 function isLightTerminal(): boolean {
   if (terminalTheme === "light") return true;
@@ -115,7 +203,27 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   const suggestion = cursor === input.length ? commandSuggestion(input) : "";
   const suggestionSuffix = suggestion ? uiDim(suggestion.slice(input.length)) : "";
   const displayContextLine = statusContextLine(contextLine);
-  const footer = `${rule()}\n${activePrompt}${input}${suggestionSuffix}\n${displayContextLine}\n${rule()}`;
+
+  // Gated to the main composer only (see mentionPanelState's comment) — the
+  // y/n confirm and title prompts reuse readInput with a different prompt
+  // and shouldn't grow a skills panel underneath them.
+  const mentionPanel = activePrompt === INPUT_PROMPT ? mentionPanelState(input, cursor) : undefined;
+  const mentionLines: string[] =
+    mentionPanel && !mentionDismissed
+      ? [
+          uiDim("skills · type to filter · ↑/↓ select · Enter/Tab insert · Esc dismiss"),
+          ...(mentionPanel.matches.length
+            ? mentionPanel.matches.map((skill, index) => {
+                const marker = index === mentionSelected ? chalk.greenBright("›") : " ";
+                const label = index === mentionSelected ? chalk.cyanBright.bold(skill.name) : skill.name;
+                return `  ${marker} ${label}  ${uiDim(skill.description)}`;
+              })
+            : [uiDim("  no matching skills")]),
+        ]
+      : [];
+  const mentionBlock = mentionLines.length ? `\n${mentionLines.join("\n")}` : "";
+
+  const footer = `${rule()}\n${activePrompt}${input}${suggestionSuffix}${mentionBlock}\n${displayContextLine}\n${rule()}`;
   const footerRows = footer.split("\n").reduce((rows, line) => rows + wrappedRows(line), 0);
   const rows = stdout.rows || 24;
   const padding = Math.max(0, rows - transcriptRows(content) - footerRows);
@@ -127,11 +235,12 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${rule()}\n${inputLine}`);
   const promptWidth = stripAnsi(activePrompt).length + cursor;
   const width = Math.max(1, stdout.columns || 80);
-  stdout.write(`\n${displayContextLine}\n${rule()}`);
+  stdout.write(`${mentionBlock}\n${displayContextLine}\n${rule()}`);
   // The cursor is now on the last footer line. Return to the input by the
   // number of footer lines actually written; avoid save/restore sequences,
   // which are not restored consistently by every terminal emulator.
-  const footerAfterInputRows = wrappedRows(displayContextLine) + wrappedRows(rule());
+  const mentionRows = mentionLines.reduce((rows, line) => rows + wrappedRows(line), 0);
+  const footerAfterInputRows = mentionRows + wrappedRows(displayContextLine) + wrappedRows(rule());
   readline.moveCursor(stdout, 0, -footerAfterInputRows);
   readline.cursorTo(stdout, promptWidth % width);
 }
@@ -210,6 +319,41 @@ function readInput(
     };
 
     const onKeypress = (input: string, key: readline.Key) => {
+      // Intercept navigation/selection keys while a skills panel is showing
+      // (main composer only — mentionPanelState no-ops elsewhere since
+      // activePrompt won't be INPUT_PROMPT). Uses value/cursor as they stood
+      // before this keystroke, i.e. exactly what's currently on screen —
+      // correct for these keys since none of them mutate text themselves.
+      if (activePrompt === INPUT_PROMPT) {
+        const activeMention = mentionPanelState(value, cursor);
+        if (activeMention && !mentionDismissed) {
+          if (key.name === "escape") {
+            mentionDismissed = true;
+            renderScreen(value, cursor, contextLine);
+            return;
+          }
+          if (activeMention.matches.length) {
+            if (key.name === "up") {
+              mentionSelected = (mentionSelected - 1 + activeMention.matches.length) % activeMention.matches.length;
+              renderScreen(value, cursor, contextLine);
+              return;
+            }
+            if (key.name === "down") {
+              mentionSelected = (mentionSelected + 1) % activeMention.matches.length;
+              renderScreen(value, cursor, contextLine);
+              return;
+            }
+            if (key.name === "tab" || key.name === "return" || key.name === "enter") {
+              const skill = activeMention.matches[mentionSelected];
+              const applied = applyMentionSelection(value, cursor, activeMention.mention, skill);
+              value = applied.value;
+              cursor = applied.cursor;
+              renderScreen(value, cursor, contextLine);
+              return;
+            }
+          }
+        }
+      }
       if (key.name === "return" || key.name === "enter") {
         finish(value);
         return;
@@ -1455,8 +1599,11 @@ async function main() {
         appendTranscript(uiDim(`[ultron] goal: ${input} (self-checking after each turn, max ${config.goalMaxTurns})\n\n`));
       }
 
+      // expandSkillMentions only touches what's sent to the model — the
+      // transcript and title/goal-objective logic above already used the
+      // raw, unexpanded input, which is what should stay on screen.
       const turnInput: { messages: HumanMessage[] } | Command = {
-        messages: command === "/retry" ? [] : [new HumanMessage(input)],
+        messages: command === "/retry" ? [] : [new HumanMessage(expandSkillMentions(input))],
       };
       const result = await executeTurn(currentChatId, turnInput, contextLine);
       // A goal stays "active" in the DB across an aborted/interrupted turn
