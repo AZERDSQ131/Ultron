@@ -1033,7 +1033,6 @@ footer {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.model-picker { position: relative; }
 .model-label {
   border: 0;
   background: transparent;
@@ -1046,6 +1045,7 @@ footer {
   white-space: nowrap;
   cursor: pointer;
 }
+.model-picker { position: relative; flex: none; }
 .model-label:hover { color: var(--text); background: var(--surface-2); border-radius: var(--radius-sm); }
 .model-menu {
   position: absolute;
@@ -1061,6 +1061,7 @@ footer {
   background: var(--surface);
   box-shadow: var(--shadow-lg);
 }
+.composer .model-menu { top: auto; bottom: calc(100% + 8px); }
 .model-search { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
 .model-option { display: flex; justify-content: space-between; gap: 12px; width: 100%; border: 0; border-radius: var(--radius-sm); padding: 9px 10px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .model-option:hover { background: var(--surface-2); }

@@ -9,6 +9,7 @@ const settingsToolCount = document.getElementById("settings-tool-count");
 const modelMenu = document.getElementById("model-menu");
 const modelSearch = document.getElementById("model-search");
 const modelOptions = document.getElementById("model-options");
+const modelPickerButton = document.getElementById("model-picker-btn");
 let availableModels = [];
 
 export function updateContextGauge(usedTokens, maxTokens) {
@@ -24,6 +25,7 @@ export async function loadStatus() {
   try {
     const data = await api.status(state.activeChatId);
     modelLabel.textContent = data.model;
+    modelPickerButton.textContent = data.model;
     settingsModel.textContent = data.model;
     settingsToolCount.textContent = String(data.toolCount);
     updateContextGauge(data.contextTokens, data.maxTokens);
@@ -44,9 +46,9 @@ function renderModelOptions(query = "") {
     option.setAttribute("role", "option");
     option.innerHTML = `<span>${model.id}</span><small>${model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString()} tokens` : "context unknown"}</small>`;
     option.addEventListener("click", async () => {
-      await api.setModel(model.id);
+    await api.setModel(model.id);
       modelMenu.hidden = true;
-      document.getElementById("model-label").setAttribute("aria-expanded", "false");
+      modelPickerButton.setAttribute("aria-expanded", "false");
       await loadStatus();
     });
     modelOptions.appendChild(option);
@@ -62,16 +64,16 @@ async function loadModelPicker() {
   }
 }
 
-document.getElementById("model-label").addEventListener("click", () => {
+modelPickerButton.addEventListener("click", () => {
   modelMenu.hidden = !modelMenu.hidden;
-  document.getElementById("model-label").setAttribute("aria-expanded", String(!modelMenu.hidden));
+  modelPickerButton.setAttribute("aria-expanded", String(!modelMenu.hidden));
   if (!modelMenu.hidden) { modelSearch.value = ""; modelSearch.focus(); renderModelOptions(); }
 });
 modelSearch.addEventListener("input", () => renderModelOptions(modelSearch.value));
 document.addEventListener("click", (event) => {
-  if (!modelMenu.hidden && !modelMenu.contains(event.target) && !document.getElementById("model-label").contains(event.target)) {
+  if (!modelMenu.hidden && !modelMenu.contains(event.target) && !modelPickerButton.contains(event.target)) {
     modelMenu.hidden = true;
-    document.getElementById("model-label").setAttribute("aria-expanded", "false");
+    modelPickerButton.setAttribute("aria-expanded", "false");
   }
 });
 window.addEventListener("model:changed", loadStatus);

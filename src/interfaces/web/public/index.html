@@ -32,13 +32,7 @@
       <button type="button" id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
       <div class="header-title" id="active-chat-title">ULTRON</div>
       <div class="status">
-        <div class="model-picker">
-          <button type="button" id="model-label" class="model-label" aria-haspopup="listbox" aria-expanded="false" title="Select model"></button>
-          <div id="model-menu" class="model-menu" role="listbox" aria-label="NVIDIA models" hidden>
-            <input id="model-search" type="search" placeholder="Search models…" autocomplete="off" />
-            <div id="model-options"></div>
-          </div>
-        </div>
+        <span id="model-label" class="dim"></span>
         <div class="context-bar" title="Context usage">
           <div id="context-fill" class="context-fill"></div>
         </div>
@@ -54,6 +48,13 @@
     <footer>
       <div id="command-menu" class="command-menu" hidden></div>
       <form id="composer">
+        <div class="model-picker">
+          <button type="button" id="model-picker-btn" class="model-label" aria-haspopup="listbox" aria-expanded="false" title="Select model">Model</button>
+          <div id="model-menu" class="model-menu" role="listbox" aria-label="NVIDIA models" hidden>
+            <input id="model-search" type="search" placeholder="Search models…" autocomplete="off" />
+            <div id="model-options"></div>
+          </div>
+        </div>
         <div class="thinking-control">
           <button type="button" id="thinking-btn" class="thinking-btn" title="Reasoning mode" aria-haspopup="listbox" aria-expanded="false">
             <span class="thinking-btn-icon" aria-hidden="true">◆</span>
