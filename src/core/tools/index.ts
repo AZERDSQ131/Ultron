@@ -8,6 +8,7 @@ import { scheduleTask } from "./schedules.js";
 import { spawnAgent } from "./agents.js";
 import { todoWrite, todoUpdate, todoRead } from "./todos.js";
 import { planPropose } from "./plan.js";
+import { memoryWrite } from "./memory.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -30,6 +31,7 @@ export const tools: StructuredToolInterface[] = [
   todoUpdate,
   todoRead,
   planPropose,
+  memoryWrite,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -61,4 +63,5 @@ export const toolScopes: Record<string, ToolScope> = {
   // in graph.ts), so this scope only affects the badge color shown in the
   // approval card and tool-call blocks.
   plan_propose: "write",
+  memory_write: "write",
 };

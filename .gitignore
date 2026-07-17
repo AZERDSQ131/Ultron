@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 archives/
+memory/daily/
 *.log
 .DS_Store
 ultron-state.sqlite3*

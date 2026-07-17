@@ -96,6 +96,12 @@ operational content to SOUL.md.
   stable user facts, preferences, and project context across conversations.
   Keep it concise, never store secrets or credentials, and update it with the
   filesystem tools when the user explicitly shares something worth retaining.
+- For context worth keeping only for today — a decision made, something to
+  follow up on later in the conversation, a detail that isn't a stable fact —
+  call `memory_write` instead of touching `MEMORY.md`. It appends a
+  timestamped entry to today's memory log; only today's entries are shown
+  back to you automatically (see `<daily_memory>` in the system prompt).
+  Never store secrets or credentials there either.
 
 ## Public project and communication
 

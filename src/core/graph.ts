@@ -12,6 +12,7 @@ import { createNemotronModel, type ThinkingMode } from "./llm/nemotron.js";
 import { getCheckpointer } from "./memory/checkpointer.js";
 import { getChatRegistry } from "./memory/chats.js";
 import { getTodoRegistry } from "./memory/todos.js";
+import { readTodayNote } from "./memory/daily.js";
 import { AgentRegistry, type Agent } from "./memory/agents.js";
 import { tools, toolScopes } from "./tools/index.js";
 import { summarizeToolCall } from "./tools/summarize.js";
@@ -68,7 +69,12 @@ ${agentNotes}`;
 // turn (not buried earlier in a long system prompt) is the deterministic
 // fallback: the user decides when the model must plan instead of hoping it
 // infers that on its own.
-export type TaskMode = "none" | "todo" | "plan";
+// "goal" is a fourth selector value alongside todo/plan (CLI-only — see
+// interfaces/cli/index.ts), but it injects no directive here: unlike
+// todo/plan, the goal loop is driven entirely on the CLI side
+// (GoalRegistry + driveGoalLoop), so the model just sees a normal user
+// message for the objective and any auto-continuation turn.
+export type TaskMode = "none" | "todo" | "plan" | "goal";
 
 function taskModeDirective(mode: TaskMode): string {
   if (mode === "todo") {
@@ -149,7 +155,10 @@ function todoState(mode: TaskMode, threadId: string | undefined, messages: BaseM
 // tool call" once that's no longer true, and doesn't push a re-proposal
 // the instant a plan gets rejected (see todoState above).
 function taskModeReminder(mode: TaskMode, state: TodoState): string {
-  if (mode === "none") return "";
+  // "goal" must short-circuit before the state checks below — those are
+  // worded for todo/plan, and a leftover todo list from an earlier mode in
+  // the same chat would otherwise make todoState() report "active" here too.
+  if (mode === "none" || mode === "goal") return "";
   if (state === "active") return `[ultron:task_mode=${mode}] The initial plan already exists. Do the user's work now. Do not call any todo tool again in this turn.`;
   if (state === "plan_denied") {
     return `[ultron:task_mode=plan] Reminder: your last proposed plan was NOT approved. Do not call plan_propose again in this reply — respond in plain text instead (ask what to change, discuss alternatives) and wait for the user's direction.`;
@@ -165,6 +174,7 @@ function buildSystemPrompt(threadId?: string, taskMode: TaskMode = "none"): stri
   const owner = chat?.agentId ? agentRegistry.getAgent(chat.agentId) : undefined;
   if (owner) return buildAgentSystemPrompt(owner) + taskModeDirective(taskMode);
 
+  const todayNote = readTodayNote();
   return `${BASE_SYSTEM_PROMPT}
 
 ---
@@ -175,7 +185,14 @@ you a stable fact or preference worth remembering:
 
 <memory>
 ${readMemory()}
-</memory>${taskModeDirective(taskMode)}`;
+</memory>${todayNote ? `
+
+Today's memory log (append-only, written with memory_write — only today's
+entries are shown here; earlier days are on disk but not injected):
+
+<daily_memory>
+${todayNote}
+</daily_memory>` : ""}${taskModeDirective(taskMode)}`;
 }
 
 // Nemotron's NVIDIA endpoint doesn't return usage in the stream (see
