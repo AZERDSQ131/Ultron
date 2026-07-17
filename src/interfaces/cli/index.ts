@@ -34,7 +34,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/security", "/goal", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/security", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -68,6 +68,13 @@ function commandSuggestion(input: string): string {
   return LOCAL_COMMANDS.find((command) => command.startsWith(input) && command !== input) ?? "";
 }
 
+function modeInputColor(): (text: string) => string {
+  if (activeModeLabel === "To-Do") return chalk.yellowBright;
+  if (activeModeLabel === "Plan") return chalk.blueBright;
+  if (activeModeLabel === "Goal") return chalk.greenBright;
+  return chalk.cyanBright;
+}
+
 function drawScreen(input: string, cursor: number, contextLine: string): void {
   const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
   const suggestion = commandSuggestion(input);
@@ -81,7 +88,7 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   // Draw up to the input first. Save that exact terminal position before
   // drawing the lines below it, then restore it; this avoids all vertical
   // cursor arithmetic and the terminal-specific wrap off-by-ones it caused.
-  const inputLine = `${activePrompt}${input}`;
+  const inputLine = modeInputColor()(`${stripAnsi(activePrompt)}${input}`);
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${rule()}\n${inputLine}`);
   const promptWidth = stripAnsi(activePrompt).length + cursor;
   const width = Math.max(1, stdout.columns || 80);
@@ -494,7 +501,7 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo or plan\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/goal")}     set/inspect a standing goal: /goal <objective>, /goal status, /goal pause, /goal resume, /goal clear\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan, or goal <objective> (also: /task goal status|pause|resume|clear)\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -959,7 +966,7 @@ async function main() {
             appendTranscript(chalk.dim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
           case "/task":
-            appendTranscript(chalk.dim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan).\n\n`));
+            appendTranscript(chalk.dim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal <objective>).\n\n`));
             continue;
           case "/security":
             appendTranscript(
@@ -1017,9 +1024,75 @@ async function main() {
               continue;
             }
             if (command.startsWith("/task ")) {
-              const mode = command.slice("/task ".length).trim();
+              const rest = commandArgument;
+              const [modeRaw, ...modeRestWords] = rest.split(/\s+/);
+              const mode = (modeRaw ?? "").toLowerCase();
+
+              // "/task goal ..." — goal control lives under the /task
+              // namespace rather than a standalone /goal command, since a
+              // goal is a task-management mode just like todo/plan, not a
+              // separate concern.
+              if (mode === "goal") {
+                const goalArgument = modeRestWords.join(" ").trim();
+                const [subRaw, ...restWords] = goalArgument.split(/\s+/);
+                const sub = (subRaw ?? "").toLowerCase();
+
+                if (!goalArgument || sub === "status") {
+                  appendTranscript(chalk.dim(`[ultron] goal: ${goalStatusLine(goals.get(currentChatId))}\n\n`));
+                  continue;
+                }
+                if (sub === "clear") {
+                  goals.clear(currentChatId);
+                  activeModeLabel = taskMode === "todo" ? "To-Do" : taskMode === "plan" ? "Plan" : "None";
+                  appendTranscript(chalk.dim("[ultron] goal cleared.\n\n"));
+                  continue;
+                }
+                if (sub === "pause") {
+                  const goal = goals.get(currentChatId);
+                  if (!goal || goal.status !== "active") {
+                    appendTranscript(chalk.yellow("[ultron] no active goal to pause.\n\n"));
+                    continue;
+                  }
+                  goals.pause(currentChatId, restWords.join(" ") || "user-paused");
+                  appendTranscript(chalk.dim("[ultron] goal paused.\n\n"));
+                  continue;
+                }
+                if (sub === "resume") {
+                  const resumed = goals.resume(currentChatId);
+                  if (!resumed) {
+                    appendTranscript(chalk.yellow("[ultron] no paused goal to resume.\n\n"));
+                    continue;
+                  }
+                  activeModeLabel = "Goal";
+                  appendTranscript(chalk.dim(`[ultron] goal resumed: ${resumed.objective}\n\n`));
+                  // Falls through to the normal send path below, same as
+                  // /retry — this becomes a real turn in the chat, not a
+                  // silent internal replay.
+                  input = buildContinuationPrompt(resumed.objective, "resumed by the user — pick up where you left off");
+                  break;
+                }
+
+                // Anything else: the whole argument is a new objective.
+                const existing = goals.get(currentChatId);
+                if (existing && (existing.status === "active" || existing.status === "paused")) {
+                  appendTranscript(
+                    chalk.yellow(`[ultron] a goal is already ${existing.status} — /task goal clear it first, or /task goal pause/resume it.\n\n`),
+                  );
+                  continue;
+                }
+                goals.set(currentChatId, goalArgument, config.goalMaxTurns);
+                activeModeLabel = "Goal";
+                appendTranscript(
+                  chalk.greenBright(
+                    `[ultron] goal set — I'll work it and self-check until it's done or blocked (max ${config.goalMaxTurns} turns).\n\n`,
+                  ),
+                );
+                input = goalArgument;
+                break;
+              }
+
               if (mode !== "none" && mode !== "todo" && mode !== "plan") {
-                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo or /task plan.\n\n"));
+                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo, /task plan or /task goal <objective>.\n\n"));
                 continue;
               }
               taskMode = mode;
@@ -1040,64 +1113,6 @@ async function main() {
               chats.setSecurityMode(currentChatId, mode);
               appendTranscript(chalk.dim(`[ultron] tool approval set to ${mode}.\n\n`));
               continue;
-            }
-            if (commandName === "/goal") {
-              const goalArgument = commandArgument;
-              const [subRaw, ...restWords] = goalArgument.split(/\s+/);
-              const sub = (subRaw ?? "").toLowerCase();
-
-              if (!goalArgument || sub === "status") {
-                appendTranscript(chalk.dim(`[ultron] goal: ${goalStatusLine(goals.get(currentChatId))}\n\n`));
-                continue;
-              }
-              if (sub === "clear") {
-                goals.clear(currentChatId);
-                activeModeLabel = taskMode === "todo" ? "To-Do" : taskMode === "plan" ? "Plan" : "None";
-                appendTranscript(chalk.dim("[ultron] goal cleared.\n\n"));
-                continue;
-              }
-              if (sub === "pause") {
-                const goal = goals.get(currentChatId);
-                if (!goal || goal.status !== "active") {
-                  appendTranscript(chalk.yellow("[ultron] no active goal to pause.\n\n"));
-                  continue;
-                }
-                goals.pause(currentChatId, restWords.join(" ") || "user-paused");
-                appendTranscript(chalk.dim("[ultron] goal paused.\n\n"));
-                continue;
-              }
-              if (sub === "resume") {
-                const resumed = goals.resume(currentChatId);
-                if (!resumed) {
-                  appendTranscript(chalk.yellow("[ultron] no paused goal to resume.\n\n"));
-                  continue;
-                }
-                activeModeLabel = "Goal";
-                appendTranscript(chalk.dim(`[ultron] goal resumed: ${resumed.objective}\n\n`));
-                // Falls through to the normal send path below, same as
-                // /retry — this becomes a real turn in the chat, not a
-                // silent internal replay.
-                input = buildContinuationPrompt(resumed.objective, "resumed by the user — pick up where you left off");
-                break;
-              }
-
-              // Anything else: the whole argument is a new objective.
-              const existing = goals.get(currentChatId);
-              if (existing && (existing.status === "active" || existing.status === "paused")) {
-                appendTranscript(
-                  chalk.yellow(`[ultron] a goal is already ${existing.status} — /goal clear it first, or /goal pause/resume it.\n\n`),
-                );
-                continue;
-              }
-              goals.set(currentChatId, goalArgument, config.goalMaxTurns);
-              activeModeLabel = "Goal";
-              appendTranscript(
-                chalk.greenBright(
-                  `[ultron] goal set — I'll work it and self-check until it's done or blocked (max ${config.goalMaxTurns} turns).\n\n`,
-                ),
-              );
-              input = goalArgument;
-              break;
             }
             if (command === "/verbose on" || command === "/verbose true") {
               verbose = true;
