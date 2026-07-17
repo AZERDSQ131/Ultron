@@ -44,7 +44,7 @@ let pendingRender: { input: string; cursor: number; contextLine: string } | unde
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
 let activePrompt = INPUT_PROMPT;
 let activeModeLabel = "None";
-let activePermissionLabel = "bypass";
+let activePermissionLabel: SecurityMode = "bypass";
 type TerminalTheme = "auto" | "light" | "dark";
 let terminalTheme: TerminalTheme = "auto";
 
@@ -94,8 +94,14 @@ function modeInputColor(): (text: string) => string {
   return isLightTerminal() ? chalk.cyan : chalk.cyanBright;
 }
 
+function permissionColor(permission: SecurityMode): (text: string) => string {
+  if (permission === "bypass") return isLightTerminal() ? chalk.red : chalk.redBright;
+  if (permission === "accept_edit") return isLightTerminal() ? chalk.yellow : chalk.yellowBright;
+  return isLightTerminal() ? chalk.green : chalk.greenBright;
+}
+
 function statusContextLine(contextLine: string): string {
-  return `${contextLine}  ${activeModeLabel}  ${uiDim(activePermissionLabel)}`;
+  return `${contextLine}  ${activeModeLabel}  ${permissionColor(activePermissionLabel)(activePermissionLabel)}`;
 }
 
 function drawScreen(input: string, cursor: number, contextLine: string): void {
@@ -379,7 +385,7 @@ function pickPermission(contextLine: string, current: SecurityMode): Promise<Sec
     const redraw = () => {
       const rows = PERMISSION_OPTIONS.map((option, index) => {
         const marker = index === selected ? chalk.greenBright("›") : " ";
-        const value = index === selected ? chalk.bold(option.value) : option.value;
+        const value = permissionColor(option.value)(index === selected ? chalk.bold(option.value) : option.value);
         return `  ${marker} ${value}  ${uiDim(option.description)}`;
       }).join("\n");
       const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
