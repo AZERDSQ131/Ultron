@@ -107,7 +107,7 @@ Available configuration:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `NVIDIA_API_KEY` | required | NVIDIA API authentication |
-| `NEMOTRON_MODEL` | `z-ai/glm-5.2` | Model identifier |
+| `NEMOTRON_MODEL` | `nvidia/nemotron-3-super-120b-a12b` | Model identifier |
 | `NEMOTRON_BASE_URL` | `https://integrate.api.nvidia.com/v1` | OpenAI-compatible endpoint |
 | `CONTEXT_WINDOW_TOKENS` | `262144` | CLI context-gauge reference |
 | `WEB_PORT` | `4173` | Local web interface port |
