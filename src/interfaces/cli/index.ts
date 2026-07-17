@@ -34,7 +34,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/theme", "/security", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -44,6 +44,7 @@ let pendingRender: { input: string; cursor: number; contextLine: string } | unde
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
 let activePrompt = INPUT_PROMPT;
 let activeModeLabel = "None";
+let activePermissionLabel = "bypass";
 type TerminalTheme = "auto" | "light" | "dark";
 let terminalTheme: TerminalTheme = "auto";
 
@@ -93,11 +94,15 @@ function modeInputColor(): (text: string) => string {
   return isLightTerminal() ? chalk.cyan : chalk.cyanBright;
 }
 
+function statusContextLine(contextLine: string): string {
+  return `${contextLine}  ${activeModeLabel}  ${uiDim(activePermissionLabel)}`;
+}
+
 function drawScreen(input: string, cursor: number, contextLine: string): void {
   const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
   const suggestion = commandSuggestion(input);
   const suggestionLine = suggestion ? uiDim(`↳ ${suggestion}`) : "";
-  const displayContextLine = `${contextLine}  ${activeModeLabel}`;
+  const displayContextLine = statusContextLine(contextLine);
   const footer = `${rule()}\n${activePrompt}${input}\n${suggestionLine}\n${displayContextLine}\n${rule()}`;
   const footerRows = footer.split("\n").reduce((rows, line) => rows + wrappedRows(line), 0);
   const rows = stdout.rows || 24;
@@ -360,6 +365,66 @@ function pickArchive(contextLine: string): Promise<string | undefined> {
   });
 }
 
+const PERMISSION_OPTIONS: { value: SecurityMode; description: string }[] = [
+  { value: "bypass", description: "run every tool immediately" },
+  { value: "accept_edit", description: "ask before destructive tools" },
+  { value: "manual", description: "ask before every tool" },
+];
+
+function pickPermission(contextLine: string, current: SecurityMode): Promise<SecurityMode | undefined> {
+  return new Promise((resolve) => {
+    let selected = Math.max(0, PERMISSION_OPTIONS.findIndex((option) => option.value === current));
+    let finished = false;
+
+    const redraw = () => {
+      const rows = PERMISSION_OPTIONS.map((option, index) => {
+        const marker = index === selected ? chalk.greenBright("›") : " ";
+        const value = index === selected ? chalk.bold(option.value) : option.value;
+        return `  ${marker} ${value}  ${uiDim(option.description)}`;
+      }).join("\n");
+      const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
+      const picker = `${uiDim("Permissions · ↑/↓ select · Enter confirm · Esc cancel")}\n${rows}`;
+      const permissionContext = statusContextLine(contextLine);
+      const footer = `${rule()}\n${uiDim("permissions")} ${uiDim("›")} ${PERMISSION_OPTIONS[selected].value}\n${permissionContext}\n${rule()}`;
+      const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
+      stdout.write(`\x1b[2J\x1b[H${content}${picker}\n${"\n".repeat(padding)}${footer}`);
+      readline.moveCursor(stdout, 0, -2);
+      readline.cursorTo(stdout, uiDim("permissions").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + 1 + uiDim("›").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + PERMISSION_OPTIONS[selected].value.length);
+    };
+
+    const finish = (value?: SecurityMode) => {
+      if (finished) return;
+      finished = true;
+      stdin.setRawMode?.(false);
+      stdin.removeListener("keypress", onKeypress);
+      cancelActiveInput = undefined;
+      renderScreen("", 0, contextLine);
+      flushRender();
+      resolve(value);
+    };
+
+    const onKeypress = (_input: string, key: readline.Key) => {
+      if (key.name === "return" || key.name === "enter") {
+        finish(PERMISSION_OPTIONS[selected].value);
+      } else if (key.name === "escape") {
+        finish();
+      } else if (key.name === "up") {
+        selected = (selected - 1 + PERMISSION_OPTIONS.length) % PERMISSION_OPTIONS.length;
+        redraw();
+      } else if (key.name === "down") {
+        selected = (selected + 1) % PERMISSION_OPTIONS.length;
+        redraw();
+      }
+    };
+
+    cancelActiveInput = () => finish();
+    readline.emitKeypressEvents(stdin);
+    stdin.setRawMode?.(true);
+    stdin.on("keypress", onKeypress);
+    redraw();
+  });
+}
+
 async function showRestoredMessages(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<void> {
   const messages = await listChatMessages(graph, threadId);
   transcript = "";
@@ -519,7 +584,7 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -625,6 +690,7 @@ async function main() {
   // not always the legacy thread, since /archive or the web UI may have
   // moved on to a newer one since the CLI last ran.
   let currentChatId = chats.list()[0].id;
+  activePermissionLabel = chats.getSecurityMode(currentChatId);
 
   let abortController: AbortController | undefined;
   let stopping = false;
@@ -651,6 +717,7 @@ async function main() {
     const archive = await archiveThread(graph, currentChatId, title || undefined);
     const nextChat = chats.create();
     currentChatId = nextChat.id;
+    activePermissionLabel = chats.getSecurityMode(currentChatId);
     appendTranscript(`${chalk.greenBright(`Chat Archived "${archive.title}"`)}\n\n`);
   };
 
@@ -994,6 +1061,17 @@ async function main() {
               ),
             );
             continue;
+          case "/permissions": {
+            const selectedPermission = await pickPermission(contextLine, chats.getSecurityMode(currentChatId));
+            if (!selectedPermission) {
+              appendTranscript(uiDim("[ultron] permissions unchanged.\n\n"));
+              continue;
+            }
+            chats.setSecurityMode(currentChatId, selectedPermission);
+            activePermissionLabel = selectedPermission;
+            appendTranscript(uiDim(`[ultron] permission mode set to ${selectedPermission}.\n\n`));
+            continue;
+          }
           case "/verbose":
             appendTranscript(uiDim(`[ultron] verbose is ${verbose ? "on" : "off"} (use /verbose on|off).\n\n`));
             continue;
@@ -1066,6 +1144,7 @@ async function main() {
                 continue;
               }
               chats.setSecurityMode(currentChatId, mode);
+              activePermissionLabel = mode;
               appendTranscript(uiDim(`[ultron] tool approval set to ${mode}.\n\n`));
               continue;
             }
