@@ -321,7 +321,7 @@ async function showRestoredMessages(graph: ReturnType<typeof buildGraph>, thread
     } else if (message.role === "tool_call") {
       appendTranscript(chalk.dim(`[${message.content}]\n`));
     } else {
-      appendTranscript(chalk.dim(`[tool result · ${message.name}]\n${message.content}\n\n`));
+      appendTranscript(`${formatToolResult(message.name ?? "tool", message.content)}\n\n`);
     }
   }
 }
@@ -381,6 +381,60 @@ async function promptToolApproval(contextLine: string, calls: PendingToolCall[])
   const decisions: ToolApprovalDecision = {};
   for (const call of calls) decisions[call.id] = approved;
   return decisions;
+}
+
+// Tool-result rendering, shared by the live stream loop and history replay
+// (showRestoredMessages) so a chat looks the same whether you're watching
+// it happen or reopening it later. Previously every tool dumped its full,
+// unstyled content under the same "[tool result · name]" dim-gray header —
+// readable for a short shell/file result, but a long web_search or
+// fetch_url blob just flooded the transcript with no visual structure.
+const RESULT_MAX_CHARS = 1400;
+const RESULT_MAX_LINES = 16;
+
+// Caps length/line count so one huge result can't push everything above it
+// off-screen — the full untruncated text is still what the model sees (this
+// only affects what gets printed to the terminal).
+function capForDisplay(text: string): string {
+  let out = text.length > RESULT_MAX_CHARS ? text.slice(0, RESULT_MAX_CHARS) : text;
+  const lines = out.split("\n");
+  if (lines.length > RESULT_MAX_LINES) out = lines.slice(0, RESULT_MAX_LINES).join("\n");
+  if (out.length === text.length) return out;
+  const omitted = text.length - out.length;
+  return `${out}\n${chalk.dim(`… (${omitted.toLocaleString()} more characters not shown — full result is still in context)`)}`;
+}
+
+// Numbered-result blocks from formatSearchResults (search.ts): "source: X",
+// then "N. Title" / "   https://…" / "   metadata" / "   snippet" groups.
+function styleSearchResults(content: string): string {
+  return content
+    .split("\n")
+    .map((line) => {
+      if (/^source: /.test(line)) return chalk.dim(line);
+      if (/^\d+\.\s/.test(line)) return chalk.bold.whiteBright(line);
+      const urlMatch = line.match(/^(\s*)(https?:\/\/\S+)$/);
+      if (urlMatch) return `${urlMatch[1]}${chalk.cyan.underline(urlMatch[2])}`;
+      return chalk.dim(line);
+    })
+    .join("\n");
+}
+
+// fetch_url/http_request's "status: …\nurl: …\n\n<body>" header.
+function styleFetchResult(content: string): string {
+  const [head, ...rest] = content.split("\n\n");
+  const styledHead = head
+    .split("\n")
+    .map((line) => chalk.dim(line))
+    .join("\n");
+  const body = rest.join("\n\n");
+  return body ? `${styledHead}\n\n${capForDisplay(body)}` : styledHead;
+}
+
+function formatToolResult(name: string, content: string): string {
+  if (name === "web_search") return `${chalk.cyanBright.bold("[search]")}\n${styleSearchResults(capForDisplay(content))}`;
+  if (name === "fetch_url" || name === "http_request") return `${chalk.blueBright.bold("[fetch]")}\n${styleFetchResult(content)}`;
+  if (name === "spawn_agent") return `${chalk.magentaBright.bold("[agent]")} ${content}`;
+  return `${chalk.dim(`[tool result · ${name}]`)}\n${capForDisplay(content)}`;
 }
 
 function contextBarColor(ratio: number): (text: string) => string {
@@ -763,7 +817,7 @@ async function main() {
                   const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
                   if (key !== undefined) pendingToolCalls.delete(key);
                 }
-                writeLive(chalk.dim(`[tool result · ${toolName}]\n${chunk.content}\n\n`), contextLine);
+                writeLive(`${formatToolResult(toolName, String(chunk.content))}\n\n`, contextLine);
                 continue;
               }
 

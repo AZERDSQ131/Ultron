@@ -69,7 +69,16 @@ mais ne sont pas implémentées.
 ## Architecture du repo
 
 - `src/interfaces/cli/index.ts` : point d'entrée CLI, affichage, streaming, statistiques,
-  jauge de contexte et interruption Ctrl+C.
+  jauge de contexte et interruption Ctrl+C. `formatToolResult` y donne un
+  rendu dédié par outil (web_search : résultats numérotés avec URLs en
+  cyan soulignées ; fetch_url/http_request : en-tête status/url en dim,
+  corps tronqué ; spawn_agent : préfixe `[agent]` distinct) au lieu du
+  dump générique gris uniforme utilisé auparavant pour tout ; tout le
+  reste passe par une troncature générique (`capForDisplay`, ~1400
+  caractères/16 lignes affichés, le modèle garde le contenu complet) pour
+  qu'un gros résultat n'inonde plus le terminal. Réutilisé à la fois par
+  le flux live et par `showRestoredMessages` (relecture d'un chat) pour
+  un rendu identique.
 - `src/interfaces/web/server.ts` + `src/interfaces/web/public/` : interface web locale (HTTP + SSE),
   sidebar de gestion des chats (créer, renommer, supprimer, changer de chat) ;
   frontend HTML/CSS + modules ES natifs (`public/js/*.js`), sans framework ni bundler.
