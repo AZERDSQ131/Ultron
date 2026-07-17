@@ -167,6 +167,66 @@ function applyMentionSelection(
   return { value: before + inserted + after, cursor: before.length + inserted.length };
 }
 
+// Shared by both places text gets typed with a live mention panel possibly
+// showing: the normal composer (readInput) and the limited input accepted
+// while a turn is generating (armStopCommand). Originally this logic only
+// lived inside readInput's onKeypress, so the panel would render during
+// generation (drawScreen doesn't care which loop is driving it) but arrow
+// keys did nothing there — this had no code path to reach. Returns true if
+// the keypress was fully handled (including its own re-render), so the
+// caller should stop processing it any further.
+async function handleMentionKeypress(
+  key: readline.Key,
+  value: string,
+  cursor: number,
+  setValue: (value: string, cursor: number) => void,
+  contextLine: string,
+): Promise<boolean> {
+  if (activePrompt !== INPUT_PROMPT) return false;
+  const activeMention = mentionPanelState(value, cursor);
+  if (!activeMention || mentionDismissed) return false;
+
+  if (key.name === "escape") {
+    mentionDismissed = true;
+    renderScreen(value, cursor, contextLine);
+    return true;
+  }
+  if (!activeMention.matches.length) return false;
+  if (key.name === "up") {
+    mentionSelected = (mentionSelected - 1 + activeMention.matches.length) % activeMention.matches.length;
+    renderScreen(value, cursor, contextLine);
+    return true;
+  }
+  if (key.name === "down") {
+    mentionSelected = (mentionSelected + 1) % activeMention.matches.length;
+    renderScreen(value, cursor, contextLine);
+    return true;
+  }
+  if (key.name === "tab" || key.name === "return" || key.name === "enter") {
+    const entry = activeMention.matches[mentionSelected];
+    // A hub skill isn't on disk yet — install it (writes
+    // skills/<name>/SKILL.md, see skillsHub.ts) before inserting the
+    // mention, so expandSkillMentions can find it at send time the same
+    // way it finds any other local skill.
+    if (entry.source === "hub") {
+      appendTranscript(uiDim(`[ultron] installing skill "${entry.name}" from anthropics/skills…\n`));
+      renderScreen(value, cursor, contextLine);
+      flushRender();
+      const installed = await installHubSkill(entry.name);
+      appendTranscript(
+        installed
+          ? uiDim(`[ultron] skill "${entry.name}" installed to skills/${entry.name}/SKILL.md.\n\n`)
+          : chalk.yellow(`[ultron] failed to install skill "${entry.name}" — inserted as text only.\n\n`),
+      );
+    }
+    const applied = applyMentionSelection(value, cursor, activeMention.mention, entry.name);
+    setValue(applied.value, applied.cursor);
+    renderScreen(applied.value, applied.cursor, contextLine);
+    return true;
+  }
+  return false;
+}
+
 // Expands every "@skill-name" mention still present in a message about to
 // be sent into the skill's full body, injected as its own tagged block
 // right after the user's text — deterministic, not a hope that the model
@@ -382,56 +442,10 @@ function readInput(
     // while this is in flight — acceptable for a single-user local CLI, and
     // installHubSkill() itself is a plain overwrite, safe to double-fire.
     const onKeypress = async (input: string, key: readline.Key) => {
-      // Intercept navigation/selection keys while a skills panel is showing
-      // (main composer only — mentionPanelState no-ops elsewhere since
-      // activePrompt won't be INPUT_PROMPT). Uses value/cursor as they stood
-      // before this keystroke, i.e. exactly what's currently on screen —
-      // correct for these keys since none of them mutate text themselves.
-      if (activePrompt === INPUT_PROMPT) {
-        const activeMention = mentionPanelState(value, cursor);
-        if (activeMention && !mentionDismissed) {
-          if (key.name === "escape") {
-            mentionDismissed = true;
-            renderScreen(value, cursor, contextLine);
-            return;
-          }
-          if (activeMention.matches.length) {
-            if (key.name === "up") {
-              mentionSelected = (mentionSelected - 1 + activeMention.matches.length) % activeMention.matches.length;
-              renderScreen(value, cursor, contextLine);
-              return;
-            }
-            if (key.name === "down") {
-              mentionSelected = (mentionSelected + 1) % activeMention.matches.length;
-              renderScreen(value, cursor, contextLine);
-              return;
-            }
-            if (key.name === "tab" || key.name === "return" || key.name === "enter") {
-              const entry = activeMention.matches[mentionSelected];
-              // A hub skill isn't on disk yet — install it (writes
-              // skills/<name>/SKILL.md, see skillsHub.ts) before inserting
-              // the mention, so expandSkillMentions can find it at send
-              // time the same way it finds any other local skill.
-              if (entry.source === "hub") {
-                appendTranscript(uiDim(`[ultron] installing skill "${entry.name}" from anthropics/skills…\n`));
-                renderScreen(value, cursor, contextLine);
-                flushRender();
-                const installed = await installHubSkill(entry.name);
-                appendTranscript(
-                  installed
-                    ? uiDim(`[ultron] skill "${entry.name}" installed to skills/${entry.name}/SKILL.md.\n\n`)
-                    : chalk.yellow(`[ultron] failed to install skill "${entry.name}" — inserted as text only.\n\n`),
-                );
-              }
-              const applied = applyMentionSelection(value, cursor, activeMention.mention, entry.name);
-              value = applied.value;
-              cursor = applied.cursor;
-              renderScreen(value, cursor, contextLine);
-              return;
-            }
-          }
-        }
-      }
+      // Uses value/cursor as they stood before this keystroke, i.e. exactly
+      // what's currently on screen — correct here since none of the keys
+      // handleMentionKeypress intercepts mutate text themselves.
+      if (await handleMentionKeypress(key, value, cursor, (v, c) => { value = v; cursor = c; }, contextLine)) return;
       if (key.name === "return" || key.name === "enter") {
         finish(value);
         return;
@@ -1093,11 +1107,28 @@ function printStatus(
 function armStopCommand(abort: AbortController, contextLine: string): () => void {
   readline.emitKeypressEvents(stdin);
   stdin.setRawMode?.(true);
-  const onKeypress = (input: string, key: readline.Key) => {
+  const onKeypress = async (input: string, key: readline.Key) => {
     if (key.ctrl && key.name === "c") {
       process.emit("SIGINT");
       return;
     }
+    // Same skills panel as the normal composer (see readInput's onKeypress)
+    // — the panel renders here too since drawScreen doesn't distinguish
+    // which loop is driving it, so without this arrow keys/Enter/Tab had
+    // nothing to intercept while a turn was generating.
+    if (
+      await handleMentionKeypress(
+        key,
+        generationInput,
+        generationCursor,
+        (v, c) => {
+          generationInput = v;
+          generationCursor = c;
+        },
+        contextLine,
+      )
+    )
+      return;
     if (key.name === "return" || key.name === "enter") {
       if (generationInput.trim().toLowerCase() === "/stop") abort.abort();
       else if (generationInput.trim()) appendTranscript(chalk.yellow("[ultron] only /stop is available while generating.\n"));
