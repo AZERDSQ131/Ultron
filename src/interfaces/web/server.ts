@@ -37,7 +37,7 @@ function debugLog(message: string): void {
   log("web", message);
 }
 
-const graph = buildGraph();
+let graph = buildGraph();
 const chats = getChatRegistry(config.databasePath);
 const agents = new AgentRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
@@ -521,6 +521,22 @@ async function handleTools(res: ServerResponse): Promise<void> {
   });
 }
 
+async function handleModels(res: ServerResponse): Promise<void> {
+  const response = await fetch(`${config.nemotronBaseUrl}/models`, { headers: { Authorization: `Bearer ${config.nvidiaApiKey}` } });
+  if (!response.ok) throw new Error(`NVIDIA models request failed: HTTP ${response.status}`);
+  const payload = (await response.json()) as { data?: { id?: string; owned_by?: string }[] };
+  sendJson(res, 200, { current: config.nemotronModel, models: (payload.data ?? []).filter((model) => model.id).map((model) => ({ id: model.id, ownedBy: model.owned_by ?? "" })) });
+}
+
+async function handleSetModel(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ model?: string }>(req);
+  const model = payload?.model?.trim();
+  if (!model) { sendJson(res, 400, { error: "model is required" }); return; }
+  config.nemotronModel = model;
+  graph = buildGraph();
+  sendJson(res, 200, { model });
+}
+
 async function handleAgents(res: ServerResponse): Promise<void> { sendJson(res, 200, { agents: agents.listAgents() }); }
 async function handleCreateAgent(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const p = await readJson<{ name?: string; description?: string; instructions?: string }>(req);
@@ -659,6 +675,14 @@ const server = createServer((req, res) => {
   }
   if (req.method === "GET" && path === "/api/tools") {
     handleTools(res).catch((err) => console.error("[ultron-web] tools handler failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/models") {
+    handleModels(res).catch((err) => sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  if (req.method === "PATCH" && path === "/api/model") {
+    handleSetModel(req, res).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
   if (req.method === "GET" && path === "/api/agents") { handleAgents(res).catch((err) => console.error("[ultron-web] list agents failed:", err)); return; }

@@ -65,6 +65,8 @@ export const api = {
   status: (chatId) => fetch(`/api/status?chatId=${encodeURIComponent(chatId ?? "")}`).then(json),
   health: () => fetch("/api/health").then(json),
   tools: () => fetch("/api/tools").then(json),
+  models: () => fetch("/api/models").then(json),
+  setModel: (model) => fetch("/api/model", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) }).then(json),
   search: (query) => fetch(`/api/search?q=${encodeURIComponent(query)}`).then(json),
   listAgents: () => fetch("/api/agents").then(json),
   createAgent: (body) => fetch("/api/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(json),
