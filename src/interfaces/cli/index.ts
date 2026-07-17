@@ -22,7 +22,8 @@ import {
 import { withThreadLock } from "../../core/threadLock.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
+import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type Chat, type SecurityMode } from "../../core/memory/chats.js";
+import { AgentRegistry } from "../../core/memory/agents.js";
 import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
@@ -36,7 +37,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/chat", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -644,6 +645,98 @@ function pickArchive(contextLine: string): Promise<string | undefined> {
   });
 }
 
+// Lets the CLI open any chat by title/id — in particular a sub-agent's
+// execution chat (spawn_agent, see tools/agents.ts), which until now could
+// only be opened from the web UI's sidebar. Mirrors pickArchive's picker
+// exactly (same keyboard/search/redraw behavior) but sources rows from the
+// live ChatRegistry instead of the on-disk archive list, and tags each row
+// with its owning Agent's name when the chat has one (chat.agentId).
+function pickChat(contextLine: string, chats: ReturnType<typeof getChatRegistry>, agents: AgentRegistry, excludeId?: string): Promise<Chat | undefined> {
+  const all = chats.list().filter((chat) => chat.id !== excludeId);
+  if (all.length === 0) return Promise.resolve(undefined);
+  const label = (chat: Chat): string => {
+    const agentName = chat.agentId ? agents.getAgent(chat.agentId)?.name : undefined;
+    return agentName ? `${chat.title} ${uiDim(`[agent: ${agentName}]`)}` : chat.title;
+  };
+
+  return new Promise((resolve) => {
+    let query = "";
+    let selected = 0;
+    let finished = false;
+
+    const redraw = () => {
+      const matches = all.filter((chat) => label(chat).toLowerCase().includes(query.toLowerCase()));
+      selected = Math.min(selected, Math.max(0, matches.length - 1));
+      const rows = matches.length
+        ? matches
+            .map((chat, index) => {
+              const marker = index === selected ? chalk.greenBright("›") : " ";
+              return `  ${marker} ${label(chat)}`;
+            })
+            .join("\n")
+        : uiDim("  no matching chats");
+      const prompt = `${chalk.magentaBright.bold("chat")} ${uiDim("›")} `;
+      const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
+      const picker = `${uiDim("Select a chat · type to search · ↑/↓ navigate · Enter confirm")}\n${rows}`;
+      const footer = `${rule()}\n${prompt}${query}\n${contextLine}\n${rule()}`;
+      const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
+      stdout.write(`\x1b[2J\x1b[H${content}${picker}\n${"\n".repeat(padding)}${footer}`);
+      readline.moveCursor(stdout, 0, -2);
+      readline.cursorTo(stdout, prompt.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + query.length);
+    };
+
+    const finish = (chat?: Chat) => {
+      if (finished) return;
+      finished = true;
+      stdin.setRawMode?.(false);
+      stdin.removeListener("keypress", onKeypress);
+      cancelActiveInput = undefined;
+      renderScreen("", 0, contextLine);
+      flushRender();
+      resolve(chat);
+    };
+
+    const onKeypress = (input: string, key: readline.Key) => {
+      const matches = all.filter((chat) => label(chat).toLowerCase().includes(query.toLowerCase()));
+      if (key.name === "return" || key.name === "enter") {
+        finish(matches[selected]);
+        return;
+      }
+      if (key.name === "escape") {
+        finish();
+        return;
+      }
+      if (key.name === "up") {
+        if (matches.length) selected = (selected - 1 + matches.length) % matches.length;
+        redraw();
+        return;
+      }
+      if (key.name === "down") {
+        if (matches.length) selected = (selected + 1) % matches.length;
+        redraw();
+        return;
+      }
+      if (key.name === "backspace") {
+        query = query.slice(0, -1);
+        selected = 0;
+        redraw();
+        return;
+      }
+      if (!key.ctrl && !key.meta && input && !input.includes("\n") && !input.includes("\r")) {
+        query += input;
+        selected = 0;
+        redraw();
+      }
+    };
+
+    cancelActiveInput = () => finish();
+    readline.emitKeypressEvents(stdin);
+    stdin.setRawMode?.(true);
+    stdin.on("keypress", onKeypress);
+    redraw();
+  });
+}
+
 interface NvidiaModelInfo {
   id: string;
   contextWindowTokens?: number;
@@ -1075,7 +1168,7 @@ stdout.on("resize", () => {
 
 function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/chat")}     search and switch to any chat (including a sub-agent's)\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -1188,6 +1281,7 @@ async function main() {
 
   let graph = buildGraph();
   const chats = getChatRegistry(config.databasePath);
+  const agents = new AgentRegistry(config.databasePath);
   const goals = getGoalRegistry(config.databasePath);
   const todos = getTodoRegistry(config.databasePath);
   // Registers the CLI's original hardcoded thread (from before chats
@@ -1604,6 +1698,18 @@ async function main() {
               appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
             }
             continue;
+          case "/chat": {
+            const target = await pickChat(contextLine, chats, agents, currentChatId);
+            if (!target) {
+              appendTranscript(chalk.yellow("[ultron] no chat selected.\n\n"));
+              continue;
+            }
+            currentChatId = target.id;
+            activePermissionLabel = chats.getSecurityMode(currentChatId);
+            await showRestoredMessages(graph, currentChatId);
+            appendTranscript(uiDim(`[ultron] switched to "${target.title}"${target.agentId ? ` (agent: ${agents.getAgent(target.agentId)?.name ?? "?"})` : ""}.\n\n`));
+            continue;
+          }
           case "/think":
             appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
@@ -1635,6 +1741,19 @@ async function main() {
             stopping = true;
             continue;
           default:
+            if (commandName === "/chat") {
+              const query = commandArgument.toLowerCase();
+              const target = chats.list().find((chat) => chat.id === commandArgument || chat.title.toLowerCase().includes(query));
+              if (!target) {
+                appendTranscript(chalk.yellow(`[ultron] no chat matches "${commandArgument}".\n\n`));
+                continue;
+              }
+              currentChatId = target.id;
+              activePermissionLabel = chats.getSecurityMode(currentChatId);
+              await showRestoredMessages(graph, currentChatId);
+              appendTranscript(uiDim(`[ultron] switched to "${target.title}"${target.agentId ? ` (agent: ${agents.getAgent(target.agentId)?.name ?? "?"})` : ""}.\n\n`));
+              continue;
+            }
             if (commandName === "/archive") {
               await archiveCurrentChat(contextLine, commandArgument);
               continue;
