@@ -83,13 +83,13 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${rule()}\n${inputLine}`);
   const promptWidth = stripAnsi(activePrompt).length + cursor;
   const width = Math.max(1, stdout.columns || 80);
-  // For normal (single-line) input this is the current input row. When the
-  // input itself wraps, readline still owns editing and the next redraw
-  // corrects the column from the same stable anchor.
+  stdout.write(`\n${suggestionLine}\n${contextLine}\n${rule()}`);
+  // The cursor is now on the last footer line. Return to the input by the
+  // number of footer lines actually written; avoid save/restore sequences,
+  // which are not restored consistently by every terminal emulator.
+  const footerAfterInputRows = wrappedRows(suggestionLine) + wrappedRows(contextLine) + wrappedRows(rule());
+  readline.moveCursor(stdout, 0, -footerAfterInputRows);
   readline.cursorTo(stdout, promptWidth % width);
-  stdout.write("\x1b[s");
-  readline.cursorTo(stdout, (stripAnsi(activePrompt).length + input.length) % width);
-  stdout.write(`\n${suggestionLine}\n${contextLine}\n${rule()}\x1b[u`);
 }
 
 function renderScreen(input: string, cursor: number, contextLine: string): void {
