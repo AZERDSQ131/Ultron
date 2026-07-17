@@ -106,10 +106,12 @@ function statusContextLine(contextLine: string): string {
 
 function drawScreen(input: string, cursor: number, contextLine: string): void {
   const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
-  const suggestion = commandSuggestion(input);
-  const suggestionLine = suggestion ? uiDim(`↳ ${suggestion}`) : "";
+  // Only show the completion when the cursor is at the end of the command:
+  // that keeps the ghost text from appearing in the middle of an edited line.
+  const suggestion = cursor === input.length ? commandSuggestion(input) : "";
+  const suggestionSuffix = suggestion ? uiDim(suggestion.slice(input.length)) : "";
   const displayContextLine = statusContextLine(contextLine);
-  const footer = `${rule()}\n${activePrompt}${input}\n${suggestionLine}\n${displayContextLine}\n${rule()}`;
+  const footer = `${rule()}\n${activePrompt}${input}${suggestionSuffix}\n${displayContextLine}\n${rule()}`;
   const footerRows = footer.split("\n").reduce((rows, line) => rows + wrappedRows(line), 0);
   const rows = stdout.rows || 24;
   const padding = Math.max(0, rows - transcriptRows(content) - footerRows);
@@ -117,15 +119,15 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   // Draw up to the input first. Save that exact terminal position before
   // drawing the lines below it, then restore it; this avoids all vertical
   // cursor arithmetic and the terminal-specific wrap off-by-ones it caused.
-  const inputLine = modeInputColor()(`${stripAnsi(activePrompt)}${input}`);
+  const inputLine = modeInputColor()(`${stripAnsi(activePrompt)}${input}`) + suggestionSuffix;
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${rule()}\n${inputLine}`);
   const promptWidth = stripAnsi(activePrompt).length + cursor;
   const width = Math.max(1, stdout.columns || 80);
-  stdout.write(`\n${suggestionLine}\n${displayContextLine}\n${rule()}`);
+  stdout.write(`\n${displayContextLine}\n${rule()}`);
   // The cursor is now on the last footer line. Return to the input by the
   // number of footer lines actually written; avoid save/restore sequences,
   // which are not restored consistently by every terminal emulator.
-  const footerAfterInputRows = wrappedRows(suggestionLine) + wrappedRows(displayContextLine) + wrappedRows(rule());
+  const footerAfterInputRows = wrappedRows(displayContextLine) + wrappedRows(rule());
   readline.moveCursor(stdout, 0, -footerAfterInputRows);
   readline.cursorTo(stdout, promptWidth % width);
 }
