@@ -101,7 +101,7 @@ function permissionColor(permission: SecurityMode): (text: string) => string {
 }
 
 function statusContextLine(contextLine: string): string {
-  return `${contextLine}  ${activeModeLabel}  ${permissionColor(activePermissionLabel)(activePermissionLabel)}`;
+  return `${contextLine}  ${modeInputColor()(activeModeLabel)}  ${permissionColor(activePermissionLabel)(activePermissionLabel)}`;
 }
 
 function drawScreen(input: string, cursor: number, contextLine: string): void {
