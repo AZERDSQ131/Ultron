@@ -38,11 +38,15 @@ export const config = {
   webPort: Number(process.env.WEB_PORT ?? 4173),
   // /computer-use (CLI-only, see src/core/computerUse.ts): a separate model
   // from the main chat model (config.nemotronModel), because computer-use
-  // needs vision and the main chat model isn't picked for that — DeepSeek
-  // V4 Flash per the user's explicit choice. Verified live against the
-  // NVIDIA endpoint before every run (verifyVisionSupport), not just
+  // needs vision and the main chat model isn't picked for that. DeepSeek V4
+  // Flash was the user's original choice, but verifyVisionSupport's live
+  // probe against the NVIDIA endpoint caught it 500ing on image content —
+  // NVIDIA's hosted instance runs vLLM without --enable-multimodal. Default
+  // switched to meta/llama-3.2-90b-vision-instruct, confirmed working with
+  // the same live probe; revert to deepseek-ai/deepseek-v4-flash once
+  // NVIDIA flips that flag. Verified on every run regardless, not just
   // assumed from this id, since served models can change under a fixed id.
-  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "deepseek-ai/deepseek-v4-flash",
+  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "meta/llama-3.2-90b-vision-instruct",
   // Hard cap on agent-loop iterations (one screenshot + one action each) so
   // a confused loop that keeps re-clicking the same spot can't run forever.
   computerUseMaxSteps: Number(process.env.COMPUTER_USE_MAX_STEPS ?? 30),
