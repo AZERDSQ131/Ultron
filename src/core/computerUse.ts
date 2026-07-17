@@ -66,7 +66,11 @@ export async function verifyVisionSupport(modelId: string): Promise<VisionSuppor
           },
         ],
       }),
-      signal: AbortSignal.timeout(15_000),
+      // NVIDIA-hosted models can take a while to spin up from cold — 15s
+      // was cutting off meta/llama-3.2-90b-vision-instruct mid cold-start
+      // and getting misread as "doesn't support images" when it just
+      // hadn't answered yet.
+      signal: AbortSignal.timeout(60_000),
     });
     if (response.ok) {
       result = { supported: true };
