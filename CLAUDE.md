@@ -151,33 +151,36 @@ mais ne sont pas implémentées.
   `taskModeDirective`/`taskModeReminder` et `AGENT.md` disent maintenant
   explicitement de préférer `todo_update` pour les changements de statut.
 - `src/core/memory/goals.ts` (`GoalRegistry`) + `src/core/goalJudge.ts` +
-  the CLI's `/task goal` command (`src/interfaces/cli/index.ts`) :
-  **CLI-only** goal mode, not wired into the web UI. It lives under the
-  existing `/task` namespace (`/task none|todo|plan|goal <objective>`)
-  rather than as a standalone `/goal` command, since a goal is a
-  task-management mode alongside todo/plan, not a separate concern.
-  `/task goal <objective>` sets one standing objective per chat and
-  immediately runs it as a turn; after each turn `driveGoalLoop` calls a
-  *separate* short-lived LLM call (`judgeGoal`, `createNemotronModel("low")`)
-  that reads only the worker's final reply plus a bounded `git status`/
-  `git diff HEAD` snapshot (`gatherCodeContext`, capped ~6k chars) —
-  deliberately not the full tool-call history, so the judge has its own
-  small, cheap context instead of re-consuming everything the main turn
-  just spent. On "continue" it appends a corrective `[Goal check] ...`
-  human-role message (`buildContinuationPrompt`) and replays `executeTurn`
-  (the same tool-approval-aware turn path a human-typed message gets —
-  extracted out of the old inline main-loop code specifically so the goal
-  loop reuses it verbatim, not a simplified copy) automatically, with no
-  user input, up to `GOAL_MAX_TURNS` (default 20) before self-pausing.
-  "done" marks the goal complete; "blocked" pauses it for the user.
-  `/task goal pause|resume|clear|status` give manual control; `/task goal
-  resume` also resets the turn-budget window. Ctrl+C aborts a goal-loop
-  turn (or the judge call itself) the same way it aborts a normal turn.
-  Only one goal per chat at a time — a second `/task goal <objective>` on
-  an active/paused goal is refused, not silently overwritten. Note: `taskMode`
-  itself (none/todo/plan, sent as `configurable.taskMode` and used by
-  `taskModeDirective`/`taskModeReminder` in `graph.ts`) is untouched by this
-  — setting a goal does not change `taskMode`, they're orthogonal.
+  the CLI's `/task goal` mode (`src/interfaces/cli/index.ts`) : **CLI-only**
+  goal mode, not wired into the web UI. `"goal"` is a fourth value of
+  `TaskMode` (`graph.ts`) alongside `none`/`todo`/`plan` — `/task goal` just
+  arms the mode exactly like `/task todo`/`/task plan` do, with no argument.
+  There is no separate `/goal` command and no pause/resume/clear/status
+  subcommands: the next non-retry message the user sends while in goal mode
+  becomes the objective (`goals.set(...)`, called from the same
+  turn-boundary spot that clears the todo list for todo/plan mode) and runs
+  as a normal turn; after that turn `driveGoalLoop` calls a *separate*
+  short-lived LLM call (`judgeGoal`, `createNemotronModel("low")`) that
+  reads only the worker's final reply plus a bounded `git status`/`git diff
+  HEAD` snapshot (`gatherCodeContext`, capped ~6k chars) — deliberately not
+  the full tool-call history, so the judge has its own small, cheap context
+  instead of re-consuming everything the main turn just spent. On
+  "continue" it appends a corrective `[Goal check] ...` human-role message
+  (`buildContinuationPrompt`) and replays `executeTurn` (the same
+  tool-approval-aware turn path a human-typed message gets — extracted out
+  of the old inline main-loop code specifically so the goal loop reuses it
+  verbatim, not a simplified copy) automatically, with no user input, up to
+  `GOAL_MAX_TURNS` (default 20) before self-pausing. "done" marks the goal
+  complete; "blocked" pauses it. Every `goals.set(...)` call unconditionally
+  overwrites whatever goal existed for the chat before — there's no
+  "already active" guard and no resume-by-command: a paused/blocked goal is
+  simply superseded by the next message sent in goal mode, same as todo/plan
+  discarding a stale list at the next turn boundary. Ctrl+C aborts a
+  goal-loop turn (or the judge call itself) the same way it aborts a normal
+  turn. `taskModeDirective`/`taskModeReminder` (`graph.ts`) short-circuit to
+  `""` for `mode === "goal"` — the model just sees a normal user message,
+  since the loop is driven entirely on the CLI side, not via a system-prompt
+  directive like todo/plan.
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
   au démarrage ; ils ne doivent pas être fusionnés.
 - `PLAN.md`, `README.md` et `docs/agent-ia-personnel.md` : périmètre,

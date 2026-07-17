@@ -97,7 +97,7 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
   const suggestion = commandSuggestion(input);
   const suggestionLine = suggestion ? uiDim(`↳ ${suggestion}`) : "";
-  const displayContextLine = `${contextLine}  ${uiDim("mode")} ${activeModeLabel}`;
+  const displayContextLine = `${contextLine}  ${activeModeLabel}`;
   const footer = `${rule()}\n${activePrompt}${input}\n${suggestionLine}\n${displayContextLine}\n${rule()}`;
   const footerRows = footer.split("\n").reduce((rows, line) => rows + wrappedRows(line), 0);
   const rows = stdout.rows || 24;
@@ -519,7 +519,7 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan, or goal <objective> (also: /task goal status|pause|resume|clear)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -527,7 +527,7 @@ function printHelp() {
 // either way so the two surfaces never drift into describing the goal
 // differently.
 function goalStatusLine(goal: Goal | undefined): string {
-  if (!goal || goal.status === "cleared") return "no active goal — set one with /task goal <objective>";
+  if (!goal || goal.status === "cleared") return "no active goal — /task goal, then send a message";
   const turns = `${goal.turnsUsed}/${goal.maxTurns} turns`;
   if (goal.status === "active") return `active (${turns}): ${goal.objective}`;
   if (goal.status === "paused") return `paused${goal.lastReason ? ` — ${goal.lastReason}` : ""} (${turns}): ${goal.objective}`;
@@ -839,7 +839,7 @@ async function main() {
         goals.pause(chatId, `turn budget (${goal.maxTurns}) exhausted`);
         appendTranscript(
           chalk.yellow(
-            `[ultron] goal paused — turn budget (${goal.maxTurns}) reached without a "done" verdict. /task goal resume to give it more room, or /task goal clear to drop it.\n\n`,
+            `[ultron] goal paused — turn budget (${goal.maxTurns}) reached without a "done" verdict. Send another message to restart it, or /task none|todo|plan to leave goal mode.\n\n`,
           ),
         );
         renderScreen("", 0, contextLine);
@@ -881,7 +881,7 @@ async function main() {
       if (verdict.verdict === "blocked") {
         goals.pause(chatId, verdict.reason);
         appendTranscript(
-          chalk.yellow(`[ultron] ⏸ goal blocked — ${verdict.reason}\n[ultron] resume with /task goal resume once that's addressed.\n\n`),
+          chalk.yellow(`[ultron] ⏸ goal blocked — ${verdict.reason}\n[ultron] send another message to retry, or /task none|todo|plan to leave goal mode.\n\n`),
         );
         renderScreen("", 0, contextLine);
         return;
@@ -985,7 +985,7 @@ async function main() {
             appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
           case "/task":
-            appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal <objective>).\n\n`));
+            appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal).\n\n`));
             continue;
           case "/security":
             appendTranscript(
@@ -1043,83 +1043,19 @@ async function main() {
               continue;
             }
             if (command.startsWith("/task ")) {
-              const rest = commandArgument;
-              const [modeRaw, ...modeRestWords] = rest.split(/\s+/);
-              const mode = (modeRaw ?? "").toLowerCase();
-
-              // "/task goal ..." — goal control lives under the /task
-              // namespace rather than a standalone /goal command, since a
-              // goal is a task-management mode just like todo/plan, not a
-              // separate concern.
-              if (mode === "goal") {
-                const goalArgument = modeRestWords.join(" ").trim();
-                const [subRaw, ...restWords] = goalArgument.split(/\s+/);
-                const sub = (subRaw ?? "").toLowerCase();
-
-                if (!goalArgument || sub === "status") {
-                  appendTranscript(uiDim(`[ultron] goal: ${goalStatusLine(goals.get(currentChatId))}\n\n`));
-                  continue;
-                }
-                if (sub === "clear") {
-                  goals.clear(currentChatId);
-                  activeModeLabel = taskMode === "todo" ? "To-Do" : taskMode === "plan" ? "Plan" : "None";
-                  appendTranscript(uiDim("[ultron] goal cleared.\n\n"));
-                  continue;
-                }
-                if (sub === "pause") {
-                  const goal = goals.get(currentChatId);
-                  if (!goal || goal.status !== "active") {
-                    appendTranscript(chalk.yellow("[ultron] no active goal to pause.\n\n"));
-                    continue;
-                  }
-                  goals.pause(currentChatId, restWords.join(" ") || "user-paused");
-                  appendTranscript(uiDim("[ultron] goal paused.\n\n"));
-                  continue;
-                }
-                if (sub === "resume") {
-                  const resumed = goals.resume(currentChatId);
-                  if (!resumed) {
-                    appendTranscript(chalk.yellow("[ultron] no paused goal to resume.\n\n"));
-                    continue;
-                  }
-                  activeModeLabel = "Goal";
-                  appendTranscript(uiDim(`[ultron] goal resumed: ${resumed.objective}\n\n`));
-                  // Falls through to the normal send path below, same as
-                  // /retry — this becomes a real turn in the chat, not a
-                  // silent internal replay.
-                  input = buildContinuationPrompt(resumed.objective, "resumed by the user — pick up where you left off");
-                  break;
-                }
-
-                // Anything else: the whole argument is a new objective.
-                const existing = goals.get(currentChatId);
-                if (existing && (existing.status === "active" || existing.status === "paused")) {
-                  appendTranscript(
-                    chalk.yellow(`[ultron] a goal is already ${existing.status} — /task goal clear it first, or /task goal pause/resume it.\n\n`),
-                  );
-                  continue;
-                }
-                goals.set(currentChatId, goalArgument, config.goalMaxTurns);
-                activeModeLabel = "Goal";
-                appendTranscript(
-                  chalk.greenBright(
-                    `[ultron] goal set — I'll work it and self-check until it's done or blocked (max ${config.goalMaxTurns} turns).\n\n`,
-                  ),
-                );
-                input = goalArgument;
-                break;
-              }
-
-              if (mode !== "none" && mode !== "todo" && mode !== "plan") {
-                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo, /task plan or /task goal <objective>.\n\n"));
+              const mode = command.slice("/task ".length).trim();
+              if (mode !== "none" && mode !== "todo" && mode !== "plan" && mode !== "goal") {
+                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo, /task plan or /task goal.\n\n"));
                 continue;
               }
               taskMode = mode;
-              activeModeLabel = mode === "todo" ? "To-Do" : mode === "plan" ? "Plan" : "None";
-              // Task mode applies to the next user request. Drop any list
+              activeModeLabel = mode === "todo" ? "To-Do" : mode === "plan" ? "Plan" : mode === "goal" ? "Goal" : "None";
+              // Task mode applies to the next user request. Drop any state
               // left by an earlier request now, before it can be mistaken
-              // for the plan of the new one.
+              // for the plan/goal of the new one — same reset-at-selection
+              // rule for all three modes, not just todo/plan.
               if (mode === "todo" || mode === "plan") todos.clear(currentChatId);
+              if (mode !== "goal") goals.clear(currentChatId);
               appendTranscript(uiDim(`[ultron] task mode set to ${taskMode}.\n\n`));
               continue;
             }
@@ -1169,6 +1105,16 @@ async function main() {
       // Reset persisted task state at this boundary so an interrupted or
       // completed request cannot make the next one resume an old plan.
       if (command !== "/retry" && (taskMode === "todo" || taskMode === "plan")) todos.clear(currentChatId);
+      // "goal" mode works the same way as todo/plan: selecting it just
+      // arms the mode (see the /task handler above), and the next message
+      // sent while it's active becomes the objective — no separate
+      // "/task goal <objective>" syntax. Every non-retry message while in
+      // goal mode starts a fresh goal (goals.set() overwrites any previous
+      // one for this chat), mirroring todo/plan's per-message reset.
+      if (command !== "/retry" && taskMode === "goal") {
+        goals.set(currentChatId, input, config.goalMaxTurns);
+        appendTranscript(uiDim(`[ultron] goal: ${input} (self-checking after each turn, max ${config.goalMaxTurns})\n\n`));
+      }
 
       const turnInput: { messages: HumanMessage[] } | Command = {
         messages: command === "/retry" ? [] : [new HumanMessage(input)],
@@ -1176,9 +1122,7 @@ async function main() {
       const result = await executeTurn(currentChatId, turnInput, contextLine);
       // A goal stays "active" in the DB across an aborted/interrupted turn
       // (see driveGoalLoop's early returns) — checked fresh here rather than
-      // trusting a stale in-memory flag, so /task goal <objective>, /task
-      // goal resume, and a plain message sent while a goal happens to be
-      // active all converge on the same auto-continuation path.
+      // trusting a stale in-memory flag.
       if (!result.aborted && !result.errored && goals.get(currentChatId)?.status === "active") {
         await driveGoalLoop(currentChatId, contextLine, result.finalText);
       }
