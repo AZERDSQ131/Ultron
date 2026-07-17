@@ -32,7 +32,13 @@
       <button type="button" id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
       <div class="header-title" id="active-chat-title">ULTRON</div>
       <div class="status">
-        <span id="model-label" class="dim"></span>
+        <div class="model-picker">
+          <button type="button" id="model-label" class="model-label" aria-haspopup="listbox" aria-expanded="false" title="Select model"></button>
+          <div id="model-menu" class="model-menu" role="listbox" aria-label="NVIDIA models" hidden>
+            <input id="model-search" type="search" placeholder="Search models…" autocomplete="off" />
+            <div id="model-options"></div>
+          </div>
+        </div>
         <div class="context-bar" title="Context usage">
           <div id="context-fill" class="context-fill"></div>
         </div>
@@ -112,7 +118,6 @@
             </button>
           </div>
         </div>
-        <span id="task-mode-label" class="task-mode-label" hidden></span>
         <textarea id="input" placeholder="Message ULTRON…" rows="1" autocomplete="off"></textarea>
         <button type="button" id="stop-btn" class="danger" hidden>Stop</button>
         <button type="submit" id="send-btn">Send</button>

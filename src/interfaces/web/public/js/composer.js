@@ -36,7 +36,6 @@ const thinkingSelectSettings = document.getElementById("thinking-select-settings
 const THINKING_LABELS = { full: "Full", low: "Low", off: "Off" };
 const taskBtn = document.getElementById("task-btn");
 const taskBtnLabel = document.getElementById("task-btn-label");
-const taskModeLabel = document.getElementById("task-mode-label");
 const taskMenu = document.getElementById("task-menu");
 const taskOptions = [...taskMenu.querySelectorAll(".task-option")];
 const TASK_LABELS = { none: "None", todo: "To-Do", plan: "Plan", goal: "Goal" };
@@ -308,9 +307,6 @@ export function setTaskMode(mode) {
   // color carries the mode the same way the security button's icon carries
   // risk level (see .security-btn-icon in style.css).
   composer.dataset.task = mode;
-  taskModeLabel.hidden = mode === "none";
-  taskModeLabel.dataset.mode = mode;
-  taskModeLabel.textContent = TASK_LABELS[mode] ?? mode;
 }
 
 taskBtn.addEventListener("click", () => {
