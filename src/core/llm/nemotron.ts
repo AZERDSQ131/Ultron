@@ -29,3 +29,19 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
     streamUsage: true,
   });
 }
+
+// /computer-use uses a separate model from the main chat loop — vision,
+// bound to precise-coordinate tool calls rather than conversational text,
+// so it gets a lower temperature and no reasoning/thinking kwargs (those
+// are Nemotron/GLM chat-template specific, not something to assume of an
+// arbitrary vision model like DeepSeek V4 Flash).
+export function createVisionModel(modelId: string): ChatOpenAI {
+  return new ChatOpenAI({
+    model: modelId,
+    apiKey: config.nvidiaApiKey,
+    temperature: 0.2,
+    configuration: {
+      baseURL: config.nemotronBaseUrl,
+    },
+  });
+}

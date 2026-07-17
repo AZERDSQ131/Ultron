@@ -36,6 +36,16 @@ export const config = {
   // burning tokens forever on a goal that never resolves.
   goalMaxTurns: Number(process.env.GOAL_MAX_TURNS ?? 20),
   webPort: Number(process.env.WEB_PORT ?? 4173),
+  // /computer-use (CLI-only, see src/core/computerUse.ts): a separate model
+  // from the main chat model (config.nemotronModel), because computer-use
+  // needs vision and the main chat model isn't picked for that — DeepSeek
+  // V4 Flash per the user's explicit choice. Verified live against the
+  // NVIDIA endpoint before every run (verifyVisionSupport), not just
+  // assumed from this id, since served models can change under a fixed id.
+  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "deepseek-ai/deepseek-v4-flash",
+  // Hard cap on agent-loop iterations (one screenshot + one action each) so
+  // a confused loop that keeps re-clicking the same spot can't run forever.
+  computerUseMaxSteps: Number(process.env.COMPUTER_USE_MAX_STEPS ?? 30),
   // Shared checkpoint database: the CLI and the web interface each open
   // their own connection to this same file, which is how they end up
   // seeing the same thread and memory instead of two disconnected sessions.

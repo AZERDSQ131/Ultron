@@ -27,6 +27,7 @@ import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
 import { disableConsoleEcho } from "../../core/logger.js";
+import { runComputerUseLoop, verifyVisionSupport } from "../../core/computerUse.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { listSkills, readSkill } from "../../core/skills.js";
@@ -36,7 +37,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/computer-use", "/theme", "/permissions", "/security", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -1075,7 +1076,7 @@ stdout.on("resize", () => {
 
 function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/computer-use")} <what you want done> — controls your real screen (mouse, keyboard, screenshots)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -1441,6 +1442,80 @@ async function main() {
     }
   }
 
+  // /computer-use: a separate loop from executeTurn — it doesn't touch the
+  // main graph/chat model at all (see core/computerUse.ts's header comment
+  // for why), it just reuses the same abortController/armStopCommand
+  // wiring so Ctrl+C and "/stop" behave identically to a normal turn.
+  async function runComputerUseCommand(contextLine: string, instruction: string): Promise<void> {
+    if (!instruction) {
+      appendTranscript(
+        chalk.yellow(
+          "[ultron] usage: /computer-use <what you want done> — takes control of your real screen (mouse, keyboard, screenshots).\n\n",
+        ),
+      );
+      return;
+    }
+
+    appendTranscript(uiDim(`[ultron] computer-use: checking ${config.computerUseModel} supports images…\n`));
+    renderScreen("", 0, contextLine);
+    flushRender();
+
+    const support = await verifyVisionSupport(config.computerUseModel);
+    if (!support.supported) {
+      appendTranscript(
+        chalk.red(
+          `[ultron] computer-use blocked: ${config.computerUseModel} does not appear to support image input on this NVIDIA endpoint.\n` +
+            `[ultron] ${support.reason ?? "no further detail."}\n\n`,
+        ),
+      );
+      renderScreen("", 0, contextLine);
+      return;
+    }
+
+    appendTranscript(
+      chalk.magentaBright(`[ultron] computer-use: taking control — "${instruction}"\n`) +
+        uiDim("[ultron] type /stop and press enter, or Ctrl+C, to abort.\n\n"),
+    );
+    renderScreen("", 0, contextLine);
+    flushRender();
+
+    abortController = new AbortController();
+    const controller = abortController;
+    generationInput = "";
+    generationCursor = 0;
+    const disarmStopCommand = armStopCommand(controller, contextLine);
+
+    try {
+      const result = await runComputerUseLoop({
+        instruction,
+        signal: controller.signal,
+        maxSteps: config.computerUseMaxSteps,
+        onStep: (step) => {
+          appendTranscript(uiDim(`  [${step.step}] ${step.action} — ${step.detail}\n`));
+          renderScreen("", 0, contextLine);
+          flushRender();
+        },
+      });
+
+      const statusColor =
+        result.status === "done" ? chalk.greenBright : result.status === "aborted" ? chalk.yellow : chalk.red;
+      appendTranscript(
+        `\n${statusColor(
+          `[ultron] computer-use ${result.status} after ${result.steps} step${result.steps === 1 ? "" : "s"}: ${result.summary}`,
+        )}\n\n`,
+      );
+    } catch (error) {
+      if (controller.signal.aborted) {
+        appendTranscript(uiDim("[ultron] computer-use stopped.\n\n"));
+      } else {
+        appendTranscript(chalk.red(`[ultron] computer-use error: ${error instanceof Error ? error.message : String(error)}\n\n`));
+      }
+    } finally {
+      disarmStopCommand();
+      renderScreen("", 0, contextLine);
+    }
+  }
+
   // The /task goal auto-continuation loop: after a turn completes, ask a
   // separate, narrow-context judge (see goalJudge.ts) whether the goal is
   // actually done — reading the worker's final reply and the real state of
@@ -1610,6 +1685,9 @@ async function main() {
           case "/task":
             appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal).\n\n`));
             continue;
+          case "/computer-use":
+            await runComputerUseCommand(contextLine, "");
+            continue;
           case "/security":
             appendTranscript(
               uiDim(
@@ -1691,6 +1769,10 @@ async function main() {
               if (mode === "todo" || mode === "plan") todos.clear(currentChatId);
               if (mode !== "goal") goals.clear(currentChatId);
               appendTranscript(uiDim(`[ultron] task mode set to ${taskMode}.\n\n`));
+              continue;
+            }
+            if (commandName === "/computer-use") {
+              await runComputerUseCommand(contextLine, commandArgument);
               continue;
             }
             if (command.startsWith("/security ")) {
