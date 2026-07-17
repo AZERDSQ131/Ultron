@@ -117,7 +117,10 @@
   </div>
 
   <aside id="todo-panel" aria-label="To-do list">
-    <div class="panel-heading"><span>To-do</span><span id="todo-count" class="dim"></span></div>
+    <div class="panel-heading">
+      <span class="panel-heading-title">To-do <span id="todo-count" class="dim"></span></span>
+      <button type="button" id="todo-clear-btn" class="icon-btn" title="Clear to-do list" aria-label="Clear to-do list" hidden>✕</button>
+    </div>
     <div id="todo-list"></div>
   </aside>
 

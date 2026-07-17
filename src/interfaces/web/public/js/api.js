@@ -30,6 +30,7 @@ export const api = {
     }).then(json),
   chatMessages: (id) => fetch(`/api/chats/${encodeURIComponent(id)}/messages`).then(json),
   chatTodos: (id) => fetch(`/api/chats/${encodeURIComponent(id)}/todos`).then(json),
+  clearTodos: (id) => fetch(`/api/chats/${encodeURIComponent(id)}/todos`, { method: "DELETE" }).then(json),
 
   stop: (chatId) =>
     fetch("/api/stop", {

@@ -349,6 +349,8 @@ body {
 
 #automation-panel { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; color: var(--text-dimmer); font: 700 var(--fs-2xs) var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.panel-heading-title { display: flex; align-items: center; gap: 6px; }
+.panel-heading .icon-btn { font-size: 11px; padding: 2px 5px; text-transform: none; letter-spacing: normal; }
 .schedule-heading { margin-top: 12px; }
 .automation-item { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: var(--radius-md); color: var(--text-dim); font-size: var(--fs-sm); }
 .automation-item:hover { background: var(--bg-raised); }

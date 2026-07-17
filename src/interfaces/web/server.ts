@@ -156,6 +156,16 @@ async function handleChatTodos(res: ServerResponse, chatId: string): Promise<voi
   sendJson(res, 200, { items: todos.get(chatId) });
 }
 
+// Explicit user-driven reset — see TodoRegistry.clear's comment for why
+// this exists: the list otherwise persists across turns indefinitely,
+// including into an unrelated new request, since nothing tells the system
+// on its own that the previous task is done.
+async function handleClearTodos(res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  todos.clear(chatId);
+  sendJson(res, 200, { items: [] });
+}
+
 // Shared by a fresh turn (HumanMessage input) and an approval resume
 // (Command input) — both just feed a different input into the same
 // graph.stream()/SSE pump. Ends either on a normal "done"/"aborted"/"error"
@@ -533,6 +543,10 @@ const server = createServer((req, res) => {
   }
   if (chatMatch && chatMatch[2] === "/todos" && req.method === "GET") {
     handleChatTodos(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] chat todos failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/todos" && req.method === "DELETE") {
+    handleClearTodos(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] clear todos failed:", err));
     return;
   }
   const streamMatch = path.match(/^\/api\/chats\/([^/]+)\/stream$/);

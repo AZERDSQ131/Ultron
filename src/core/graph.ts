@@ -85,7 +85,11 @@ step 'in_progress' or 'completed' as you go (one item, by its position) —
 do NOT call todo_write again just to change a status; that rewrites the
 whole list and is how progress gets lost or a step gets silently dropped.
 Only call todo_write a second time if the plan's shape itself needs to
-change (steps added, removed, or reordered).`;
+change (steps added, removed, or reordered). If a to-do list already
+exists for this chat but the CURRENT request is a new, unrelated task —
+not a continuation of what that list was tracking — don't append to it or
+mark its old items done: call todo_write fresh, replacing it outright,
+rather than mixing an unrelated request into a stale plan.`;
   }
   if (mode === "plan") {
     return `
@@ -105,7 +109,11 @@ pauses and shows the user your plan:
 - If they reject it, you'll get a refusal back instead — do NOT call
   plan_propose again in that same reply. Respond in plain text: ask what
   they want changed, or discuss alternatives. Only call plan_propose again
-  once they've given you new direction, which may be in a later turn.`;
+  once they've given you new direction, which may be in a later turn. If a
+  to-do list already exists for this chat but the CURRENT request is a new,
+  unrelated task — not a continuation of what that list was tracking —
+  don't append to it: call plan_propose fresh, replacing it outright once
+  approved, rather than mixing an unrelated request into a stale plan.`;
   }
   return "";
 }
@@ -149,7 +157,7 @@ function todoState(mode: TaskMode, threadId: string | undefined, messages: BaseM
 function taskModeReminder(mode: TaskMode, state: TodoState): string {
   if (mode === "none") return "";
   if (state === "active") {
-    return `[ultron:task_mode=${mode}] Reminder: a to-do list already exists for this chat. Use todo_update (one item, by its position) to mark a step in_progress/completed as you go — do NOT call todo_write${mode === "plan" ? " or plan_propose" : ""} again just to change a status, that replaces the whole list.`;
+    return `[ultron:task_mode=${mode}] Reminder: a to-do list already exists for this chat. If the CURRENT request continues that same task, use todo_update (one item, by its position) to mark a step in_progress/completed — do NOT call todo_write${mode === "plan" ? " or plan_propose" : ""} again just to change a status. If the CURRENT request is a new, unrelated task instead, don't reuse or update the old list — call ${mode === "plan" ? "plan_propose" : "todo_write"} fresh for this request; it replaces the stale one.`;
   }
   if (state === "plan_denied") {
     return `[ultron:task_mode=plan] Reminder: your last proposed plan was NOT approved. Do not call plan_propose again in this reply — respond in plain text instead (ask what to change, discuss alternatives) and wait for the user's direction.`;

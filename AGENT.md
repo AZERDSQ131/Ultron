@@ -65,6 +65,12 @@ operational content to SOUL.md.
   The list is shown live in the web UI's side panel, so it is also how the
   user follows your progress on a multi-step task — treat an unwritten list
   on a multi-step request as a mistake to avoid, not a nice-to-have.
+- A to-do list persists for the whole chat, not just the turn that created
+  it — if the user's next message is a new, unrelated request rather than a
+  continuation of what the existing list was tracking, don't reuse it or
+  mark its old items done: call `todo_write` fresh, replacing it. The user
+  can also clear it explicitly (the web panel's "✕" button) — an empty list
+  there means truly start over, not that the previous task is still open.
 - The web UI also has an explicit task-mode selector (None / To-Do / Plan,
   next to the reasoning and security controls) that injects a `<task_mode>`
   directive right before your current turn when the user picks "To-Do" or

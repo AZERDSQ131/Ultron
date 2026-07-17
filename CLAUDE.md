@@ -252,3 +252,22 @@ nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
    prévention des chevauchements et rattachement à un chat dédié.
 5. Corriger les écarts documentaires au fur et à mesure de chaque nouveau
    changement de code, conformément à `AGENTS.md`.
+
+## To-do : persistance par chat et reprise de tâche non liée
+
+La liste to-do (`memory/todos.ts`) est scoppée par `chat_id`, donc elle
+survit indéfiniment à travers les tours d'un même chat — y compris un
+redémarrage d'ULTRON (SQLite persiste) suivi d'une demande totalement sans
+rapport dans le même chat. `todoState()` (`graph.ts`) ne regardait que
+« la liste est-elle vide ou non » pour décider d'autoriser `todo_write`,
+donc une demande sans rapport avec une liste déjà existante faisait
+continuer/mettre à jour l'ancienne liste au lieu d'en repartir sur une
+nouvelle — reproduit et corrigé sur deux fronts :
+- **Déterministe** : `TodoRegistry.clear()` +
+  `DELETE /api/chats/:id/todos` + bouton "✕" dans l'en-tête du panneau
+  web (`todos.js`) — l'utilisateur peut toujours forcer un nouveau départ
+  sans dépendre du jugement du modèle.
+- **Consigne** : `taskModeDirective`/`taskModeReminder` (`graph.ts`) et
+  `AGENT.md` disent maintenant explicitement de repartir d'un `todo_write`/
+  `plan_propose` neuf (pas `todo_update`) si la demande courante n'est pas
+  la continuation de ce que la liste existante suivait.

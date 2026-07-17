@@ -8,6 +8,7 @@ import { state } from "./store.js";
 const panel = document.getElementById("todo-panel");
 const list = document.getElementById("todo-list");
 const countEl = document.getElementById("todo-count");
+const clearBtn = document.getElementById("todo-clear-btn");
 
 const STATUS_LABEL = { pending: "To do", in_progress: "In progress", completed: "Done" };
 
@@ -21,6 +22,19 @@ export function initTodos() {
   window.addEventListener("chat:selected", () => {
     renderTodos([]);
     refreshTodos();
+  });
+
+  // The list otherwise persists across turns indefinitely (see todoState in
+  // graph.ts) — including into a later, unrelated request in the same
+  // chat, since nothing about a fresh message tells the model on its own
+  // that the previous task is done. This is the deterministic escape
+  // hatch: the user can always force a clean slate instead of depending on
+  // the model noticing.
+  clearBtn.addEventListener("click", async () => {
+    if (!state.activeChatId) return;
+    if (!confirm("Clear the to-do list for this chat?")) return;
+    await api.clearTodos(state.activeChatId);
+    renderTodos([]);
   });
 }
 
@@ -44,6 +58,7 @@ function renderTodos(items) {
   panel.classList.toggle("empty", items.length === 0);
   const done = items.filter((item) => item.status === "completed").length;
   countEl.textContent = items.length ? `${done}/${items.length}` : "";
+  clearBtn.hidden = items.length === 0;
 
   if (!items.length) {
     const empty = document.createElement("div");

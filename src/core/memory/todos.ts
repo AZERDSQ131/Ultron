@@ -58,6 +58,16 @@ export class TodoRegistry {
       .run(chatId, JSON.stringify(items), now);
     return items;
   }
+
+  // Explicit user-driven reset (web UI's "Clear" action on the to-do
+  // panel) — a chat's list otherwise persists indefinitely across turns
+  // (see todoState in graph.ts), including across an unrelated new
+  // request, since nothing about a fresh message tells the system the
+  // previous task is done. This gives the user a deterministic way to
+  // start clean instead of depending on the model noticing on its own.
+  clear(chatId: string): void {
+    this.set(chatId, []);
+  }
 }
 
 let sharedRegistry: TodoRegistry | undefined;
