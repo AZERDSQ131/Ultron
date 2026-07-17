@@ -23,6 +23,7 @@ import { withThreadLock } from "../../core/threadLock.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
+import { disableConsoleEcho } from "../../core/logger.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { MarkdownStreamRenderer } from "./markdown.js";
@@ -536,6 +537,11 @@ function armStopCommand(abort: AbortController, contextLine: string): () => void
 }
 
 async function main() {
+  // Must happen before anything else can log — the CLI owns raw-mode
+  // terminal drawing from here on (see drawScreen), and a stray
+  // console.error from graph.ts/tools would otherwise land as garbage text
+  // spliced into the middle of that live-rendered UI.
+  disableConsoleEcho();
   printBanner();
 
   const graph = buildGraph();

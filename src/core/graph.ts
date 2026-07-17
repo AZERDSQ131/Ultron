@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START, interrupt } from "@langchain/langgraph";
@@ -15,17 +15,15 @@ import { getTodoRegistry } from "./memory/todos.js";
 import { AgentRegistry, type Agent } from "./memory/agents.js";
 import { tools, toolScopes } from "./tools/index.js";
 import { summarizeToolCall } from "./tools/summarize.js";
+import { log } from "./logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const soul = readFileSync(join(__dirname, "..", "..", "SOUL.md"), "utf-8");
 const agentNotes = readFileSync(join(__dirname, "..", "..", "AGENT.md"), "utf-8");
 const memoryPath = join(__dirname, "..", "..", "MEMORY.md");
-const debugLogPath = join(__dirname, "..", "..", "ultron-web.log");
 function debugLog(message: string): void {
-  const line = `[${new Date().toISOString()}] [graph] ${message}`;
-  console.error(line);
-  try { appendFileSync(debugLogPath, `${line}\n`); } catch { /* diagnostics must never break the graph */ }
+  log("graph", message);
 }
 
 // SOUL.md is personality only; AGENT.md carries the tool-use protocol and
@@ -474,9 +472,7 @@ export function buildGraph() {
           debugLog(`model error attempt=${attempt} thread=${String(runConfig.configurable?.thread_id ?? "unknown")} error=${message}`);
           if (!RETRYABLE_ERROR.test(message) || attempt === MAX_ATTEMPTS || runConfig.signal?.aborted) throw err;
           const delay = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
-          console.error(
-            `[ultron] transient API error, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_ATTEMPTS}): ${message}`,
-          );
+          log("ultron", `transient API error, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_ATTEMPTS}): ${message}`);
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
@@ -484,9 +480,7 @@ export function buildGraph() {
         if (response.tool_calls?.length || !looksLikeFakeToolCall(response.content)) break;
 
         if (attempt === MAX_ATTEMPTS) break;
-        console.error(
-          `[ultron] model wrote a tool call as plain text instead of using it — discarding and retrying (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
-        );
+        log("ultron", `model wrote a tool call as plain text instead of using it — discarding and retrying (attempt ${attempt + 1}/${MAX_ATTEMPTS})`);
       }
 
       // Nemotron sometimes emits a well-formed tool call as text even after
@@ -504,7 +498,7 @@ export function buildGraph() {
       // answer — after exhausting retries, replace it with an explicit
       // failure notice instead of passing fiction through as fact.
       if (response && !response.tool_calls?.length && looksLikeFakeToolCall(response.content)) {
-        console.error(`[ultron] gave up after ${MAX_ATTEMPTS} attempts — the model never issued a real tool call for this turn.`);
+        log("ultron", `gave up after ${MAX_ATTEMPTS} attempts — the model never issued a real tool call for this turn.`);
         response = new AIMessage(
           "[ultron] Tool call failed to register after several attempts — I'm not going to guess at the answer. Ask again.",
         );

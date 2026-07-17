@@ -68,6 +68,17 @@ mais ne sont pas implémentées.
 
 ## Architecture du repo
 
+- `src/core/logger.ts` : `log(prefix, message)` partagé par `graph.ts`,
+  `server.ts` et les outils qui journalisent leurs propres diagnostics
+  (`tools/agents.ts`, `tools/schedules.ts`) — écrit toujours dans
+  `ultron-web.log`, et sur stderr seulement si `disableConsoleEcho()` n'a
+  pas été appelé. Le CLI l'appelle en tout premier dans `main()` : il prend
+  le contrôle du terminal en mode brut et redessine tout l'écran depuis son
+  propre buffer (`transcript`), donc un `console.error` isolé (ex. la ligne
+  de debug `[graph] agent start thread=...`) atterrissait littéralement au
+  milieu d'une réponse affichée — corrigé en centralisant tous ces appels
+  derrière ce logger désactivable plutôt qu'en les retirant (le fichier de
+  log reste alimenté normalement, y compris pour le CLI).
 - `src/interfaces/cli/index.ts` : point d'entrée CLI, affichage, streaming, statistiques,
   jauge de contexte et interruption Ctrl+C. `formatToolResult` y donne un
   rendu dédié par outil (web_search : résultats numérotés avec URLs en

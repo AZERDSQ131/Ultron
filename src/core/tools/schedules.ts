@@ -4,6 +4,7 @@ import { z } from "zod";
 import { config } from "../../config.js";
 import { getChatRegistry } from "../memory/chats.js";
 import { AgentRegistry, nextCronDate } from "../memory/agents.js";
+import { log } from "../logger.js";
 
 const agents = new AgentRegistry(config.databasePath);
 const chats = getChatRegistry(config.databasePath);
@@ -13,7 +14,7 @@ export const scheduleTask = tool(
     try {
       const normalizedAgentName = agentName === "None" || agentName === "null" ? null : agentName;
       const normalizedCron = cron === "None" || cron === "null" ? null : cron;
-      console.error(`[ultron] schedule_task invoked name=${name} delaySeconds=${delaySeconds} cron=${normalizedCron ?? "none"}`);
+      log("ultron", `schedule_task invoked name=${name} delaySeconds=${delaySeconds} cron=${normalizedCron ?? "none"}`);
       const threadId = runConfig?.configurable?.thread_id;
       const currentChat = typeof threadId === "string" ? chats.get(threadId) : undefined;
       let agentId = currentChat?.agentId ?? null;

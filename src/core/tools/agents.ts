@@ -14,6 +14,7 @@ import { buildGraph, getPendingApproval } from "../graph.js";
 import { beginRun } from "../runs.js";
 import { withThreadLock } from "../threadLock.js";
 import { summarizeToolCall } from "./summarize.js";
+import { log } from "../logger.js";
 
 const agentsRegistry = new AgentRegistry(config.databasePath);
 const chats = getChatRegistry(config.databasePath);
@@ -35,7 +36,7 @@ function getSubGraph(): ReturnType<typeof buildGraph> {
 const MAX_SPAWN_DEPTH = 3;
 
 function logError(prefix: string, err: unknown): void {
-  console.error(`[ultron] ${prefix}:`, err instanceof Error ? err.stack ?? err.message : String(err));
+  log("ultron", `${prefix}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
 }
 
 // Runs the sub-agent to completion and, once it's done, wakes the thread
@@ -146,7 +147,7 @@ async function runSpawnedAgent(opts: {
   }
 
   try {
-    console.error(`[ultron] spawn_agent waking parent thread=${opts.parentThreadId} agent=${opts.ownerName}`);
+    log("ultron", `spawn_agent waking parent thread=${opts.parentThreadId} agent=${opts.ownerName}`);
     // Serialized per parentThreadId (see threadLock.ts) — without this, a
     // sub-agent finishing while the user's own turn on that same chat was
     // still streaming (server.ts's streamGraphTurn, same lock) would race
@@ -183,7 +184,7 @@ export const spawnAgent = tool(
       let owner = agentsRegistry.listAgents().find((a) => a.name.toLowerCase() === trimmedName.toLowerCase());
       if (!owner) {
         owner = agentsRegistry.createAgent(trimmedName, "", instructions?.trim() ?? "");
-        console.error(`[ultron] spawn_agent created new Agent "${owner.name}" (${owner.id})`);
+        log("ultron", `spawn_agent created new Agent "${owner.name}" (${owner.id})`);
       } else if (instructions?.trim()) {
         owner = agentsRegistry.updateAgent(owner.id, { instructions: instructions.trim() }) ?? owner;
       }
@@ -195,7 +196,7 @@ export const spawnAgent = tool(
       // conversation that spawned it.
       chats.setSecurityMode(execution.id, chats.getSecurityMode(parentThreadId));
       const effectiveThinking = thinking ?? "full";
-      console.error(`[ultron] spawn_agent dispatching agent=${owner.name} chat=${execution.id} parent=${parentThreadId} depth=${depth}`);
+      log("ultron", `spawn_agent dispatching agent=${owner.name} chat=${execution.id} parent=${parentThreadId} depth=${depth}`);
 
       // Fire-and-forget: this tool call returns immediately so the current
       // turn isn't blocked for as long as the sub-agent takes to run (which

@@ -1,4 +1,4 @@
-import { appendFileSync, createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -27,14 +27,12 @@ import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { abortRun, isRunning, subscribeToRun } from "../../core/runs.js";
 import { withThreadLock } from "../../core/threadLock.js";
+import { log } from "../../core/logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
-const debugLogPath = join(__dirname, "..", "..", "..", "ultron-web.log");
 function debugLog(message: string): void {
-  const line = `[${new Date().toISOString()}] [web] ${message}`;
-  console.error(line);
-  try { appendFileSync(debugLogPath, `${line}\n`); } catch { /* diagnostics must never break the server */ }
+  log("web", message);
 }
 
 const graph = buildGraph();
