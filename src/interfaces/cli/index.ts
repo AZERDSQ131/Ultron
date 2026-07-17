@@ -16,6 +16,7 @@ import {
   prepareRetry,
   resumeThread,
   type PendingToolCall,
+  type TaskMode,
   type ToolApprovalDecision,
 } from "../../core/graph.js";
 import { withThreadLock } from "../../core/threadLock.js";
@@ -29,7 +30,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/security", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/security", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -334,7 +335,34 @@ const SECURITY_LABELS: Record<SecurityMode, string> = {
 // Backs the pause created by toolsNode's interrupt() (see graph.ts) — a
 // single yes/no for the whole batch, since the terminal has no per-call
 // widget the way the web UI's approval block does.
+//
+// A lone plan_propose call (Plan task mode, see plan.ts) gets a distinct
+// rendering — a numbered plan instead of a raw args blob, and a
+// start/discuss framing instead of generic approve/deny — mirroring the
+// web UI's addApprovalBlock (thread.js). Same interrupt/resume plumbing
+// underneath either way.
 async function promptToolApproval(contextLine: string, calls: PendingToolCall[]): Promise<ToolApprovalDecision> {
+  const isPlan = calls.length === 1 && calls[0].name === "plan_propose";
+
+  if (isPlan) {
+    const items = (calls[0].args as { items?: { content?: string }[] } | undefined)?.items ?? [];
+    const list = items.map((item, i) => `  ${chalk.dim(`${i + 1}.`)} ${item.content ?? String(item)}`).join("\n");
+    appendTranscript(`${chalk.yellowBright.bold(`[ultron] plan proposed · ${items.length} step${items.length === 1 ? "" : "s"}`)}\n${list}\n`);
+    renderScreen("", 0, contextLine);
+    flushRender();
+
+    const answer = (
+      await readInput(contextLine, "", `${chalk.yellowBright.bold("start?")} ${chalk.dim("(y/n) ›")} `, false)
+    )
+      .trim()
+      .toLowerCase();
+    const approved = answer === "y" || answer === "yes";
+    appendTranscript(
+      chalk.dim(approved ? "[ultron] plan started.\n\n" : "[ultron] plan not approved — discuss changes, then it can be re-proposed.\n\n"),
+    );
+    return { [calls[0].id]: approved };
+  }
+
   const list = calls
     .map((c) => `  ${chalk.yellow("•")} ${chalk.bold(c.name)} ${chalk.dim(JSON.stringify(c.args))}`)
     .join("\n");
@@ -386,13 +414,13 @@ function printBanner() {
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo or plan\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
-function printStatus(thinkingMode: ThinkingMode, verbose: boolean, chatId: string, securityMode: SecurityMode) {
+function printStatus(thinkingMode: ThinkingMode, taskMode: TaskMode, verbose: boolean, chatId: string, securityMode: SecurityMode) {
   appendTranscript(
-    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · chat ${chatId}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("security")} ${securityMode}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
+    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · chat ${chatId}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("task")}     ${taskMode}\n  ${chalk.dim("security")} ${securityMode}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
   );
 }
 
@@ -470,6 +498,7 @@ async function main() {
   let abortController: AbortController | undefined;
   let stopping = false;
   let thinkingMode: ThinkingMode = "full";
+  let taskMode: TaskMode = "none";
   let verbose = false;
 
   const archiveCurrentChat = async (contextLine: string, requestedTitle?: string): Promise<void> => {
@@ -520,7 +549,7 @@ async function main() {
             printHelp();
             continue;
           case "/status":
-            printStatus(thinkingMode, verbose, currentChatId, chats.getSecurityMode(currentChatId));
+            printStatus(thinkingMode, taskMode, verbose, currentChatId, chats.getSecurityMode(currentChatId));
             continue;
           case "/clear":
             transcript = "";
@@ -583,6 +612,9 @@ async function main() {
           case "/think":
             appendTranscript(chalk.dim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
+          case "/task":
+            appendTranscript(chalk.dim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan).\n\n`));
+            continue;
           case "/security":
             appendTranscript(
               chalk.dim(
@@ -636,6 +668,16 @@ async function main() {
                 continue;
               }
               appendTranscript(chalk.dim(`[ultron] reasoning mode set to ${thinkingMode}.\n\n`));
+              continue;
+            }
+            if (command.startsWith("/task ")) {
+              const mode = command.slice("/task ".length).trim();
+              if (mode !== "none" && mode !== "todo" && mode !== "plan") {
+                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo or /task plan.\n\n"));
+                continue;
+              }
+              taskMode = mode;
+              appendTranscript(chalk.dim(`[ultron] task mode set to ${taskMode}.\n\n`));
               continue;
             }
             if (command.startsWith("/security ")) {
@@ -700,7 +742,7 @@ async function main() {
           // an unrelated reply.
           await withThreadLock(currentChatId, async () => {
             const stream = await graph.stream(nextInput, {
-              configurable: { thread_id: currentChatId, thinking: thinkingMode },
+              configurable: { thread_id: currentChatId, thinking: thinkingMode, taskMode },
               signal: controller.signal,
               streamMode: "messages",
               recursionLimit: config.graphRecursionLimit,

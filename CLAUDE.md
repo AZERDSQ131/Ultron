@@ -104,7 +104,12 @@ mais ne sont pas implémentées.
   sécurité) qui injecte une directive `<task_mode>` juste avant le tour
   courant (`taskModeDirective` dans `graph.ts`, propagé par
   `configurable.taskMode` depuis `/api/turn` et `/api/approve`) — un mode
-  choisi par l'utilisateur plutôt qu'une inférence du modèle. Un second
+  choisi par l'utilisateur plutôt qu'une inférence du modèle. Le CLI a la
+  même chose via `/task none|todo|plan` (`src/interfaces/cli/index.ts`,
+  variable locale `taskMode` propagée au `configurable` de `graph.stream`,
+  comme `/think`) ; l'approbation d'un `plan_propose` y a aussi un rendu
+  dédié dans `promptToolApproval` (plan numéroté, prompt « start? »)
+  au lieu du bloc JSON générique utilisé pour les autres outils. Un second
   rappel plus court (`taskModeReminder`) est en plus ajouté après tout
   l'historique, juste avant l'appel au modèle, car un run réel a montré
   que la directive seule en tête du system prompt ne suffisait pas
