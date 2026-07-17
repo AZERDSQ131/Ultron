@@ -1012,6 +1012,45 @@ footer {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* Task mode (see composer.js's setTaskMode) recolors the composer itself —
+   an always-visible reminder of which mode is active, not just the small
+   icon on the task-mode button, since it changes how ULTRON behaves for
+   every message sent while it's on. */
+#composer[data-task="todo"] {
+  border-color: var(--warn);
+}
+#composer[data-task="todo"]:focus-within {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+#composer[data-task="plan"] {
+  border-color: var(--accent);
+}
+#composer[data-task="plan"]:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.task-mode-label {
+  flex: none;
+  align-self: center;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.task-mode-label[data-mode="todo"] {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.task-mode-label[data-mode="plan"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 /* Reasoning mode — a real button that opens a small popover menu, instead
    of a native <select> that couldn't carry the per-mode description or
    match the rest of the app's custom controls. */

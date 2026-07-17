@@ -36,6 +36,7 @@ const thinkingSelectSettings = document.getElementById("thinking-select-settings
 const THINKING_LABELS = { full: "Full", low: "Low", off: "Off" };
 const taskBtn = document.getElementById("task-btn");
 const taskBtnLabel = document.getElementById("task-btn-label");
+const taskModeLabel = document.getElementById("task-mode-label");
 const taskMenu = document.getElementById("task-menu");
 const taskOptions = [...taskMenu.querySelectorAll(".task-option")];
 const TASK_LABELS = { none: "None", todo: "To-Do", plan: "Plan" };
@@ -262,6 +263,15 @@ export function setTaskMode(mode) {
     opt.classList.toggle("active", active);
     opt.setAttribute("aria-selected", String(active));
   }
+
+  // Composer border and the left-side label are the "am I in To-Do/Plan
+  // mode" indicator that doesn't require opening the task menu to check —
+  // color carries the mode the same way the security button's icon carries
+  // risk level (see .security-btn-icon in style.css).
+  composer.dataset.task = mode;
+  taskModeLabel.hidden = mode === "none";
+  taskModeLabel.dataset.mode = mode;
+  taskModeLabel.textContent = TASK_LABELS[mode] ?? mode;
 }
 
 taskBtn.addEventListener("click", () => {
