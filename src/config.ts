@@ -47,9 +47,15 @@ export const config = {
   // "required" makes it echo the JSON Schema's type name ("string") as the
   // literal argument value instead of a real one, even using the API's own
   // raw AIMessage unmodified (not a serialization bug on ULTRON's side).
-  // meta/llama-3.2-90b-vision-instruct does not reproduce this across
-  // repeated multi-turn tests and reasons sensibly about tool errors.
-  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "meta/llama-3.2-90b-vision-instruct",
+  // meta/llama-3.2-90b-vision-instruct didn't reproduce that bug, but a
+  // wider live bake-off (same multi-turn failure scenario, six candidates)
+  // showed it's not the best judgment available: nemotron-3-super-120b
+  // hallucinated success without checking, gpt-oss-20b leaked raw special
+  // tokens into the tool name, qwen3.5-122b went silent on turn 2. Only
+  // qwen3-next-80b-a3b-instruct correctly recognized the failure and called
+  // computer_fail with an accurate reason instead of guessing or stalling —
+  // the one candidate that showed real judgment, not just clean syntax.
+  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "qwen/qwen3-next-80b-a3b-instruct",
   // Hard cap on agent-loop iterations (one tree read + one action each) so
   // a confused loop that keeps re-reading the same state can't run forever.
   computerUseMaxSteps: Number(process.env.COMPUTER_USE_MAX_STEPS ?? 30),
