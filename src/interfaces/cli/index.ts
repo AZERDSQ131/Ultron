@@ -557,6 +557,8 @@ interface NvidiaModelInfo {
   contextWindowTokens?: number;
 }
 
+const modelContextCache = new Map<string, number | undefined>();
+
 async function listNvidiaModels(): Promise<NvidiaModelInfo[]> {
   const baseUrl = config.nemotronBaseUrl.replace(/\/+$/, "");
   const response = await fetch(`${baseUrl}/models`, {
@@ -587,6 +589,45 @@ async function listNvidiaModels(): Promise<NvidiaModelInfo[]> {
     })
     .filter((model): model is NvidiaModelInfo => Boolean(model))
     .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function resolveNvidiaModelContext(model: NvidiaModelInfo): Promise<NvidiaModelInfo> {
+  if (model.contextWindowTokens) return model;
+  if (modelContextCache.has(model.id)) {
+    const contextWindowTokens = modelContextCache.get(model.id);
+    return contextWindowTokens ? { ...model, contextWindowTokens } : model;
+  }
+
+  try {
+    const modelPath = model.id.split("/").map(encodeURIComponent).join("/");
+    const response = await fetch(`https://build.nvidia.com/${modelPath}/modelcard`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const html = await response.text();
+    // Hosted NIM's /v1/models omits max_model_len. The NVIDIA model card
+    // exposes the same capability in its description (for example, "1M
+    // context" or "1,000,000 tokens").
+    const contextMatch = html.match(/(?:([\d][\d,.]*)\s*(million|[kKmM])\s*[- ]?token(?:s)?\s*context|context(?: window| length)?[^\d]{0,40}([\d][\d,.]*)\s*(million|[kKmM])?\s*token(?:s)?)/i);
+    const value = contextMatch?.[1] ?? contextMatch?.[3];
+    const unit = (contextMatch?.[2] ?? contextMatch?.[4] ?? "").toLowerCase();
+    if (!value) {
+      modelContextCache.set(model.id, undefined);
+      return model;
+    }
+    const numeric = Number(value.replace(/,/g, ""));
+    const multiplier = unit === "million" || unit === "m" ? 1_000_000 : unit === "k" ? 1_000 : 1;
+    const contextWindowTokens = numeric * multiplier;
+    if (!Number.isSafeInteger(contextWindowTokens) || contextWindowTokens <= 0) {
+      modelContextCache.set(model.id, undefined);
+      return model;
+    }
+    modelContextCache.set(model.id, contextWindowTokens);
+    return { ...model, contextWindowTokens };
+  } catch {
+    modelContextCache.set(model.id, undefined);
+    return model;
+  }
 }
 
 function pickModel(contextLine: string, models: NvidiaModelInfo[], currentModel: string): Promise<NvidiaModelInfo | undefined> {
@@ -1073,17 +1114,18 @@ async function main() {
       }
       const selected = await pickModel(contextLine, models, config.nemotronModel);
       if (!selected) return;
-      if (selected.id === config.nemotronModel) {
-        applyModelContext(selected);
+      const resolvedSelected = await resolveNvidiaModelContext(selected);
+      if (resolvedSelected.id === config.nemotronModel) {
+        applyModelContext(resolvedSelected);
         return;
       }
-      config.nemotronModel = selected.id;
-      applyModelContext(selected);
+      config.nemotronModel = resolvedSelected.id;
+      applyModelContext(resolvedSelected);
       graph = buildGraph();
-      const contextLabel = selected.contextWindowTokens
-        ? ` · context ${selected.contextWindowTokens.toLocaleString()} tokens`
+      const contextLabel = resolvedSelected.contextWindowTokens
+        ? ` · context ${resolvedSelected.contextWindowTokens.toLocaleString()} tokens`
         : " · context fallback in use";
-      appendTranscript(uiDim(`[ultron] model set to ${selected.id}${contextLabel}.\n\n`));
+      appendTranscript(uiDim(`[ultron] model set to ${resolvedSelected.id}${contextLabel}.\n\n`));
     } catch (error) {
       appendTranscript(chalk.red(`[ultron] could not list NVIDIA models: ${error instanceof Error ? error.message : String(error)}\n\n`));
     }
@@ -1094,7 +1136,8 @@ async function main() {
   // explicit CONTEXT_WINDOW_TOKENS fallback from the environment.
   try {
     const models = await listNvidiaModels();
-    applyModelContext(models.find((model) => model.id === config.nemotronModel));
+    const currentModel = models.find((model) => model.id === config.nemotronModel);
+    applyModelContext(currentModel ? await resolveNvidiaModelContext(currentModel) : undefined);
   } catch {
     // The model can still be used with the configured fallback window.
   }
