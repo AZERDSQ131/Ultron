@@ -76,18 +76,20 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   const rows = stdout.rows || 24;
   const padding = Math.max(0, rows - transcriptRows(content) - footerRows);
 
-  stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${footer}`);
-  // Position absolutely inside the freshly drawn frame. Relative cursor
-  // moves from the final rule are terminal-dependent once the transcript or
-  // footer wraps, which was placing the visible cursor one line above the
-  // input even though keystrokes still went to the right value.
+  // Draw up to the input first. Save that exact terminal position before
+  // drawing the lines below it, then restore it; this avoids all vertical
+  // cursor arithmetic and the terminal-specific wrap off-by-ones it caused.
+  const inputLine = `${activePrompt}${input}`;
+  stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${rule()}\n${inputLine}`);
   const promptWidth = stripAnsi(activePrompt).length + cursor;
   const width = Math.max(1, stdout.columns || 80);
-  // transcriptRows counts the empty slot after content's final newline;
-  // the footer rule occupies that slot, so the prompt starts one row below
-  // it rather than at the raw count.
-  const promptRow = transcriptRows(content) + padding - 1;
-  readline.cursorTo(stdout, promptWidth % width, promptRow + Math.floor(promptWidth / width));
+  // For normal (single-line) input this is the current input row. When the
+  // input itself wraps, readline still owns editing and the next redraw
+  // corrects the column from the same stable anchor.
+  readline.cursorTo(stdout, promptWidth % width);
+  stdout.write("\x1b[s");
+  readline.cursorTo(stdout, (stripAnsi(activePrompt).length + input.length) % width);
+  stdout.write(`\n${suggestionLine}\n${contextLine}\n${rule()}\x1b[u`);
 }
 
 function renderScreen(input: string, cursor: number, contextLine: string): void {
