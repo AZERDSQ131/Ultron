@@ -41,6 +41,7 @@ let transcript = "";
 let bannerTranscript = "";
 let generationInput = "";
 let generationCursor = 0;
+const promptHistory: string[] = [];
 let latestRender: { input: string; cursor: number; contextLine: string } = { input: "", cursor: 0, contextLine: "" };
 let pendingRender: { input: string; cursor: number; contextLine: string } | undefined;
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
@@ -187,6 +188,8 @@ function readInput(
   return new Promise((resolve) => {
     let value = initialValue;
     let cursor = value.length;
+    let historyIndex = -1;
+    let historyDraft = "";
     let finished = false;
 
     const finish = (result: string, keepHistory = true) => {
@@ -196,7 +199,10 @@ function readInput(
       stdin.removeListener("keypress", onKeypress);
       cancelActiveInput = undefined;
 
-      if (keepHistory && recordHistory && result.trim()) appendTranscript(`${activePrompt}${result}\n`);
+      if (keepHistory && recordHistory && result.trim()) {
+        if (promptHistory.at(-1) !== result) promptHistory.push(result);
+        appendTranscript(`${activePrompt}${result}\n`);
+      }
       renderScreen("", 0, contextLine);
       flushRender();
       activePrompt = INPUT_PROMPT;
@@ -219,6 +225,31 @@ function readInput(
           cursor = value.length;
           renderScreen(value, cursor, contextLine);
         }
+        return;
+      }
+      if (key.name === "up") {
+        if (!recordHistory || promptHistory.length === 0) return;
+        if (historyIndex === -1) {
+          historyDraft = value;
+          historyIndex = promptHistory.length;
+        }
+        if (historyIndex > 0) historyIndex--;
+        value = promptHistory[historyIndex];
+        cursor = value.length;
+        renderScreen(value, cursor, contextLine);
+        return;
+      }
+      if (key.name === "down") {
+        if (!recordHistory || historyIndex === -1) return;
+        if (historyIndex < promptHistory.length - 1) {
+          historyIndex++;
+          value = promptHistory[historyIndex];
+        } else {
+          historyIndex = -1;
+          value = historyDraft;
+        }
+        cursor = value.length;
+        renderScreen(value, cursor, contextLine);
         return;
       }
       if (key.name === "backspace") {
