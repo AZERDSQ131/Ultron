@@ -166,7 +166,7 @@ function ruleWidth(): number {
   // Leave one column empty. A rule that exactly fills the terminal can
   // trigger the terminal's automatic wrap, adding an invisible line; the
   // cursor calculation below would then land on the line above the input.
-  return Math.min(Math.max(1, (stdout.columns || 80) - 1), 76);
+  return Math.max(1, (stdout.columns || 80) - 1);
 }
 
 function rule(): string {
