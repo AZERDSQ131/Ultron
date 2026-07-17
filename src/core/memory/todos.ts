@@ -68,6 +68,14 @@ export class TodoRegistry {
   clear(chatId: string): void {
     this.set(chatId, []);
   }
+
+  // The model creates the plan once; the host closes it once the turn has
+  // finished. This avoids one extra LLM round-trip per item just to flip
+  // statuses.
+  completeAll(chatId: string): void {
+    const items = this.get(chatId);
+    if (items.length) this.set(chatId, items.map((item) => ({ ...item, status: "completed" })));
+  }
 }
 
 let sharedRegistry: TodoRegistry | undefined;

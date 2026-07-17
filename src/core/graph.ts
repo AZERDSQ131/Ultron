@@ -77,19 +77,13 @@ function taskModeDirective(mode: TaskMode): string {
 ---
 
 <task_mode>To-Do</task_mode>
-For THIS turn, the user selected "To-Do" task mode. Before your first tool
-call, you MUST call todo_write once with one item per sub-task in the
-user's request — this is mandatory, not a judgment call, even if each
-sub-task looks quick on its own. After that, use todo_update to mark a
-step 'in_progress' or 'completed' as you go (one item, by its position) —
-do NOT call todo_write again just to change a status; that rewrites the
-whole list and is how progress gets lost or a step gets silently dropped.
-Only call todo_write a second time if the plan's shape itself needs to
-change (steps added, removed, or reordered). If a to-do list already
-exists for this chat but the CURRENT request is a new, unrelated task —
-not a continuation of what that list was tracking — don't append to it or
-mark its old items done: call todo_write fresh, replacing it outright,
-rather than mixing an unrelated request into a stale plan.`;
+For THIS turn, the user selected "To-Do" task mode. Your FIRST tool call
+MUST be exactly one todo_write containing one concise item per sub-task.
+Then do the actual work. Do NOT call todo_read, todo_update, or todo_write
+again during this turn: the plan is already in the preceding tool result and
+the host will close it when the turn finishes. Never turn task progress into
+separate tool calls. If the request has only one action, still create one
+item because the user explicitly selected To-Do mode.`;
   }
   if (mode === "plan") {
     return `
@@ -104,8 +98,8 @@ detailed breakdown of the work into concrete steps, erring on the side of
 more and smaller steps rather than fewer and bigger ones. plan_propose
 pauses and shows the user your plan:
 - If they approve it, you'll get a confirmation back — start executing
-  immediately after, and use todo_update (not todo_write, not another
-  plan_propose call) to mark steps 'in_progress'/'completed' as you go.
+  immediately after. Do not call todo_read, todo_update, or plan_propose
+  again during this turn; the host will close the plan when the turn ends.
 - If they reject it, you'll get a refusal back instead — do NOT call
   plan_propose again in that same reply. Respond in plain text: ask what
   they want changed, or discuss alternatives. Only call plan_propose again
@@ -156,9 +150,7 @@ function todoState(mode: TaskMode, threadId: string | undefined, messages: BaseM
 // the instant a plan gets rejected (see todoState above).
 function taskModeReminder(mode: TaskMode, state: TodoState): string {
   if (mode === "none") return "";
-  if (state === "active") {
-    return `[ultron:task_mode=${mode}] Reminder: a to-do list already exists for this chat. If the CURRENT request continues that same task, use todo_update (one item, by its position) to mark a step in_progress/completed — do NOT call todo_write${mode === "plan" ? " or plan_propose" : ""} again just to change a status. If the CURRENT request is a new, unrelated task instead, don't reuse or update the old list — call ${mode === "plan" ? "plan_propose" : "todo_write"} fresh for this request; it replaces the stale one.`;
-  }
+  if (state === "active") return `[ultron:task_mode=${mode}] The initial plan already exists. Do the user's work now. Do not call any todo tool again in this turn.`;
   if (state === "plan_denied") {
     return `[ultron:task_mode=plan] Reminder: your last proposed plan was NOT approved. Do not call plan_propose again in this reply — respond in plain text instead (ask what to change, discuss alternatives) and wait for the user's direction.`;
   }
@@ -430,9 +422,6 @@ export function buildGraph() {
   const fullThinkingModel = createNemotronModel("full");
   const lowThinkingModel = createNemotronModel("low");
   const noThinkingModel = createNemotronModel("off");
-  const fullModel = tools.length > 0 ? fullThinkingModel.bindTools(tools) : fullThinkingModel;
-  const lowModel = tools.length > 0 ? lowThinkingModel.bindTools(tools) : lowThinkingModel;
-  const noModel = tools.length > 0 ? noThinkingModel.bindTools(tools) : noThinkingModel;
   // Shared, disk-backed, and keyed by thread_id — the CLI and the web
   // interface both call buildGraph() and point at the same database file,
   // so they read and write the same conversation state instead of each
@@ -444,7 +433,8 @@ export function buildGraph() {
       const threadId = runConfig.configurable?.thread_id as string | undefined;
       const taskMode = (runConfig.configurable?.taskMode as TaskMode | undefined) ?? "none";
       const history = sanitizeHistory(state.messages);
-      const taskReminder = taskModeReminder(taskMode, todoState(taskMode, threadId, state.messages));
+      const currentTodoState = todoState(taskMode, threadId, state.messages);
+      const taskReminder = taskModeReminder(taskMode, currentTodoState);
       const messages = [
         { role: "system" as const, content: buildSystemPrompt(threadId, taskMode) },
         ...history,
@@ -455,7 +445,16 @@ export function buildGraph() {
         ...(taskReminder ? [{ role: "system" as const, content: taskReminder }] : []),
       ];
       const thinkingMode = (runConfig.configurable?.thinking as ThinkingMode | undefined) ?? "full";
-      const model = thinkingMode === "off" ? noModel : thinkingMode === "low" ? lowModel : fullModel;
+      // Once the initial plan exists, hide all task-management tools from
+      // Nemotron. This makes the one-plan rule structural instead of merely
+      // prompt advice, so searches/actions cannot be interrupted by status
+      // bookkeeping turns.
+      const taskToolNames = new Set(["todo_write", "todo_update", "todo_read", "plan_propose"]);
+      const availableTools = currentTodoState === "active" || currentTodoState === "plan_denied"
+        ? tools.filter((tool) => !taskToolNames.has(tool.name))
+        : tools;
+      const baseModel = thinkingMode === "off" ? noThinkingModel : thinkingMode === "low" ? lowThinkingModel : fullThinkingModel;
+      const model = availableTools.length ? baseModel.bindTools(availableTools) : baseModel;
       debugLog(`agent start thread=${String(runConfig.configurable?.thread_id ?? "unknown")} thinking=${thinkingMode} messages=${state.messages.length}`);
 
       // Only the first attempt streams live — runConfig carries the

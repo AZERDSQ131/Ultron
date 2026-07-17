@@ -57,6 +57,11 @@ function transcriptRows(text: string): number {
   return text.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(stripAnsi(line).length / width)), 0);
 }
 
+function wrappedRows(text: string): number {
+  const width = Math.max(1, stdout.columns || 80);
+  return Math.max(1, Math.ceil(stripAnsi(text).length / width));
+}
+
 function commandSuggestion(input: string): string {
   if (!input.startsWith("/") || /\s/.test(input)) return "";
   return LOCAL_COMMANDS.find((command) => command.startsWith(input) && command !== input) ?? "";
@@ -67,12 +72,21 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   const suggestion = commandSuggestion(input);
   const suggestionLine = suggestion ? chalk.dim(`↳ ${suggestion}`) : "";
   const footer = `${rule()}\n${activePrompt}${input}\n${suggestionLine}\n${contextLine}\n${rule()}`;
+  const footerRows = footer.split("\n").reduce((rows, line) => rows + wrappedRows(line), 0);
   const rows = stdout.rows || 24;
-  const padding = Math.max(0, rows - transcriptRows(content) - 5);
+  const padding = Math.max(0, rows - transcriptRows(content) - footerRows);
 
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${footer}`);
-  readline.moveCursor(stdout, 0, -3);
-  readline.cursorTo(stdout, activePrompt.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + cursor);
+  // The old fixed -3 assumed a five-line footer and broke as soon as the
+  // prompt wrapped. Move to the actual prompt row and account for wrapped
+  // input so redraws cannot land in the banner or splice text into an
+  // earlier line.
+  readline.moveCursor(stdout, 0, -(footerRows - 1));
+  const promptWidth = stripAnsi(activePrompt).length + cursor;
+  const width = Math.max(1, stdout.columns || 80);
+  readline.cursorTo(stdout, 0);
+  readline.moveCursor(stdout, 0, Math.floor(promptWidth / width));
+  readline.cursorTo(stdout, promptWidth % width);
 }
 
 function renderScreen(input: string, cursor: number, contextLine: string): void {
@@ -744,6 +758,10 @@ async function main() {
         nextInput = new Command({ resume: decisions });
       }
 
+      // Task bookkeeping is host-owned: close the whole plan once the
+      // model has finished the actual turn, without sending one update call
+      // per item back through the graph.
+      todos.completeAll(chatId);
       writeLive(markdown.flush(), contextLine);
       appendTranscript("\n\n");
 

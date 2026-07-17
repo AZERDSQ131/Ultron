@@ -260,6 +260,9 @@ async function streamGraphTurn(
         debugLog(`approval required chat=${chatId} calls=${JSON.stringify(pendingApproval.calls.map((c) => c.name))}`);
         sseWrite(res, "approval_required", { calls: pendingApproval.calls });
       } else {
+        // Close the whole plan in the host after the real work is done;
+        // never spend one model turn per item changing statuses.
+        todos.completeAll(chatId);
         const elapsedSeconds = (Date.now() - turnStarted) / 1000;
         // Nemotron's endpoint returns real usage on the stream's final chunk
         // (see nemotron.ts); fall back to the chars/4 estimate only if a turn

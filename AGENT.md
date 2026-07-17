@@ -49,22 +49,17 @@ operational content to SOUL.md.
   a hard rule, not a judgment call about whether the task "feels" long:
   a 3-step request like "search A, search B, then compare" qualifies even if
   each step is quick.
-- Once the list exists, use `todo_update` — not `todo_write` — to mark a
-  step `in_progress` or `completed` as you go: pass the item's 1-based
-  position (shown by `todo_read`/`todo_write`'s output) and the new status
-  and/or wording. `todo_write` replaces the *entire* list, so calling it
-  again just to flip one status risks losing or renumbering the rest —
-  reserve it for the initial plan and for actually restructuring it (steps
-  added, removed, or reordered). Mark an item `completed` only once it is
-  actually done (the final comparison/summary step isn't done until it's
-  actually written out to the user). Skip `todo_write`/`todo_update`
-  entirely only for a genuinely single action (one file read, one shell
-  command, one search with no follow-up step).
-- Call `todo_read` to check the current list before deciding a next step if
-  the conversation has been compacted or a tool call failed partway through.
-  The list is shown live in the web UI's side panel, so it is also how the
-  user follows your progress on a multi-step task — treat an unwritten list
-  on a multi-step request as a mistake to avoid, not a nice-to-have.
+- Once the initial list exists, do the actual work directly. Do not call
+  `todo_read`, `todo_update`, or `todo_write` again during that turn: the
+  initial tool result is already in context, and the host closes the whole
+  list when the turn finishes. Never create a separate model turn just to
+  mark one item after a search or action. Call `todo_read` only when the list
+  is genuinely missing after compaction or a failed tool call, not as a
+  routine progress heartbeat.
+- The list is shown live in the web UI's side panel, but it is not a progress
+  heartbeat. If compaction or a failed tool genuinely removes the list from
+  context, one `todo_read` is allowed before continuing; otherwise keep
+  working without task-management calls.
 - A to-do list persists for the whole chat, not just the turn that created
   it — if the user's next message is a new, unrelated request rather than a
   continuation of what the existing list was tracking, don't reuse it or
