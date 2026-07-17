@@ -582,8 +582,32 @@ function renderContextBar(usedTokens: number, maxTokens: number): string {
   return `${uiDim("context")}  ${bar}  ${usedTokens.toLocaleString()} / ${maxLabel} tokens (${fillColor(`${pct}%`)})`;
 }
 
+function fitAsciiArt(art: string, availableWidth: number): string {
+  const lines = art.split("\n");
+  const sourceWidth = Math.max(...lines.map((line) => Array.from(line).length), 1);
+  const targetWidth = Math.min(sourceWidth, Math.max(1, availableWidth));
+  if (targetWidth === sourceWidth) return art;
+
+  const scale = targetWidth / sourceWidth;
+  const targetHeight = Math.max(1, Math.round(lines.length * scale));
+  const sourceLines = lines.map((line) => {
+    const chars = Array.from(line);
+    return chars.concat(" ".repeat(sourceWidth - chars.length));
+  });
+
+  return Array.from({ length: targetHeight }, (_, targetRow) => {
+    const sourceRow = Math.min(lines.length - 1, Math.floor(targetRow / scale));
+    const source = sourceLines[sourceRow];
+    return Array.from({ length: targetWidth }, (_, targetColumn) => {
+      const sourceColumn = Math.min(sourceWidth - 1, Math.floor(targetColumn / scale));
+      return source[sourceColumn];
+    }).join("").trimEnd();
+  }).join("\n");
+}
+
 function printBanner() {
-  const art = readFileSync(join(__dirname, "ascii-art.txt"), "utf-8").trimEnd();
+  const sourceArt = readFileSync(join(__dirname, "ascii-art.txt"), "utf-8").trimEnd();
+  const art = fitAsciiArt(sourceArt, (stdout.columns || 80) - 2);
   appendTranscript(
     `${art}\n\n  ${uiDim("model")}    ${config.nemotronModel}\n  ${uiDim("memory")}   MEMORY.md\n  ${uiDim("status")}   ${chalk.greenBright("ready")}\n\n${uiDim("  type a message to begin · ctrl+c to stop at any time")}\n\n`,
   );
