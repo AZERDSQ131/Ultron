@@ -24,6 +24,7 @@ import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
+import { getTodoRegistry } from "../../core/memory/todos.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
 import { disableConsoleEcho } from "../../core/logger.js";
 import { tools } from "../../core/tools/index.js";
@@ -567,6 +568,7 @@ async function main() {
   const graph = buildGraph();
   const chats = getChatRegistry(config.databasePath);
   const goals = getGoalRegistry(config.databasePath);
+  const todos = getTodoRegistry(config.databasePath);
   // Registers the CLI's original hardcoded thread (from before chats
   // existed) so its history shows up in the registry instead of being
   // orphaned — same migration the web server runs on its own startup.
@@ -995,6 +997,10 @@ async function main() {
                 continue;
               }
               taskMode = mode;
+              // Task mode applies to the next user request. Drop any list
+              // left by an earlier request now, before it can be mistaken
+              // for the plan of the new one.
+              if (mode === "todo" || mode === "plan") todos.clear(currentChatId);
               appendTranscript(chalk.dim(`[ultron] task mode set to ${taskMode}.\n\n`));
               continue;
             }
@@ -1080,6 +1086,11 @@ async function main() {
 
       if (command !== "/retry") chats.maybeAutoTitle(currentChatId, input);
       chats.touch(currentChatId);
+
+      // The selector describes the current request, not the whole chat.
+      // Reset persisted task state at this boundary so an interrupted or
+      // completed request cannot make the next one resume an old plan.
+      if (command !== "/retry" && (taskMode === "todo" || taskMode === "plan")) todos.clear(currentChatId);
 
       const turnInput: { messages: HumanMessage[] } | Command = {
         messages: command === "/retry" ? [] : [new HumanMessage(input)],

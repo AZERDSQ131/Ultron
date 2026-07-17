@@ -311,6 +311,12 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   }
   chats.touch(chatId);
 
+  // Task mode applies to this request only. Clear the chat-scoped list at
+  // the user-turn boundary so an interrupted or completed request cannot
+  // make a new request resume an unrelated old plan. Approval resumes and
+  // retries intentionally keep their existing list.
+  if (!isRetry && (taskMode === "todo" || taskMode === "plan")) todos.clear(chatId);
+
   await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(input)] });
 }
 
