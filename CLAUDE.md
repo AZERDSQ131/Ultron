@@ -151,27 +151,33 @@ mais ne sont pas implémentées.
   `taskModeDirective`/`taskModeReminder` et `AGENT.md` disent maintenant
   explicitement de préférer `todo_update` pour les changements de statut.
 - `src/core/memory/goals.ts` (`GoalRegistry`) + `src/core/goalJudge.ts` +
-  the CLI's `/goal` command (`src/interfaces/cli/index.ts`) : **CLI-only**
-  goal mode, not wired into the web UI. `/goal <objective>` sets one
-  standing objective per chat and immediately runs it as a turn; after each
-  turn `driveGoalLoop` calls a *separate* short-lived LLM call
-  (`judgeGoal`, `createNemotronModel("low")`) that reads only the worker's
-  final reply plus a bounded `git status`/`git diff HEAD` snapshot
-  (`gatherCodeContext`, capped ~6k chars) — deliberately not the full
-  tool-call history, so the judge has its own small, cheap context instead
-  of re-consuming everything the main turn just spent. On "continue" it
-  appends a corrective `[Goal check] ...` human-role message
-  (`buildContinuationPrompt`) and replays `executeTurn` (the same
-  tool-approval-aware turn path a human-typed message gets — extracted out
-  of the old inline main-loop code specifically so the goal loop reuses it
-  verbatim, not a simplified copy) automatically, with no user input, up to
-  `GOAL_MAX_TURNS` (default 20) before self-pausing. "done" marks the goal
-  complete; "blocked" pauses it for the user. `/goal pause|resume|clear|status`
-  give manual control; `/goal resume` also resets the turn-budget window.
-  Ctrl+C aborts a goal-loop turn (or the judge call itself) the same way it
-  aborts a normal turn. Only one goal per chat at a time — a second
-  `/goal <objective>` on an active/paused goal is refused, not silently
-  overwritten.
+  the CLI's `/task goal` command (`src/interfaces/cli/index.ts`) :
+  **CLI-only** goal mode, not wired into the web UI. It lives under the
+  existing `/task` namespace (`/task none|todo|plan|goal <objective>`)
+  rather than as a standalone `/goal` command, since a goal is a
+  task-management mode alongside todo/plan, not a separate concern.
+  `/task goal <objective>` sets one standing objective per chat and
+  immediately runs it as a turn; after each turn `driveGoalLoop` calls a
+  *separate* short-lived LLM call (`judgeGoal`, `createNemotronModel("low")`)
+  that reads only the worker's final reply plus a bounded `git status`/
+  `git diff HEAD` snapshot (`gatherCodeContext`, capped ~6k chars) —
+  deliberately not the full tool-call history, so the judge has its own
+  small, cheap context instead of re-consuming everything the main turn
+  just spent. On "continue" it appends a corrective `[Goal check] ...`
+  human-role message (`buildContinuationPrompt`) and replays `executeTurn`
+  (the same tool-approval-aware turn path a human-typed message gets —
+  extracted out of the old inline main-loop code specifically so the goal
+  loop reuses it verbatim, not a simplified copy) automatically, with no
+  user input, up to `GOAL_MAX_TURNS` (default 20) before self-pausing.
+  "done" marks the goal complete; "blocked" pauses it for the user.
+  `/task goal pause|resume|clear|status` give manual control; `/task goal
+  resume` also resets the turn-budget window. Ctrl+C aborts a goal-loop
+  turn (or the judge call itself) the same way it aborts a normal turn.
+  Only one goal per chat at a time — a second `/task goal <objective>` on
+  an active/paused goal is refused, not silently overwritten. Note: `taskMode`
+  itself (none/todo/plan, sent as `configurable.taskMode` and used by
+  `taskModeDirective`/`taskModeReminder` in `graph.ts`) is untouched by this
+  — setting a goal does not change `taskMode`, they're orthogonal.
 - `AGENT.md` / `SOUL.md` : règles opérationnelles et personnalité, concaténées
   au démarrage ; ils ne doivent pas être fusionnés.
 - `PLAN.md`, `README.md` et `docs/agent-ia-personnel.md` : périmètre,
@@ -228,8 +234,8 @@ indépendants.
   proposé" avec boutons Start/Discuss) reflètent ce cycle
   propose → (accepte → exécute) | (refuse → discute → re-propose).
 - `GOAL_MAX_TURNS` : optionnel ; défaut `20`. Nombre de tours d'auto-continuation
-  que le mode `/goal` (CLI uniquement, voir ci-dessus) s'autorise avant de se
-  mettre en pause tout seul.
+  que le mode `/task goal` (CLI uniquement, voir ci-dessus) s'autorise avant
+  de se mettre en pause tout seul.
 - `WEB_PORT` : optionnel ; défaut `4173`, port de l'interface web locale.
 - `CONTEXT_WINDOW_TOKENS` : optionnel ; défaut `262144`, utilisé uniquement
   pour la jauge de contexte.

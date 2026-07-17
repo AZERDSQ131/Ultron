@@ -34,7 +34,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/security", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/theme", "/security", "/verbose", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -44,6 +44,24 @@ let pendingRender: { input: string; cursor: number; contextLine: string } | unde
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
 let activePrompt = INPUT_PROMPT;
 let activeModeLabel = "None";
+type TerminalTheme = "auto" | "light" | "dark";
+let terminalTheme: TerminalTheme = "auto";
+
+function isLightTerminal(): boolean {
+  if (terminalTheme === "light") return true;
+  if (terminalTheme === "dark") return false;
+  // COLORFGBG conventionally stores foreground;background; a background
+  // value of 15 is the usual white terminal background.
+  return /(?:^|[;:])15$/.test(process.env.COLORFGBG ?? "");
+}
+
+function uiDim(text: string): string {
+  return isLightTerminal() ? chalk.gray(text) : chalk.dim(text);
+}
+
+function uiWhite(text: string): string {
+  return isLightTerminal() ? chalk.blackBright(text) : chalk.whiteBright(text);
+}
 
 function appendTranscript(text: string): void {
   transcript += text;
@@ -69,17 +87,17 @@ function commandSuggestion(input: string): string {
 }
 
 function modeInputColor(): (text: string) => string {
-  if (activeModeLabel === "To-Do") return chalk.yellowBright;
-  if (activeModeLabel === "Plan") return chalk.blueBright;
-  if (activeModeLabel === "Goal") return chalk.greenBright;
-  return chalk.cyanBright;
+  if (activeModeLabel === "To-Do") return isLightTerminal() ? chalk.yellow : chalk.yellowBright;
+  if (activeModeLabel === "Plan") return isLightTerminal() ? chalk.blue : chalk.blueBright;
+  if (activeModeLabel === "Goal") return isLightTerminal() ? chalk.green : chalk.greenBright;
+  return isLightTerminal() ? chalk.cyan : chalk.cyanBright;
 }
 
 function drawScreen(input: string, cursor: number, contextLine: string): void {
   const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
   const suggestion = commandSuggestion(input);
-  const suggestionLine = suggestion ? chalk.dim(`↳ ${suggestion}`) : "";
-  const displayContextLine = `${contextLine}  ${chalk.dim("mode")} ${activeModeLabel}`;
+  const suggestionLine = suggestion ? uiDim(`↳ ${suggestion}`) : "";
+  const displayContextLine = `${contextLine}  ${uiDim("mode")} ${activeModeLabel}`;
   const footer = `${rule()}\n${activePrompt}${input}\n${suggestionLine}\n${displayContextLine}\n${rule()}`;
   const footerRows = footer.split("\n").reduce((rows, line) => rows + wrappedRows(line), 0);
   const rows = stdout.rows || 24;
@@ -136,7 +154,7 @@ function ruleWidth(): number {
 }
 
 function rule(): string {
-  return chalk.dim("─".repeat(ruleWidth()));
+  return uiDim("─".repeat(ruleWidth()));
 }
 
 function readInput(
@@ -279,10 +297,10 @@ function pickArchive(contextLine: string): Promise<string | undefined> {
               return `  ${marker} ${archive.title}`;
             })
             .join("\n")
-        : chalk.dim("  no matching chats");
-      const prompt = `${chalk.magentaBright.bold("resume")} ${chalk.dim("›")} `;
+        : uiDim("  no matching chats");
+      const prompt = `${chalk.magentaBright.bold("resume")} ${uiDim("›")} `;
       const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
-      const picker = `${chalk.dim("Select a chat · type to search · ↑/↓ navigate · Enter confirm")}\n${rows}`;
+      const picker = `${uiDim("Select a chat · type to search · ↑/↓ navigate · Enter confirm")}\n${rows}`;
       const footer = `${rule()}\n${prompt}${query}\n${contextLine}\n${rule()}`;
       const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
       stdout.write(`\x1b[2J\x1b[H${content}${picker}\n${"\n".repeat(padding)}${footer}`);
@@ -350,9 +368,9 @@ async function showRestoredMessages(graph: ReturnType<typeof buildGraph>, thread
     if (message.role === "human") {
       appendTranscript(`${INPUT_PROMPT}${message.content}\n`);
     } else if (message.role === "ai") {
-      appendTranscript(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} ${message.content}\n\n`);
+      appendTranscript(`${chalk.redBright.bold("ultron")} ${uiDim("›")} ${message.content}\n\n`);
     } else if (message.role === "tool_call") {
-      appendTranscript(chalk.dim(`[${message.content}]\n`));
+      appendTranscript(uiDim(`[${message.content}]\n`));
     } else {
       appendTranscript(`${formatToolResult(message.name ?? "tool", message.content)}\n\n`);
     }
@@ -379,37 +397,37 @@ async function promptToolApproval(contextLine: string, calls: PendingToolCall[])
 
   if (isPlan) {
     const items = (calls[0].args as { items?: { content?: string }[] } | undefined)?.items ?? [];
-    const list = items.map((item, i) => `  ${chalk.dim(`${i + 1}.`)} ${item.content ?? String(item)}`).join("\n");
+    const list = items.map((item, i) => `  ${uiDim(`${i + 1}.`)} ${item.content ?? String(item)}`).join("\n");
     appendTranscript(`${chalk.yellowBright.bold(`[ultron] plan proposed · ${items.length} step${items.length === 1 ? "" : "s"}`)}\n${list}\n`);
     renderScreen("", 0, contextLine);
     flushRender();
 
     const answer = (
-      await readInput(contextLine, "", `${chalk.yellowBright.bold("start?")} ${chalk.dim("(y/n) ›")} `, false)
+      await readInput(contextLine, "", `${chalk.yellowBright.bold("start?")} ${uiDim("(y/n) ›")} `, false)
     )
       .trim()
       .toLowerCase();
     const approved = answer === "y" || answer === "yes";
     appendTranscript(
-      chalk.dim(approved ? "[ultron] plan started.\n\n" : "[ultron] plan not approved — discuss changes, then it can be re-proposed.\n\n"),
+      uiDim(approved ? "[ultron] plan started.\n\n" : "[ultron] plan not approved — discuss changes, then it can be re-proposed.\n\n"),
     );
     return { [calls[0].id]: approved };
   }
 
   const list = calls
-    .map((c) => `  ${chalk.yellow("•")} ${chalk.bold(c.name)} ${chalk.dim(JSON.stringify(c.args))}`)
+    .map((c) => `  ${chalk.yellow("•")} ${chalk.bold(c.name)} ${uiDim(JSON.stringify(c.args))}`)
     .join("\n");
   appendTranscript(`${chalk.yellowBright.bold("[ultron] approval required")}\n${list}\n`);
   renderScreen("", 0, contextLine);
   flushRender();
 
   const answer = (
-    await readInput(contextLine, "", `${chalk.yellowBright.bold("approve?")} ${chalk.dim("(y/n) ›")} `, false)
+    await readInput(contextLine, "", `${chalk.yellowBright.bold("approve?")} ${uiDim("(y/n) ›")} `, false)
   )
     .trim()
     .toLowerCase();
   const approved = answer === "y" || answer === "yes";
-  appendTranscript(chalk.dim(`[ultron] ${approved ? "approved" : "denied"} ${calls.length} tool call(s).\n\n`));
+  appendTranscript(uiDim(`[ultron] ${approved ? "approved" : "denied"} ${calls.length} tool call(s).\n\n`));
 
   const decisions: ToolApprovalDecision = {};
   for (const call of calls) decisions[call.id] = approved;
@@ -434,7 +452,7 @@ function capForDisplay(text: string): string {
   if (lines.length > RESULT_MAX_LINES) out = lines.slice(0, RESULT_MAX_LINES).join("\n");
   if (out.length === text.length) return out;
   const omitted = text.length - out.length;
-  return `${out}\n${chalk.dim(`… (${omitted.toLocaleString()} more characters not shown — full result is still in context)`)}`;
+  return `${out}\n${uiDim(`… (${omitted.toLocaleString()} more characters not shown — full result is still in context)`)}`;
 }
 
 // Numbered-result blocks from formatSearchResults (search.ts): "source: X",
@@ -443,11 +461,11 @@ function styleSearchResults(content: string): string {
   return content
     .split("\n")
     .map((line) => {
-      if (/^source: /.test(line)) return chalk.dim(line);
-      if (/^\d+\.\s/.test(line)) return chalk.bold.whiteBright(line);
+      if (/^source: /.test(line)) return uiDim(line);
+      if (/^\d+\.\s/.test(line)) return uiWhite(line);
       const urlMatch = line.match(/^(\s*)(https?:\/\/\S+)$/);
       if (urlMatch) return `${urlMatch[1]}${chalk.cyan.underline(urlMatch[2])}`;
-      return chalk.dim(line);
+      return uiDim(line);
     })
     .join("\n");
 }
@@ -457,7 +475,7 @@ function styleFetchResult(content: string): string {
   const [head, ...rest] = content.split("\n\n");
   const styledHead = head
     .split("\n")
-    .map((line) => chalk.dim(line))
+    .map((line) => uiDim(line))
     .join("\n");
   const body = rest.join("\n\n");
   return body ? `${styledHead}\n\n${capForDisplay(body)}` : styledHead;
@@ -467,7 +485,7 @@ function formatToolResult(name: string, content: string): string {
   if (name === "web_search") return `${chalk.cyanBright.bold("[search]")}\n${styleSearchResults(capForDisplay(content))}`;
   if (name === "fetch_url" || name === "http_request") return `${chalk.blueBright.bold("[fetch]")}\n${styleFetchResult(content)}`;
   if (name === "spawn_agent") return `${chalk.magentaBright.bold("[agent]")} ${content}`;
-  return `${chalk.dim(`[tool result · ${name}]`)}\n${capForDisplay(content)}`;
+  return `${uiDim(`[tool result · ${name}]`)}\n${capForDisplay(content)}`;
 }
 
 function contextBarColor(ratio: number): (text: string) => string {
@@ -480,7 +498,7 @@ function renderContextBar(usedTokens: number, maxTokens: number): string {
   const ratio = Math.min(usedTokens / maxTokens, 1);
   const filled = Math.round(ratio * CONTEXT_BAR_WIDTH);
   const fillColor = contextBarColor(ratio);
-  const bar = fillColor("█".repeat(filled)) + chalk.dim("░".repeat(CONTEXT_BAR_WIDTH - filled));
+  const bar = fillColor("█".repeat(filled)) + uiDim("░".repeat(CONTEXT_BAR_WIDTH - filled));
   const pct = Math.round(ratio * 100);
   const maxLabel =
     maxTokens >= 1_000_000
@@ -488,27 +506,28 @@ function renderContextBar(usedTokens: number, maxTokens: number): string {
       : maxTokens >= 1000
         ? `${Math.round(maxTokens / 1000)}k`
         : String(maxTokens);
-  return `${chalk.dim("context")}  ${bar}  ${usedTokens.toLocaleString()} / ${maxLabel} tokens (${fillColor(`${pct}%`)})`;
+  return `${uiDim("context")}  ${bar}  ${usedTokens.toLocaleString()} / ${maxLabel} tokens (${fillColor(`${pct}%`)})`;
 }
 
 function printBanner() {
   const art = readFileSync(join(__dirname, "ascii-art.txt"), "utf-8").trimEnd();
   appendTranscript(
-    `${art}\n\n  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n${chalk.dim("  type a message to begin · ctrl+c to stop at any time")}\n\n`,
+    `${art}\n\n  ${uiDim("model")}    ${config.nemotronModel}\n  ${uiDim("memory")}   MEMORY.md\n  ${uiDim("status")}   ${chalk.greenBright("ready")}\n\n${uiDim("  type a message to begin · ctrl+c to stop at any time")}\n\n`,
   );
   stdout.write(transcript);
 }
 
 function printHelp() {
   appendTranscript(
-    `${chalk.dim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan, or goal <objective> (also: /task goal status|pause|resume|clear)\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan, or goal <objective> (also: /task goal status|pause|resume|clear)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
-// Shared by /status and /goal (bare or "status") — same one-liner either
-// way so the two surfaces never drift into describing the goal differently.
+// Shared by /status and /task goal (bare or "status") — same one-liner
+// either way so the two surfaces never drift into describing the goal
+// differently.
 function goalStatusLine(goal: Goal | undefined): string {
-  if (!goal || goal.status === "cleared") return "no active goal — set one with /goal <objective>";
+  if (!goal || goal.status === "cleared") return "no active goal — set one with /task goal <objective>";
   const turns = `${goal.turnsUsed}/${goal.maxTurns} turns`;
   if (goal.status === "active") return `active (${turns}): ${goal.objective}`;
   if (goal.status === "paused") return `paused${goal.lastReason ? ` — ${goal.lastReason}` : ""} (${turns}): ${goal.objective}`;
@@ -525,7 +544,7 @@ function printStatus(
   goal: Goal | undefined,
 ) {
   appendTranscript(
-    `  ${chalk.dim("model")}    ${config.nemotronModel}\n  ${chalk.dim("memory")}   MEMORY.md · chat ${chatId}\n  ${chalk.dim("tools")}    ${tools.length} available\n  ${chalk.dim("think")}    ${thinkingMode}\n  ${chalk.dim("task")}     ${taskMode}\n  ${chalk.dim("security")} ${securityMode}\n  ${chalk.dim("goal")}     ${goalStatusLine(goal)}\n  ${chalk.dim("verbose")}  ${verbose ? "on" : "off"}\n  ${chalk.dim("status")}   ${chalk.greenBright("ready")}\n\n`,
+    `  ${uiDim("model")}    ${config.nemotronModel}\n  ${uiDim("memory")}   MEMORY.md · chat ${chatId}\n  ${uiDim("tools")}    ${tools.length} available\n  ${uiDim("think")}    ${thinkingMode}\n  ${uiDim("task")}     ${taskMode}\n  ${uiDim("security")} ${securityMode}\n  ${uiDim("goal")}     ${goalStatusLine(goal)}\n  ${uiDim("verbose")}  ${verbose ? "on" : "off"}\n  ${uiDim("status")}   ${chalk.greenBright("ready")}\n\n`,
   );
 }
 
@@ -622,7 +641,7 @@ async function main() {
         await readInput(
           contextLine,
           suggestedTitle,
-          `${chalk.magentaBright.bold("title")} ${chalk.dim("›")} `,
+          `${chalk.magentaBright.bold("title")} ${uiDim("›")} `,
           false,
         )
       ).trim();
@@ -638,7 +657,7 @@ async function main() {
   process.on("SIGINT", () => {
     if (stopping) process.exit(0);
     stopping = true;
-    appendTranscript(chalk.dim("\n[ultron] stopping...\n"));
+    appendTranscript(uiDim("\n[ultron] stopping...\n"));
     abortController?.abort();
     cancelActiveInput?.();
   });
@@ -704,7 +723,7 @@ async function main() {
               const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
               const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
               if (pending) {
-                writeLive(chalk.dim(`[${summarizeToolCall(pending.name, pending.args)}]\n`), contextLine);
+                writeLive(uiDim(`[${summarizeToolCall(pending.name, pending.args)}]\n`), contextLine);
                 const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
                 if (key !== undefined) pendingToolCalls.delete(key);
               }
@@ -750,7 +769,7 @@ async function main() {
               inToolCall = false;
             }
             if (!wrotePrefix) {
-              writeLive(`${chalk.redBright.bold("ultron")} ${chalk.dim("›")} `, contextLine);
+              writeLive(`${chalk.redBright.bold("ultron")} ${uiDim("›")} `, contextLine);
               wrotePrefix = true;
             }
             writeLive(markdown.push(chunk.content), contextLine);
@@ -786,12 +805,12 @@ async function main() {
       // turn was interrupted before that chunk arrived.
       const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
       const tokenLabel = outputTokens !== undefined ? `${generatedTokens.toLocaleString()} tokens` : `≈${generatedTokens.toLocaleString()} tokens`;
-      if (verbose) appendTranscript(chalk.dim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ${tokenLabel}\n\n`));
+      if (verbose) appendTranscript(uiDim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ${tokenLabel}\n\n`));
       renderScreen("", 0, contextLine);
       return { finalText, aborted: false, errored: false };
     } catch (err) {
       if (controller.signal.aborted) {
-        appendTranscript(chalk.dim("[ultron] generation stopped.\n\n"));
+        appendTranscript(uiDim("[ultron] generation stopped.\n\n"));
         renderScreen("", 0, contextLine);
         return { finalText, aborted: true, errored: false };
       }
@@ -802,7 +821,7 @@ async function main() {
     }
   }
 
-  // The /goal auto-continuation loop: after a turn completes, ask a
+  // The /task goal auto-continuation loop: after a turn completes, ask a
   // separate, narrow-context judge (see goalJudge.ts) whether the goal is
   // actually done — reading the worker's final reply and the real state of
   // the code on disk, not the worker's own say-so. "continue" replays
@@ -820,14 +839,14 @@ async function main() {
         goals.pause(chatId, `turn budget (${goal.maxTurns}) exhausted`);
         appendTranscript(
           chalk.yellow(
-            `[ultron] goal paused — turn budget (${goal.maxTurns}) reached without a "done" verdict. /goal resume to give it more room, or /goal clear to drop it.\n\n`,
+            `[ultron] goal paused — turn budget (${goal.maxTurns}) reached without a "done" verdict. /task goal resume to give it more room, or /task goal clear to drop it.\n\n`,
           ),
         );
         renderScreen("", 0, contextLine);
         return;
       }
 
-      appendTranscript(chalk.dim("[ultron] checking goal completion…\n"));
+      appendTranscript(uiDim("[ultron] checking goal completion…\n"));
       renderScreen("", 0, contextLine);
       flushRender();
 
@@ -862,7 +881,7 @@ async function main() {
       if (verdict.verdict === "blocked") {
         goals.pause(chatId, verdict.reason);
         appendTranscript(
-          chalk.yellow(`[ultron] ⏸ goal blocked — ${verdict.reason}\n[ultron] resume with /goal resume once that's addressed.\n\n`),
+          chalk.yellow(`[ultron] ⏸ goal blocked — ${verdict.reason}\n[ultron] resume with /task goal resume once that's addressed.\n\n`),
         );
         renderScreen("", 0, contextLine);
         return;
@@ -870,7 +889,7 @@ async function main() {
 
       goals.recordTurn(chatId);
       appendTranscript(
-        chalk.dim(`[ultron] not done yet — ${verdict.reason}\n[ultron] continuing (turn ${goal.turnsUsed + 1}/${goal.maxTurns})…\n\n`),
+        uiDim(`[ultron] not done yet — ${verdict.reason}\n[ultron] continuing (turn ${goal.turnsUsed + 1}/${goal.maxTurns})…\n\n`),
       );
       renderScreen("", 0, contextLine);
 
@@ -914,7 +933,7 @@ async function main() {
             continue;
           }
           case "/stop":
-            appendTranscript(chalk.dim("[ultron] no active generation to stop.\n\n"));
+            appendTranscript(uiDim("[ultron] no active generation to stop.\n\n"));
             continue;
           case "/retry": {
             const retryInput = await prepareRetry(graph, currentChatId);
@@ -929,8 +948,8 @@ async function main() {
             const result = await compactThread(graph, currentChatId);
             appendTranscript(
               result.compacted
-                ? chalk.dim(`[ultron] compacted ${result.before} messages into ${result.after} context messages.\n\n`)
-                : chalk.dim("[ultron] not enough history to compact yet.\n\n"),
+                ? uiDim(`[ultron] compacted ${result.before} messages into ${result.after} context messages.\n\n`)
+                : uiDim("[ultron] not enough history to compact yet.\n\n"),
             );
             continue;
           }
@@ -948,7 +967,7 @@ async function main() {
               try {
                 const messageCount = await resumeThread(graph, currentChatId, selectedArchive);
                 await showRestoredMessages(graph, currentChatId);
-                appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages.\n\n`));
+                appendTranscript(uiDim(`[ultron] resumed ${messageCount} messages.\n\n`));
               } catch (error) {
                 appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
               }
@@ -957,26 +976,26 @@ async function main() {
             try {
               const messageCount = await resumeThread(graph, currentChatId, commandArgument);
               await showRestoredMessages(graph, currentChatId);
-              appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
+              appendTranscript(uiDim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
             } catch (error) {
               appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
             }
             continue;
           case "/think":
-            appendTranscript(chalk.dim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
+            appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
           case "/task":
-            appendTranscript(chalk.dim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal <objective>).\n\n`));
+            appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal <objective>).\n\n`));
             continue;
           case "/security":
             appendTranscript(
-              chalk.dim(
+              uiDim(
                 `[ultron] tool approval: ${chats.getSecurityMode(currentChatId)} (use /security bypass|accept_edit|manual).\n\n`,
               ),
             );
             continue;
           case "/verbose":
-            appendTranscript(chalk.dim(`[ultron] verbose is ${verbose ? "on" : "off"} (use /verbose on|off).\n\n`));
+            appendTranscript(uiDim(`[ultron] verbose is ${verbose ? "on" : "off"} (use /verbose on|off).\n\n`));
             continue;
           case "/quit":
             stopping = true;
@@ -996,7 +1015,7 @@ async function main() {
                 try {
                   const messageCount = await resumeThread(graph, currentChatId, selectedArchive);
                   await showRestoredMessages(graph, currentChatId);
-                  appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages.\n\n`));
+                  appendTranscript(uiDim(`[ultron] resumed ${messageCount} messages.\n\n`));
                 } catch (error) {
                   appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
                 }
@@ -1005,7 +1024,7 @@ async function main() {
               try {
                 const messageCount = await resumeThread(graph, currentChatId, commandArgument);
                 await showRestoredMessages(graph, currentChatId);
-                appendTranscript(chalk.dim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
+                appendTranscript(uiDim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
               } catch (error) {
                 appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
               }
@@ -1020,7 +1039,7 @@ async function main() {
                 appendTranscript(chalk.yellow("[ultron] use /think on, /think low or /think off.\n\n"));
                 continue;
               }
-              appendTranscript(chalk.dim(`[ultron] reasoning mode set to ${thinkingMode}.\n\n`));
+              appendTranscript(uiDim(`[ultron] reasoning mode set to ${thinkingMode}.\n\n`));
               continue;
             }
             if (command.startsWith("/task ")) {
@@ -1038,13 +1057,13 @@ async function main() {
                 const sub = (subRaw ?? "").toLowerCase();
 
                 if (!goalArgument || sub === "status") {
-                  appendTranscript(chalk.dim(`[ultron] goal: ${goalStatusLine(goals.get(currentChatId))}\n\n`));
+                  appendTranscript(uiDim(`[ultron] goal: ${goalStatusLine(goals.get(currentChatId))}\n\n`));
                   continue;
                 }
                 if (sub === "clear") {
                   goals.clear(currentChatId);
                   activeModeLabel = taskMode === "todo" ? "To-Do" : taskMode === "plan" ? "Plan" : "None";
-                  appendTranscript(chalk.dim("[ultron] goal cleared.\n\n"));
+                  appendTranscript(uiDim("[ultron] goal cleared.\n\n"));
                   continue;
                 }
                 if (sub === "pause") {
@@ -1054,7 +1073,7 @@ async function main() {
                     continue;
                   }
                   goals.pause(currentChatId, restWords.join(" ") || "user-paused");
-                  appendTranscript(chalk.dim("[ultron] goal paused.\n\n"));
+                  appendTranscript(uiDim("[ultron] goal paused.\n\n"));
                   continue;
                 }
                 if (sub === "resume") {
@@ -1064,7 +1083,7 @@ async function main() {
                     continue;
                   }
                   activeModeLabel = "Goal";
-                  appendTranscript(chalk.dim(`[ultron] goal resumed: ${resumed.objective}\n\n`));
+                  appendTranscript(uiDim(`[ultron] goal resumed: ${resumed.objective}\n\n`));
                   // Falls through to the normal send path below, same as
                   // /retry — this becomes a real turn in the chat, not a
                   // silent internal replay.
@@ -1101,7 +1120,7 @@ async function main() {
               // left by an earlier request now, before it can be mistaken
               // for the plan of the new one.
               if (mode === "todo" || mode === "plan") todos.clear(currentChatId);
-              appendTranscript(chalk.dim(`[ultron] task mode set to ${taskMode}.\n\n`));
+              appendTranscript(uiDim(`[ultron] task mode set to ${taskMode}.\n\n`));
               continue;
             }
             if (command.startsWith("/security ")) {
@@ -1111,17 +1130,31 @@ async function main() {
                 continue;
               }
               chats.setSecurityMode(currentChatId, mode);
-              appendTranscript(chalk.dim(`[ultron] tool approval set to ${mode}.\n\n`));
+              appendTranscript(uiDim(`[ultron] tool approval set to ${mode}.\n\n`));
+              continue;
+            }
+            if (command === "/theme") {
+              appendTranscript(uiDim(`[ultron] terminal theme: ${terminalTheme} (${isLightTerminal() ? "light" : "dark"} palette).\n\n`));
+              continue;
+            }
+            if (command.startsWith("/theme ")) {
+              const theme = command.slice("/theme ".length).trim();
+              if (theme !== "auto" && theme !== "light" && theme !== "dark") {
+                appendTranscript(chalk.yellow("[ultron] use /theme auto, /theme light or /theme dark.\n\n"));
+                continue;
+              }
+              terminalTheme = theme;
+              appendTranscript(uiDim(`[ultron] terminal theme set to ${theme} (${isLightTerminal() ? "light" : "dark"} palette).\n\n`));
               continue;
             }
             if (command === "/verbose on" || command === "/verbose true") {
               verbose = true;
-              appendTranscript(chalk.dim("[ultron] verbose on.\n\n"));
+              appendTranscript(uiDim("[ultron] verbose on.\n\n"));
               continue;
             }
             if (command === "/verbose off" || command === "/verbose false") {
               verbose = false;
-              appendTranscript(chalk.dim("[ultron] verbose off.\n\n"));
+              appendTranscript(uiDim("[ultron] verbose off.\n\n"));
               continue;
             }
             appendTranscript(chalk.yellow(`[ultron] unknown command: ${input.trim()} — try /help\n\n`));
@@ -1143,17 +1176,17 @@ async function main() {
       const result = await executeTurn(currentChatId, turnInput, contextLine);
       // A goal stays "active" in the DB across an aborted/interrupted turn
       // (see driveGoalLoop's early returns) — checked fresh here rather than
-      // trusting a stale in-memory flag, so /goal, /goal resume, and a plain
-      // message sent while a goal happens to be active all converge on the
-      // same auto-continuation path.
+      // trusting a stale in-memory flag, so /task goal <objective>, /task
+      // goal resume, and a plain message sent while a goal happens to be
+      // active all converge on the same auto-continuation path.
       if (!result.aborted && !result.errored && goals.get(currentChatId)?.status === "active") {
         await driveGoalLoop(currentChatId, contextLine, result.finalText);
       }
     }
   } finally {
     cancelActiveInput?.();
-    appendTranscript(chalk.dim("[ultron] stopped.\n"));
-    stdout.write(chalk.dim("[ultron] stopped.\n"));
+    appendTranscript(uiDim("[ultron] stopped.\n"));
+    stdout.write(uiDim("[ultron] stopped.\n"));
     process.exit(0);
   }
 }
