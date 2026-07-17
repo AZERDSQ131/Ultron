@@ -88,12 +88,16 @@ const LOCAL_COMMANDS = COMMANDS.map((c) => c.name);
 
 let menuMatches = [];
 let menuIndex = -1;
+let menuKind = "command";
+let skills = [];
+let skillsLoaded = false;
 
 function closeCommandMenu() {
   commandMenu.hidden = true;
   commandMenu.innerHTML = "";
   menuMatches = [];
   menuIndex = -1;
+  menuKind = "command";
 }
 
 function renderCommandMenu() {
@@ -101,10 +105,11 @@ function renderCommandMenu() {
   menuMatches.forEach((cmd, i) => {
     const item = document.createElement("div");
     item.className = "item" + (i === menuIndex ? " active" : "");
-    item.innerHTML = `<span class="name">${cmd.name}</span><span class="desc">${cmd.desc}</span>`;
+    item.innerHTML = `<span class="name">${menuKind === "skill" ? `@${cmd.name}` : cmd.name}</span><span class="desc">${cmd.description ?? cmd.desc ?? ""}${cmd.source === "hub" ? " · hub" : ""}</span>`;
     item.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      acceptCommand(cmd);
+      if (menuKind === "skill") acceptSkill(cmd);
+      else acceptCommand(cmd);
     });
     commandMenu.appendChild(item);
   });
@@ -119,6 +124,15 @@ function acceptCommand(cmd) {
 
 function updateCommandMenu() {
   const value = input.value;
+  const mention = value.match(/(?:^|\s)@([\w-]*)$/);
+  if (mention && skillsLoaded) {
+    const query = mention[1].toLowerCase();
+    menuMatches = skills.filter((skill) => skill.name.toLowerCase().includes(query));
+    menuKind = "skill";
+    menuIndex = 0;
+    if (menuMatches.length) renderCommandMenu(); else closeCommandMenu();
+    return;
+  }
   const isCommandToken = value.startsWith("/") && !/\s/.test(value);
   if (!isCommandToken) {
     closeCommandMenu();
@@ -131,6 +145,29 @@ function updateCommandMenu() {
   }
   menuIndex = 0;
   renderCommandMenu();
+}
+
+async function acceptSkill(skill) {
+  if (skill.source === "hub") {
+    const result = await api.installSkill(skill.name);
+    if (!result.installed) return;
+  }
+  const match = input.value.match(/(?:^|\s)@[\w-]*$/);
+  if (!match) return;
+  const start = match.index + match[0].length - (match[0].match(/@[\w-]*$/)?.[0].length ?? 0);
+  input.value = `${input.value.slice(0, start)}@${skill.name} `;
+  autoGrow();
+  closeCommandMenu();
+  input.focus();
+}
+
+async function loadSkills() {
+  try {
+    skills = (await api.skills()).skills;
+    skillsLoaded = true;
+  } catch {
+    skills = [];
+  }
 }
 
 input.addEventListener("input", () => {
@@ -154,7 +191,8 @@ input.addEventListener("keydown", (e) => {
     }
     if (e.key === "Tab" || e.key === "Enter") {
       e.preventDefault();
-      acceptCommand(menuMatches[menuIndex]);
+      if (menuKind === "skill") acceptSkill(menuMatches[menuIndex]);
+      else acceptCommand(menuMatches[menuIndex]);
       return;
     }
     if (e.key === "Escape") {
@@ -783,4 +821,5 @@ export function prefillCommand(name) {
 
 export function initComposer() {
   loadStatus();
+  loadSkills();
 }

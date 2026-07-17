@@ -25,6 +25,8 @@ import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
+import { listSkills, readSkill } from "../../core/skills.js";
+import { installHubSkill, listHubSkills } from "../../core/skillsHub.js";
 import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { abortRun, isRunning, subscribeToRun } from "../../core/runs.js";
@@ -51,6 +53,16 @@ chats.ensure(LEGACY_CHAT_ID);
 // chat can't affect another that happens to also be streaming (e.g. the CLI
 // generating on a different chat at the same time).
 const activeAborts = new Map<string, AbortController>();
+
+function expandSkillMentions(message: string): string {
+  const names = new Set(listSkills().map((skill) => skill.name));
+  const mentioned = [...message.matchAll(/(?:^|\s)@([\w-]+)/g)]
+    .map((match) => match[1])
+    .filter((name, index, all) => names.has(name) && all.indexOf(name) === index);
+  if (!mentioned.length) return message;
+  const blocks = mentioned.map((name) => `<skill name="${name}">\n${readSkill(name) ?? ""}\n</skill>`);
+  return `${message}\n\n---\n${blocks.join("\n\n")}`;
+}
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -358,7 +370,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   // retries intentionally keep their existing list.
   if (!isRetry && (taskMode === "todo" || taskMode === "plan")) todos.clear(chatId);
 
-  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(input)] });
+  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(expandSkillMentions(input))] });
 }
 
 // Resumes a thread paused on toolsNode's interrupt() (see graph.ts) with the
@@ -521,6 +533,19 @@ async function handleTools(res: ServerResponse): Promise<void> {
   });
 }
 
+async function handleSkills(res: ServerResponse): Promise<void> {
+  const local = listSkills().map((skill) => ({ name: skill.name, description: skill.description, source: "local" }));
+  const localNames = new Set(local.map((skill) => skill.name));
+  const hub = (await listHubSkills()).filter((skill) => !localNames.has(skill.name)).map((skill) => ({ name: skill.name, description: skill.description, source: "hub" }));
+  sendJson(res, 200, { skills: [...local, ...hub] });
+}
+
+async function handleInstallSkill(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ name?: string }>(req);
+  if (!payload?.name?.trim() || !(await installHubSkill(payload.name.trim()))) { sendJson(res, 404, { error: "skill not found" }); return; }
+  sendJson(res, 200, { installed: true, name: payload.name.trim() });
+}
+
 async function handleModels(res: ServerResponse): Promise<void> {
   const response = await fetch(`${config.nemotronBaseUrl}/models`, { headers: { Authorization: `Bearer ${config.nvidiaApiKey}` } });
   if (!response.ok) throw new Error(`NVIDIA models request failed: HTTP ${response.status}`);
@@ -675,6 +700,14 @@ const server = createServer((req, res) => {
   }
   if (req.method === "GET" && path === "/api/tools") {
     handleTools(res).catch((err) => console.error("[ultron-web] tools handler failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/skills") {
+    handleSkills(res).catch((err) => sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  if (req.method === "POST" && path === "/api/skills/install") {
+    handleInstallSkill(req, res).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
   if (req.method === "GET" && path === "/api/models") {
