@@ -38,8 +38,10 @@ const LOCAL_COMMANDS = ["/help", "/status", "/clear", "/context", "/stop", "/ret
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
+let bannerTranscript = "";
 let generationInput = "";
 let generationCursor = 0;
+let latestRender: { input: string; cursor: number; contextLine: string } = { input: "", cursor: 0, contextLine: "" };
 let pendingRender: { input: string; cursor: number; contextLine: string } | undefined;
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
 let activePrompt = INPUT_PROMPT;
@@ -133,6 +135,7 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
 }
 
 function renderScreen(input: string, cursor: number, contextLine: string): void {
+  latestRender = { input, cursor, contextLine };
   pendingRender = { input, cursor, contextLine };
   if (renderTimer) return;
   renderTimer = setTimeout(() => {
@@ -605,14 +608,30 @@ function fitAsciiArt(art: string, availableWidth: number): string {
   }).join("\n");
 }
 
-function printBanner() {
+function buildBanner(): string {
   const sourceArt = readFileSync(join(__dirname, "ascii-art.txt"), "utf-8").trimEnd();
   const art = fitAsciiArt(sourceArt, (stdout.columns || 80) - 2);
-  appendTranscript(
-    `${art}\n\n  ${uiDim("model")}    ${config.nemotronModel}\n  ${uiDim("memory")}   MEMORY.md\n  ${uiDim("status")}   ${chalk.greenBright("ready")}\n\n${uiDim("  type a message to begin · ctrl+c to stop at any time")}\n\n`,
-  );
-  stdout.write(transcript);
+  return `${art}\n\n  ${uiDim("model")}    ${config.nemotronModel}\n  ${uiDim("memory")}   MEMORY.md\n  ${uiDim("status")}   ${chalk.greenBright("ready")}\n\n${uiDim("  type a message to begin · ctrl+c to stop at any time")}\n\n`;
 }
+
+function printBanner() {
+  bannerTranscript = buildBanner();
+  appendTranscript(bannerTranscript);
+}
+
+function refreshBanner() {
+  if (!bannerTranscript || !transcript.startsWith(bannerTranscript)) return;
+  const history = transcript.slice(bannerTranscript.length);
+  transcript = "";
+  printBanner();
+  transcript += history;
+}
+
+stdout.on("resize", () => {
+  refreshBanner();
+  renderScreen(latestRender.input, latestRender.cursor, latestRender.contextLine);
+  flushRender();
+});
 
 function printHelp() {
   appendTranscript(
