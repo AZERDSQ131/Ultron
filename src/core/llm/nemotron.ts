@@ -29,19 +29,3 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
     streamUsage: true,
   });
 }
-
-// /computer-use uses a separate model from the main chat loop — bound to
-// precise tool calls addressing accessibility-tree element paths rather
-// than conversational text, so it gets a lower temperature and no
-// reasoning/thinking kwargs (those are Nemotron/GLM chat-template
-// specific, not something to assume of an arbitrary model id).
-export function createComputerUseModel(modelId: string): ChatOpenAI {
-  return new ChatOpenAI({
-    model: modelId,
-    apiKey: config.nvidiaApiKey,
-    temperature: 0.2,
-    configuration: {
-      baseURL: config.nemotronBaseUrl,
-    },
-  });
-}

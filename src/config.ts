@@ -36,29 +36,6 @@ export const config = {
   // burning tokens forever on a goal that never resolves.
   goalMaxTurns: Number(process.env.GOAL_MAX_TURNS ?? 20),
   webPort: Number(process.env.WEB_PORT ?? 4173),
-  // /computer-use (CLI-only, see src/core/computerUse.ts): a separate model
-  // from the main chat model (config.nemotronModel), dedicated to this
-  // mechanical read-tree/call-one-tool loop. Reads the macOS accessibility
-  // tree as text (native/computer-use/main.swift), not screenshots, so it
-  // doesn't need a vision-capable model. DeepSeek V4 Flash (the original
-  // choice) was tried and ruled out: reproduced live on NVIDIA's endpoint,
-  // it reliably degenerates on the SECOND tool-calling turn — after seeing
-  // its own prior tool_calls + a ToolMessage in history, tool_choice:
-  // "required" makes it echo the JSON Schema's type name ("string") as the
-  // literal argument value instead of a real one, even using the API's own
-  // raw AIMessage unmodified (not a serialization bug on ULTRON's side).
-  // meta/llama-3.2-90b-vision-instruct didn't reproduce that bug, but a
-  // wider live bake-off (same multi-turn failure scenario, six candidates)
-  // showed it's not the best judgment available: nemotron-3-super-120b
-  // hallucinated success without checking, gpt-oss-20b leaked raw special
-  // tokens into the tool name, qwen3.5-122b went silent on turn 2. Only
-  // qwen3-next-80b-a3b-instruct correctly recognized the failure and called
-  // computer_fail with an accurate reason instead of guessing or stalling —
-  // the one candidate that showed real judgment, not just clean syntax.
-  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "qwen/qwen3-next-80b-a3b-instruct",
-  // Hard cap on agent-loop iterations (one tree read + one action each) so
-  // a confused loop that keeps re-reading the same state can't run forever.
-  computerUseMaxSteps: Number(process.env.COMPUTER_USE_MAX_STEPS ?? 30),
   // Shared checkpoint database: the CLI and the web interface each open
   // their own connection to this same file, which is how they end up
   // seeing the same thread and memory instead of two disconnected sessions.
