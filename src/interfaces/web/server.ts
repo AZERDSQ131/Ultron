@@ -15,14 +15,16 @@ import {
   prepareRetry,
   resumeThread,
   searchMessages,
+  type TaskMode,
   type ToolApprovalDecision,
 } from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import type { TaskMode } from "../../core/graph.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
+import { getGoalRegistry } from "../../core/memory/goals.js";
+import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
 import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { abortRun, isRunning, subscribeToRun } from "../../core/runs.js";
@@ -39,6 +41,7 @@ const graph = buildGraph();
 const chats = getChatRegistry(config.databasePath);
 const agents = new AgentRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
+const goals = getGoalRegistry(config.databasePath);
 // Migrates the CLI's original hardcoded thread ("ultron-main", used before
 // chats existed) into the registry on first run, so pre-existing history
 // shows up as a chat instead of being orphaned.
@@ -178,8 +181,9 @@ async function streamGraphTurn(
   thinkingMode: ThinkingMode,
   taskMode: TaskMode,
   input: { messages: HumanMessage[] } | Command,
+  nested = false,
 ): Promise<void> {
-  res.writeHead(200, {
+  if (!nested) res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
@@ -194,6 +198,7 @@ async function streamGraphTurn(
   });
 
   const turnStarted = Date.now();
+  let finalText = "";
 
   try {
     // Serialized per chatId (see threadLock.ts) so this can never run
@@ -252,6 +257,7 @@ async function streamGraphTurn(
 
         if (typeof chunk.content !== "string" || !chunk.content) continue;
         generatedChars += chunk.content.length;
+        finalText += chunk.content;
         sseWrite(res, "text", { delta: chunk.content });
       }
 
@@ -270,6 +276,36 @@ async function streamGraphTurn(
         const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
         const contextTokens = await estimateContextUsage(graph, chatId);
         sseWrite(res, "done", { elapsedSeconds, generatedTokens, contextTokens, maxTokens: config.contextWindowTokens });
+
+        if (taskMode === "goal") {
+          const goal = goals.get(chatId);
+          if (goal?.status === "active") {
+            if (goal.turnsUsed >= goal.maxTurns) {
+              goals.pause(chatId, `turn budget (${goal.maxTurns}) exhausted`);
+              sseWrite(res, "goal", { status: "paused", reason: `turn budget (${goal.maxTurns}) exhausted` });
+            } else {
+              try {
+                const verdict = await judgeGoal({ objective: goal.objective, finalMessage: finalText, codeContext: gatherCodeContext() }, abortController.signal);
+                if (verdict.verdict === "done") {
+                  goals.markDone(chatId, verdict.reason);
+                  sseWrite(res, "goal", { status: "complete", reason: verdict.reason });
+                } else if (verdict.verdict === "blocked") {
+                  goals.pause(chatId, verdict.reason);
+                  sseWrite(res, "goal", { status: "paused", reason: verdict.reason });
+                } else {
+                  goals.recordTurn(chatId);
+                  sseWrite(res, "goal", { status: "continuing", reason: verdict.reason });
+                  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, {
+                    messages: [new HumanMessage(buildContinuationPrompt(goal.objective, verdict.reason))],
+                  }, true);
+                }
+              } catch (error) {
+                goals.pause(chatId, "goal check failed");
+                sseWrite(res, "goal", { status: "paused", reason: error instanceof Error ? error.message : String(error) });
+              }
+            }
+          }
+        }
       }
     });
   } catch (err) {
@@ -281,7 +317,7 @@ async function streamGraphTurn(
     }
   } finally {
     if (activeAborts.get(chatId) === abortController) activeAborts.delete(chatId);
-    res.end();
+    if (!nested) res.end();
   }
 }
 
@@ -311,6 +347,8 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     return;
   } else {
     chats.maybeAutoTitle(chatId, input);
+    if (taskMode === "goal") goals.set(chatId, input, config.goalMaxTurns);
+    else goals.clear(chatId);
   }
   chats.touch(chatId);
 
@@ -530,6 +568,7 @@ async function handleStatus(res: ServerResponse, chatId: string | undefined): Pr
     toolCount: tools.length,
     contextTokens,
     maxTokens: config.contextWindowTokens,
+    goal: goals.get(id) ?? null,
   });
 }
 

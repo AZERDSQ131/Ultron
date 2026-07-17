@@ -39,7 +39,7 @@ const taskBtnLabel = document.getElementById("task-btn-label");
 const taskModeLabel = document.getElementById("task-mode-label");
 const taskMenu = document.getElementById("task-menu");
 const taskOptions = [...taskMenu.querySelectorAll(".task-option")];
-const TASK_LABELS = { none: "None", todo: "To-Do", plan: "Plan" };
+const TASK_LABELS = { none: "None", todo: "To-Do", plan: "Plan", goal: "Goal" };
 const securityBtn = document.getElementById("security-btn");
 const securityBtnLabel = document.getElementById("security-btn-label");
 const securityMenu = document.getElementById("security-menu");
@@ -79,6 +79,7 @@ export const COMMANDS = [
   { name: "/archive", desc: "save this session to a text file" },
   { name: "/resume", desc: "restore a previously archived session" },
   { name: "/think", desc: "set reasoning: on, low or off" },
+  { name: "/task", desc: "set task mode: none, todo, plan or goal" },
   { name: "/verbose", desc: "toggle timing and token metrics" },
   { name: "/clear", desc: "clear this chat view" },
   { name: "/quit", desc: "about closing this interface" },
@@ -459,6 +460,8 @@ export async function streamTurn(body) {
           if (state.verbose) {
             addMetaLine(`⏱ ${data.elapsedSeconds.toFixed(1)}s   ${data.generatedTokens.toLocaleString()} tokens`);
           }
+        } else if (eventName === "goal") {
+          addSystemNote(`[ultron] goal ${data.status}${data.reason ? ` — ${data.reason}` : ""}`);
         } else if (eventName === "aborted") {
           finishAssistant();
           addSystemNote("[ultron] generation stopped.");
@@ -655,6 +658,21 @@ async function runCommand(raw) {
     }
     setThinkingMode(next);
     addSystemNote(`[ultron] reasoning mode set to ${next}.`);
+    return;
+  }
+
+  if (command === "/task") {
+    const mode = arg.toLowerCase();
+    if (!mode) {
+      addSystemNote(`[ultron] task mode: ${state.taskMode} (use /task none|todo|plan|goal).`);
+      return;
+    }
+    if (!["none", "todo", "plan", "goal"].includes(mode)) {
+      addSystemNote("[ultron] use /task none, /task todo, /task plan or /task goal.", true);
+      return;
+    }
+    setTaskMode(mode);
+    addSystemNote(`[ultron] task mode set to ${mode}.`);
     return;
   }
 
