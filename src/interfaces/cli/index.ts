@@ -123,7 +123,7 @@ function drawScreen(input: string, cursor: number, contextLine: string): void {
   // Draw up to the input first. Save that exact terminal position before
   // drawing the lines below it, then restore it; this avoids all vertical
   // cursor arithmetic and the terminal-specific wrap off-by-ones it caused.
-  const inputLine = modeInputColor()(`${stripAnsi(activePrompt)}${input}`) + suggestionSuffix;
+  const inputLine = activePrompt + chalk.black(input) + suggestionSuffix;
   stdout.write(`\x1b[2J\x1b[H${content}${"\n".repeat(padding)}${rule()}\n${inputLine}`);
   const promptWidth = stripAnsi(activePrompt).length + cursor;
   const width = Math.max(1, stdout.columns || 80);
