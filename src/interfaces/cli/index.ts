@@ -27,7 +27,7 @@ import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
 import { disableConsoleEcho } from "../../core/logger.js";
-import { runComputerUseLoop, verifyVisionSupport } from "../../core/computerUse.js";
+import { runComputerUseLoop } from "../../core/computerUse.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { listSkills, readSkill } from "../../core/skills.js";
@@ -1076,7 +1076,7 @@ stdout.on("resize", () => {
 
 function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/computer-use")} <what you want done> — controls your real screen (mouse, keyboard, screenshots)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/computer-use")} <what you want done> — controls your real screen via the macOS accessibility tree\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -1450,25 +1450,9 @@ async function main() {
     if (!instruction) {
       appendTranscript(
         chalk.yellow(
-          "[ultron] usage: /computer-use <what you want done> — takes control of your real screen (mouse, keyboard, screenshots).\n\n",
+          "[ultron] usage: /computer-use <what you want done> — takes control of your real screen via the macOS accessibility tree.\n\n",
         ),
       );
-      return;
-    }
-
-    appendTranscript(uiDim(`[ultron] computer-use: checking ${config.computerUseModel} supports images…\n`));
-    renderScreen("", 0, contextLine);
-    flushRender();
-
-    const support = await verifyVisionSupport(config.computerUseModel);
-    if (!support.supported) {
-      appendTranscript(
-        chalk.red(
-          `[ultron] computer-use blocked: ${config.computerUseModel} does not appear to support image input on this NVIDIA endpoint.\n` +
-            `[ultron] ${support.reason ?? "no further detail."}\n\n`,
-        ),
-      );
-      renderScreen("", 0, contextLine);
       return;
     }
 

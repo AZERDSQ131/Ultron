@@ -1,90 +1,35 @@
 // /computer-use (CLI-only, src/interfaces/cli/index.ts) — a self-contained
-// agent loop that drives the real mouse/keyboard/screen via nut.js
-// (src/core/tools/computer.ts), the same pattern goal mode uses
-// (src/core/goalJudge.ts): driven entirely on the CLI side rather than
-// wired into the main LangGraph graph, because this is a fundamentally
-// different loop shape (screenshot in, one tool call out, repeat) that
-// doesn't belong sharing the main chat model or its history.
+// agent loop that drives the real macOS UI through the Accessibility API
+// (src/core/tools/computer.ts / native/computer-use/main.swift), the same
+// pattern goal mode uses (src/core/goalJudge.ts): driven entirely on the
+// CLI side rather than wired into the main LangGraph graph, because this is
+// a fundamentally different loop shape (read UI tree, one tool call out,
+// repeat) that doesn't belong sharing the main chat model or its history.
+//
+// Deliberately not vision/screenshot-based: an earlier version sent
+// screenshots to a vision model and had it click pixel coordinates, which
+// in practice typed into whatever window had OS focus (including ULTRON's
+// own terminal) with no way to confirm a target actually existed before
+// acting on it. Reading the real accessibility tree and addressing
+// elements by role/title/path is what macOS apps expose for exactly this
+// purpose, and doesn't need a vision-capable model at all — any capable
+// text/tool-calling model works.
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { config } from "../config.js";
-import { createVisionModel } from "./llm/nemotron.js";
+import { createComputerUseModel } from "./llm/nemotron.js";
 import {
-  captureScreenshot,
-  click,
-  doubleClick,
-  dragTo,
-  moveMouse,
+  clickElement,
+  getAccessibilityTree,
+  getFrontmostApp,
+  openApplication,
   pressKeyCombo,
-  scaleToScreen,
-  scrollAt,
+  scrollElement,
   typeText,
-  type Screenshot,
+  wait,
+  type AXNode,
 } from "./tools/computer.js";
-
-// A 1x1 transparent PNG — small enough to be a cheap, unambiguous probe:
-// any model that accepts it and replies is multimodal-capable on this
-// endpoint, and any model that rejects image content clearly isn't.
-const PROBE_IMAGE_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-
-export interface VisionSupportResult {
-  supported: boolean;
-  reason?: string;
-}
-
-const visionSupportCache = new Map<string, VisionSupportResult>();
-
-// Verified live against the NVIDIA endpoint rather than assumed from the
-// model id or scraped docs — a served model can change under a fixed id,
-// and this is the one check that can't go stale. Cached per model id for
-// the life of the process (matches modelContextCache's pattern in the CLI).
-export async function verifyVisionSupport(modelId: string): Promise<VisionSupportResult> {
-  const cached = visionSupportCache.get(modelId);
-  if (cached) return cached;
-
-  const baseUrl = config.nemotronBaseUrl.replace(/\/+$/, "");
-  let result: VisionSupportResult;
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.nvidiaApiKey}`,
-      },
-      body: JSON.stringify({
-        model: modelId,
-        max_tokens: 5,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Reply with just the word: ok" },
-              { type: "image_url", image_url: { url: `data:image/png;base64,${PROBE_IMAGE_BASE64}` } },
-            ],
-          },
-        ],
-      }),
-      // NVIDIA-hosted models can take a while to spin up from cold — 15s
-      // was cutting off meta/llama-3.2-90b-vision-instruct mid cold-start
-      // and getting misread as "doesn't support images" when it just
-      // hadn't answered yet.
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (response.ok) {
-      result = { supported: true };
-    } else {
-      const body = await response.text().catch(() => "");
-      result = { supported: false, reason: `NVIDIA returned HTTP ${response.status}: ${body.slice(0, 300)}` };
-    }
-  } catch (error) {
-    result = { supported: false, reason: error instanceof Error ? error.message : String(error) };
-  }
-
-  visionSupportCache.set(modelId, result);
-  return result;
-}
 
 export interface ComputerUseStep {
   step: number;
@@ -105,197 +50,32 @@ export interface ComputerUseOptions {
   maxSteps?: number;
 }
 
-const SYSTEM_PROMPT = `You are ULTRON's computer-use module, controlling the user's real macOS desktop through tool calls — every action you take (click, type, keypress) really happens on their machine.
+const SYSTEM_PROMPT = `You are ULTRON's computer-use module, controlling the user's real macOS desktop through tool calls — every action you take (opening apps, clicking, typing, keypresses) really happens on their machine.
 
-You receive a screenshot of the current screen before every decision. Coordinates you give in click/move/drag/scroll tools are in the pixel space of that screenshot image, not the physical screen — they get scaled automatically.
+Before every decision you're shown the accessibility tree of the frontmost application's window: a list of its UI elements with a path, role, title/value/description, and screen frame — not a screenshot. Paths are re-derived fresh from the live UI every step; a path from an earlier step may no longer point at the same element if the screen changed, so always act on the path shown in the MOST RECENT tree.
 
 Rules:
 - Call exactly one tool per turn. Never respond with plain text instead of a tool call.
-- After each action you'll be shown a fresh screenshot — use it to check whether the action worked before deciding the next one, don't assume.
-- Prefer keyboard shortcuts (computer_key) over hunting for small UI targets with the mouse when a reliable shortcut exists.
+- To open, launch, or switch to an application, ALWAYS call computer_open_app with its name first — this reliably launches or focuses it. Follow it with computer_wait (1-2s) before interacting with it, since it takes a moment to appear and its tree isn't available until it does.
+- To interact with an element (button, field, link, checkbox...), use computer_click_element with the exact path shown in the current tree — do not guess or reuse a path from a previous step.
+- computer_type sends keystrokes to whatever currently has keyboard focus — click a text field's element first so the text lands in the right place.
+- Prefer keyboard shortcuts (computer_key) over hunting for small UI targets when a reliable shortcut exists.
+- If the tree looks incomplete or the app hasn't finished loading, use computer_wait and check again rather than acting blind.
 - Call computer_finish as soon as the user's request is satisfied, with a short summary of what you did.
-- Call computer_fail if you get stuck, the target isn't on screen, or you need information/permission you don't have — explain why. Do not loop on the same failing action.`;
-
-function buildTools(shotRef: { current: Screenshot }) {
-  const point = () => shotRef.current;
-
-  const computerClick = tool(
-    async ({ x, y, button }: { x: number; y: number; button?: "left" | "right" | "middle" | null }) => {
-      const target = scaleToScreen(point(), x, y);
-      await click(target.x, target.y, button ?? "left");
-      return `clicked (${button ?? "left"}) at image coords (${x}, ${y}) → screen (${target.x}, ${target.y})`;
-    },
-    {
-      name: "computer_click",
-      description: "Click at a point in the current screenshot's coordinate space.",
-      schema: z.object({
-        x: z.number().describe("X coordinate in the screenshot image."),
-        y: z.number().describe("Y coordinate in the screenshot image."),
-        button: z.enum(["left", "right", "middle"]).nullable().optional().describe("Mouse button, default left."),
-      }),
-    },
-  );
-
-  const computerDoubleClick = tool(
-    async ({ x, y }: { x: number; y: number }) => {
-      const target = scaleToScreen(point(), x, y);
-      await doubleClick(target.x, target.y);
-      return `double-clicked at image coords (${x}, ${y}) → screen (${target.x}, ${target.y})`;
-    },
-    {
-      name: "computer_double_click",
-      description: "Double-click at a point in the current screenshot's coordinate space.",
-      schema: z.object({
-        x: z.number().describe("X coordinate in the screenshot image."),
-        y: z.number().describe("Y coordinate in the screenshot image."),
-      }),
-    },
-  );
-
-  const computerMove = tool(
-    async ({ x, y }: { x: number; y: number }) => {
-      const target = scaleToScreen(point(), x, y);
-      await moveMouse(target.x, target.y);
-      return `moved cursor to image coords (${x}, ${y}) → screen (${target.x}, ${target.y})`;
-    },
-    {
-      name: "computer_move",
-      description: "Move the mouse cursor to a point without clicking.",
-      schema: z.object({
-        x: z.number().describe("X coordinate in the screenshot image."),
-        y: z.number().describe("Y coordinate in the screenshot image."),
-      }),
-    },
-  );
-
-  const computerDrag = tool(
-    async ({ fromX, fromY, toX, toY }: { fromX: number; fromY: number; toX: number; toY: number }) => {
-      const from = scaleToScreen(point(), fromX, fromY);
-      const to = scaleToScreen(point(), toX, toY);
-      await dragTo(from.x, from.y, to.x, to.y);
-      return `dragged from image (${fromX}, ${fromY}) to (${toX}, ${toY})`;
-    },
-    {
-      name: "computer_drag",
-      description: "Press, drag, and release the left mouse button from one point to another.",
-      schema: z.object({
-        fromX: z.number(),
-        fromY: z.number(),
-        toX: z.number(),
-        toY: z.number(),
-      }),
-    },
-  );
-
-  const computerScroll = tool(
-    async ({
-      x,
-      y,
-      direction,
-      amount,
-    }: {
-      x: number;
-      y: number;
-      direction: "up" | "down" | "left" | "right";
-      amount?: number | null;
-    }) => {
-      const target = scaleToScreen(point(), x, y);
-      await scrollAt(target.x, target.y, direction, amount ?? 3);
-      return `scrolled ${direction} (${amount ?? 3}) at image coords (${x}, ${y})`;
-    },
-    {
-      name: "computer_scroll",
-      description: "Scroll at a point in the current screenshot's coordinate space.",
-      schema: z.object({
-        x: z.number(),
-        y: z.number(),
-        direction: z.enum(["up", "down", "left", "right"]),
-        amount: z.number().nullable().optional().describe("Scroll steps, default 3."),
-      }),
-    },
-  );
-
-  const computerType = tool(
-    async ({ text }: { text: string }) => {
-      await typeText(text);
-      return `typed: ${text}`;
-    },
-    {
-      name: "computer_type",
-      description: "Type a text string via the keyboard, at the current focus/cursor position.",
-      schema: z.object({ text: z.string() }),
-    },
-  );
-
-  const computerKey = tool(
-    async ({ combo }: { combo: string }) => {
-      await pressKeyCombo(combo);
-      return `pressed: ${combo}`;
-    },
-    {
-      name: "computer_key",
-      description:
-        'Press a key or key combination, e.g. "enter", "escape", "cmd+s", "cmd+shift+4". Modifiers first, joined by "+".',
-      schema: z.object({ combo: z.string() }),
-    },
-  );
-
-  const computerFinish = tool(
-    async ({ summary }: { summary: string }) => summary,
-    {
-      name: "computer_finish",
-      description: "Call this once the user's request has been completed, with a short summary of what was done.",
-      schema: z.object({ summary: z.string() }),
-    },
-  );
-
-  const computerFail = tool(
-    async ({ reason }: { reason: string }) => reason,
-    {
-      name: "computer_fail",
-      description: "Call this if the task cannot be completed — stuck, target not found, or missing permission/info.",
-      schema: z.object({ reason: z.string() }),
-    },
-  );
-
-  return {
-    all: [
-      computerClick,
-      computerDoubleClick,
-      computerMove,
-      computerDrag,
-      computerScroll,
-      computerType,
-      computerKey,
-      computerFinish,
-      computerFail,
-    ],
-    byName: {
-      computer_click: computerClick,
-      computer_double_click: computerDoubleClick,
-      computer_move: computerMove,
-      computer_drag: computerDrag,
-      computer_scroll: computerScroll,
-      computer_type: computerType,
-      computer_key: computerKey,
-      computer_finish: computerFinish,
-      computer_fail: computerFail,
-    } as Record<string, ReturnType<typeof tool>>,
-  };
-}
+- Call computer_fail if you get stuck, the target isn't in the tree, or you need information/permission you don't have — explain why. Do not loop on the same failing action.`;
 
 interface FakeToolCall {
   name: string;
   args: Record<string, unknown>;
 }
 
-// Some vision models on this endpoint (meta/llama-3.2-90b-vision-instruct
-// observed doing this) don't reliably use OpenAI-style function calling
-// even when tools are bound — they narrate intent and then write the call
-// as JSON in the message text instead, e.g. `I will use computer_type...
-// {"name": "computer_type", "parameters": {"text": "..."}}`. Same problem
-// graph.ts's extractFakeToolCall works around for the main chat model,
-// simplified here since this loop's tool set is small and unambiguous.
+// Some models on this endpoint don't reliably use OpenAI-style function
+// calling even with tools bound and tool_choice: "required" — they narrate
+// intent and then write the call as JSON in the message text instead, e.g.
+// `I will use computer_type... {"name": "computer_type", "parameters":
+// {"text": "..."}}`. Same problem graph.ts's extractFakeToolCall works
+// around for the main chat model, simplified here since this loop's tool
+// set is small and unambiguous.
 function extractFakeToolCall(content: unknown): FakeToolCall | undefined {
   const text =
     typeof content === "string"
@@ -325,35 +105,194 @@ function extractFakeToolCall(content: unknown): FakeToolCall | undefined {
   return { name: obj.name, args: argsRaw as Record<string, unknown> };
 }
 
-function screenshotMessage(shot: Screenshot, caption: string): HumanMessage {
-  return new HumanMessage({
-    content: [
-      { type: "text", text: caption },
-      { type: "image_url", image_url: { url: `data:image/png;base64,${shot.base64}` } },
-    ],
+const MAX_TREE_LINES = 300;
+
+// Renders the pruned AX tree as compact indented text instead of raw JSON —
+// noticeably fewer tokens, and easier for the model to scan for a role/title
+// than nested braces.
+function renderTree(node: AXNode, lines: string[]): void {
+  if (lines.length >= MAX_TREE_LINES) return;
+  const attrs: string[] = [];
+  if (node.title) attrs.push(`title="${node.title}"`);
+  if (node.value) attrs.push(`value="${node.value.length > 80 ? node.value.slice(0, 80) + "…" : node.value}"`);
+  if (node.description) attrs.push(`desc="${node.description}"`);
+  if (node.enabled === false) attrs.push("disabled");
+  if (node.frame) attrs.push(`frame=(${Math.round(node.frame.x)},${Math.round(node.frame.y)} ${Math.round(node.frame.width)}x${Math.round(node.frame.height)})`);
+  const indent = "  ".repeat(node.path.length);
+  lines.push(`${indent}[${node.path.join(".")}] ${node.role} ${attrs.join(" ")}`.trimEnd());
+  for (const child of node.children ?? []) {
+    if (lines.length >= MAX_TREE_LINES) {
+      lines.push(`${indent}  … truncated (tree too large)`);
+      return;
+    }
+    renderTree(child, lines);
+  }
+}
+
+async function describeCurrentScreen(): Promise<{ pid: number; appName: string; treeText: string }> {
+  const app = await getFrontmostApp();
+  try {
+    const tree = await getAccessibilityTree(app.pid);
+    const lines: string[] = [];
+    renderTree(tree, lines);
+    return { pid: app.pid, appName: app.name, treeText: lines.join("\n") };
+  } catch (error) {
+    return {
+      pid: app.pid,
+      appName: app.name,
+      treeText: `(could not read UI tree: ${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+}
+
+function buildTools(pidRef: { current: number }) {
+  const computerClickElement = tool(
+    async ({ path }: { path: number[] }) => {
+      const result = await clickElement(pidRef.current, path);
+      return `clicked element at path [${path.join(",")}] (${result.method})`;
+    },
+    {
+      name: "computer_click_element",
+      description: "Click a UI element by its path, exactly as shown in the current accessibility tree.",
+      schema: z.object({
+        path: z.array(z.number().int().nonnegative()).describe("Element path, e.g. [1, 0, 3] for the tree line \"[1.0.3]\"."),
+      }),
+    },
+  );
+
+  const computerScrollElement = tool(
+    async ({
+      path,
+      direction,
+      amount,
+    }: {
+      path: number[];
+      direction: "up" | "down" | "left" | "right";
+      amount?: number | null;
+    }) => {
+      await scrollElement(pidRef.current, path, direction, amount ?? 3);
+      return `scrolled ${direction} (${amount ?? 3}) at element path [${path.join(",")}]`;
+    },
+    {
+      name: "computer_scroll_element",
+      description: "Scroll at a UI element's location by its path from the current accessibility tree.",
+      schema: z.object({
+        path: z.array(z.number().int().nonnegative()),
+        direction: z.enum(["up", "down", "left", "right"]),
+        amount: z.number().nullable().optional().describe("Scroll steps, default 3."),
+      }),
+    },
+  );
+
+  const computerType = tool(
+    async ({ text }: { text: string }) => {
+      await typeText(text);
+      return `typed: ${text}`;
+    },
+    {
+      name: "computer_type",
+      description: "Type a text string via the keyboard, at the current focus/cursor position. Click a field first.",
+      schema: z.object({ text: z.string() }),
+    },
+  );
+
+  const computerKey = tool(
+    async ({ combo }: { combo: string }) => {
+      await pressKeyCombo(combo);
+      return `pressed: ${combo}`;
+    },
+    {
+      name: "computer_key",
+      description:
+        'Press a key or key combination, e.g. "enter", "escape", "cmd+s", "cmd+shift+4". Modifiers first, joined by "+".',
+      schema: z.object({ combo: z.string() }),
+    },
+  );
+
+  const computerOpenApp = tool(
+    async ({ name }: { name: string }) => {
+      await openApplication(name);
+      return `opened/focused application: ${name}`;
+    },
+    {
+      name: "computer_open_app",
+      description: "Launch or focus a macOS application by name — the reliable way to open/switch to an app.",
+      schema: z.object({ name: z.string() }),
+    },
+  );
+
+  const computerWait = tool(
+    async ({ seconds }: { seconds: number }) => {
+      await wait(seconds);
+      return `waited ${seconds}s`;
+    },
+    {
+      name: "computer_wait",
+      description: "Pause briefly (max 10s) — use after opening an app or triggering something slow to load.",
+      schema: z.object({ seconds: z.number().min(0).max(10) }),
+    },
+  );
+
+  const computerFinish = tool(async ({ summary }: { summary: string }) => summary, {
+    name: "computer_finish",
+    description: "Call this once the user's request has been completed, with a short summary of what was done.",
+    schema: z.object({ summary: z.string() }),
   });
+
+  const computerFail = tool(async ({ reason }: { reason: string }) => reason, {
+    name: "computer_fail",
+    description: "Call this if the task cannot be completed — stuck, target not found, or missing permission/info.",
+    schema: z.object({ reason: z.string() }),
+  });
+
+  return {
+    all: [
+      computerClickElement,
+      computerScrollElement,
+      computerType,
+      computerKey,
+      computerOpenApp,
+      computerWait,
+      computerFinish,
+      computerFail,
+    ],
+    byName: {
+      computer_click_element: computerClickElement,
+      computer_scroll_element: computerScrollElement,
+      computer_type: computerType,
+      computer_key: computerKey,
+      computer_open_app: computerOpenApp,
+      computer_wait: computerWait,
+      computer_finish: computerFinish,
+      computer_fail: computerFail,
+    } as Record<string, ReturnType<typeof tool>>,
+  };
+}
+
+function treeMessage(appName: string, treeText: string, caption: string): HumanMessage {
+  return new HumanMessage(`${caption}\n\nFrontmost app: ${appName}\n\nAccessibility tree:\n${treeText || "(empty)"}`);
 }
 
 export async function runComputerUseLoop(options: ComputerUseOptions): Promise<ComputerUseResult> {
   const { instruction, signal, onStep } = options;
   const maxSteps = options.maxSteps ?? config.computerUseMaxSteps;
 
-  const shotRef = { current: await captureScreenshot() };
-  const { all: toolList, byName } = buildTools(shotRef);
+  const initial = await describeCurrentScreen();
+  const pidRef = { current: initial.pid };
+  const { all: toolList, byName } = buildTools(pidRef);
   // tool_choice: "required" pushes the API to actually use OpenAI-style
-  // function calling instead of narrating intent as plain text — it cut
-  // down on, but did not eliminate, meta/llama-3.2-90b-vision-instruct
-  // skipping tool_calls entirely, hence the retry loop below on top of it.
-  const model = createVisionModel(config.computerUseModel).bindTools(toolList, { tool_choice: "required" });
+  // function calling instead of narrating intent as plain text.
+  const model = createComputerUseModel(config.computerUseModel).bindTools(toolList, { tool_choice: "required" });
 
   const history: BaseMessage[] = [new SystemMessage(SYSTEM_PROMPT)];
   const MAX_TOOL_CALL_RETRIES = 2;
+  let current = initial;
 
   for (let step = 1; step <= maxSteps; step++) {
     if (signal.aborted) return { status: "aborted", summary: "Stopped by user.", steps: step - 1 };
 
-    const caption = step === 1 ? `Task: ${instruction}\n\nCurrent screen:` : "Result of the last action — current screen:";
-    const callMessages = [...history, screenshotMessage(shotRef.current, caption)];
+    const caption = step === 1 ? `Task: ${instruction}` : "Result of the last action — current state:";
+    const callMessages = [...history, treeMessage(current.appName, current.treeText, caption)];
 
     let call: { name: string; args: Record<string, unknown>; id?: string } | undefined;
     let lastText = "";
@@ -420,7 +359,10 @@ export async function runComputerUseLoop(options: ComputerUseOptions): Promise<C
 
     if (signal.aborted) return { status: "aborted", summary: "Stopped by user.", steps: step };
 
-    shotRef.current = await captureScreenshot();
+    // Re-read whichever app is now frontmost — opening/switching apps
+    // changes it, and pidRef feeds the next click/scroll's target too.
+    current = await describeCurrentScreen();
+    pidRef.current = current.pid;
   }
 
   return { status: "max_steps", summary: `Reached the ${maxSteps}-step limit without finishing.`, steps: maxSteps };

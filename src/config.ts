@@ -37,18 +37,16 @@ export const config = {
   goalMaxTurns: Number(process.env.GOAL_MAX_TURNS ?? 20),
   webPort: Number(process.env.WEB_PORT ?? 4173),
   // /computer-use (CLI-only, see src/core/computerUse.ts): a separate model
-  // from the main chat model (config.nemotronModel), because computer-use
-  // needs vision and the main chat model isn't picked for that. DeepSeek V4
-  // Flash was the user's original choice, but verifyVisionSupport's live
-  // probe against the NVIDIA endpoint caught it 500ing on image content —
-  // NVIDIA's hosted instance runs vLLM without --enable-multimodal. Default
-  // switched to meta/llama-3.2-90b-vision-instruct, confirmed working with
-  // the same live probe; revert to deepseek-ai/deepseek-v4-flash once
-  // NVIDIA flips that flag. Verified on every run regardless, not just
-  // assumed from this id, since served models can change under a fixed id.
-  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "meta/llama-3.2-90b-vision-instruct",
-  // Hard cap on agent-loop iterations (one screenshot + one action each) so
-  // a confused loop that keeps re-clicking the same spot can't run forever.
+  // from the main chat model (config.nemotronModel), dedicated to this
+  // mechanical read-tree/call-one-tool loop. Reads the macOS accessibility
+  // tree as text (native/computer-use/main.swift), not screenshots — an
+  // earlier vision/pixel-clicking version needed a vision-capable model and
+  // is why this used to be pinned to a model verified to accept images;
+  // that requirement no longer applies, so this is back to the user's
+  // original choice, DeepSeek V4 Flash.
+  computerUseModel: process.env.COMPUTER_USE_MODEL ?? "deepseek-ai/deepseek-v4-flash",
+  // Hard cap on agent-loop iterations (one tree read + one action each) so
+  // a confused loop that keeps re-reading the same state can't run forever.
   computerUseMaxSteps: Number(process.env.COMPUTER_USE_MAX_STEPS ?? 30),
   // Shared checkpoint database: the CLI and the web interface each open
   // their own connection to this same file, which is how they end up
