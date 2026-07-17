@@ -13,6 +13,7 @@ import { getCheckpointer } from "./memory/checkpointer.js";
 import { getChatRegistry } from "./memory/chats.js";
 import { getTodoRegistry } from "./memory/todos.js";
 import { readTodayNote } from "./memory/daily.js";
+import { listSkills } from "./skills.js";
 import { AgentRegistry, type Agent } from "./memory/agents.js";
 import { tools, toolScopes } from "./tools/index.js";
 import { summarizeToolCall } from "./tools/summarize.js";
@@ -40,6 +41,24 @@ function readMemory(): string {
   return readFileSync(memoryPath, "utf-8").trim();
 }
 
+// Only name + description per skill (the catalog), never the full body —
+// that's loaded on demand via skill_read so an unrelated skill doesn't cost
+// context on every turn. Shared by both ULTRON's own prompt and a spawned
+// sub-agent's, since a sub-agent uses the same tools skills give guidance on.
+function skillsCatalog(): string {
+  const skills = listSkills();
+  if (!skills.length) return "";
+  const lines = skills.map((s) => `- ${s.name}: ${s.description}`).join("\n");
+  return `
+
+Skills — call skill_read with the exact name for the full instructions when
+one matches the current task:
+
+<skills>
+${lines}
+</skills>`;
+}
+
 const agentRegistry = new AgentRegistry(appConfig.databasePath);
 const chatRegistryForPrompt = getChatRegistry(appConfig.databasePath);
 
@@ -56,7 +75,7 @@ function buildAgentSystemPrompt(agent: Agent): string {
 
 ${agent.instructions?.trim() ? `Your standing persona and instructions:\n${agent.instructions.trim()}\n\n` : ""}---
 
-${agentNotes}`;
+${agentNotes}${skillsCatalog()}`;
 }
 
 // Explicit per-turn task-management mode picked from the composer's task
@@ -192,7 +211,7 @@ entries are shown here; earlier days are on disk but not injected):
 
 <daily_memory>
 ${todayNote}
-</daily_memory>` : ""}${taskModeDirective(taskMode)}`;
+</daily_memory>` : ""}${skillsCatalog()}${taskModeDirective(taskMode)}`;
 }
 
 // Nemotron's NVIDIA endpoint doesn't return usage in the stream (see

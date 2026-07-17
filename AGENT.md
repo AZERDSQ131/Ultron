@@ -102,6 +102,12 @@ operational content to SOUL.md.
   timestamped entry to today's memory log; only today's entries are shown
   back to you automatically (see `<daily_memory>` in the system prompt).
   Never store secrets or credentials there either.
+- `<skills>` in the system prompt lists every skill under `skills/` by name
+  and short description. When one matches the current task, call
+  `skill_read` with its exact name before attempting that kind of task from
+  scratch — it returns the skill's full instructions. Skills are plain
+  Markdown guidance for using tools you already have (shell, files, etc.),
+  not new capabilities on their own.
 
 ## Public project and communication
 

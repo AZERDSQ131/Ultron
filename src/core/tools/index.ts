@@ -9,6 +9,7 @@ import { spawnAgent } from "./agents.js";
 import { todoWrite, todoUpdate, todoRead } from "./todos.js";
 import { planPropose } from "./plan.js";
 import { memoryWrite } from "./memory.js";
+import { skillRead } from "./skills.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -32,6 +33,7 @@ export const tools: StructuredToolInterface[] = [
   todoRead,
   planPropose,
   memoryWrite,
+  skillRead,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -64,4 +66,5 @@ export const toolScopes: Record<string, ToolScope> = {
   // approval card and tool-call blocks.
   plan_propose: "write",
   memory_write: "write",
+  skill_read: "read",
 };
