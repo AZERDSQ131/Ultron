@@ -59,7 +59,7 @@ mais ne sont pas implémentées.
 - TypeScript strict, Node.js 24+ attendu, pnpm 9.15.4.
 - LangGraph.js pour l'état et l'orchestration.
 - `@langchain/openai` contre l'endpoint OpenAI-compatible de NVIDIA.
-- Nemotron exclusivement, modèle par défaut `nvidia/nemotron-3-super-120b-a12b`.
+- API NVIDIA exclusivement, modèle par défaut `deepseek-ai/deepseek-v4-flash`.
 - SQLite local (`node:sqlite`, natif à Node — aucune dépendance native
   supplémentaire) via un `SqliteSaver` écrit à la main dans
   `src/core/memory/checkpointer.ts`, partagé par le CLI et le serveur web.
