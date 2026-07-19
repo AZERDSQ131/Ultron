@@ -173,6 +173,47 @@ Target architecture (see `docs/agent-ia-personnel.md`'s follow-up discussion, no
 - Web UI: a button next to the composer input (same popover shape as the reasoning-mode button) sets the mode per chat; a pending approval renders inline in the thread with Approve/Deny.
 - CLI: `/security bypass|accept_edit|manual` sets it, `/status` shows it; a pending approval prints the batch and asks a single y/n.
 
+## Health module (done — all 6 phases, except calendar correlation)
+
+A daily health-export payload (activity/sleep/heart, e.g. from Health Export Kit) is a real,
+queryable data source rather than a JSON blob pasted into chat, with computed scores, anomaly
+detection, a biological age estimate, on-demand narration, a web dashboard, and a goal-mode
+extension point. All under `src/core/health/` unless noted:
+
+- **Storage/ingestion** (`src/core/memory/health.ts`, `HealthRegistry`, global) — `health_days`
+  (raw payload kept forever, never purged, plus flat extracted metrics), `health_baselines`
+  (7/30/90-day rolling mean/stddev per metric), `health_profile` (birthdate, sleep target).
+  `POST /api/health-data/ingest` (`server.ts`) is the primary ingestion path for an external
+  export app/shortcut — the only web route that checks an auth header (`x-health-token` vs
+  `HEALTH_INGEST_TOKEN`). `health_ingest`/`health_query`/`health_set_profile` tools
+  (`src/core/tools/health.ts`) cover manual ingestion, read queries, and setting birthdate/sleep
+  target conversationally.
+- **Scores and trends** — `scoring.ts` (`computeRecoveryScore`/`computeActivityScore`, 0-100,
+  personal 30-day-baseline z-scores) and `trends.ts` (`detectAnomalies`, personal z-score
+  thresholds, including a composite illness/overtraining flag). `HealthRegistry.getRecords()`
+  (best sleep, lowest resting HR, activity streak) and `getSleepDebt()` (rolling deficit vs
+  personal target).
+- **Biological age** — `bioAge.ts` (`estimateBiologicalAge`), an explicitly non-clinical, fully
+  explained wellness estimate (every contributing factor listed in `explanation`) from resting
+  HR/HRV/sleep efficiency/activity vs a documented adult reference point, adjusted from
+  `health_profile.birthdate`.
+- **Narration and export** — `narrator.ts` (`narrateHealth`, same cheap-separate-LLM-call
+  pattern as `userModelExtractor.ts`/`goalJudge.ts`, fed only already-computed numbers, never raw
+  data) behind the `health_report` tool — on-demand only, never auto-pushed by default, per
+  explicit user preference (the existing `schedule_task` tool covers it if ever wanted). `export.ts`
+  + `health_export` tool for a one-shot Markdown dump of the full history.
+- **Web dashboard** — `public/health.html` + `public/js/health.js` (native SVG charts, no
+  library), backed by `GET /api/health-data/summary`: recovery/activity score trend, sleep
+  duration bars, last night's sleep-stage timeline (parsed client-side from the stored raw
+  payload), records, sleep debt, and the biological-age estimate.
+- **Goal-mode extension** — `gatherHealthContext()` in `goalJudge.ts` (sibling to
+  `gatherCodeContext`), wired into both the CLI's `driveGoalLoop` and the web's `streamGraphTurn`
+  judge calls, so a `/task goal` objective about health has the last 7 days of data available to
+  the judge alongside any code diff.
+- **Not built**: calendar correlation — genuinely blocked, not a scope choice: there is no
+  calendar/OAuth integration anywhere in this codebase yet (see roadmap item 3 in `CLAUDE.md`),
+  so there's nothing to correlate health data against. Revisit once that integration exists.
+
 ## Ground rules carried across every phase
 
 - Full research and the reasoning behind these choices: [docs/agent-ia-personnel.md](docs/agent-ia-personnel.md) (French)
