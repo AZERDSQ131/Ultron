@@ -291,9 +291,10 @@ nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
 
 1. Ajouter des tests unitaires ciblés sans changer la posture de sécurité
    choisie.
-2. Étendre le bot Telegram si besoin (`/task`, `/security`, `/memory`,
-   streaming incrémental des messages) — volontairement minimal pour l'instant
-   (`/start`, `/status`, `/stop`), sans démarrer la phase vibe-coding.
+2. Le bot Telegram a maintenant la parité complète avec les commandes CLI (voir PLAN.md,
+   phase 2) ; améliorations possibles plus tard : vrai streaming incrémental (actuellement un
+   seul message replié par tour), approbation d'outil par appel plutôt que par lot. Ne pas
+   démarrer la phase vibe-coding.
 3. Concevoir les intégrations mail/calendrier et leur OAuth avant d'ajouter
    leurs outils.
 4. Définir le modèle persistant et le cycle de vie des tâches planifiées avant

@@ -50,17 +50,21 @@ before assuming ULTRON is up.
 
 A Telegram bot (`pnpm telegram`, grammY, long polling) is a third entry
 point: same `buildGraph()`, same shared SQLite file, so a Telegram chat has
-the same memory, tools and personality as the CLI and the web UI. Each
-Telegram chat maps permanently to one ULTRON chat (`telegram-<chatId>`),
-visible in the web sidebar too — there's no chat-switching UI on the
-Telegram side, since a Telegram chat is inherently one conversation with one
-person. There's no true token-by-token streaming (Telegram rate-limits
-message edits); a single placeholder message per turn is updated when the
-active tool changes and once more with the final text. A pending
-tool-approval interrupt (`accept_edit`/`manual` security mode) renders as one
-inline-keyboard Approve/Deny for the whole batch, not per call. Command set
-is deliberately minimal for now: `/start`, `/status`, `/stop`. Requires
-`TELEGRAM_BOT_TOKEN` in `.env` (see `.env.example`).
+the same memory, tools and personality as the CLI and the web UI. Which
+ULTRON chat a Telegram chat currently points at is a movable pointer
+(`/archive`, `/chat` and `/resume` all repoint it), not a fixed mapping —
+every chat it touches is a normal row in `ChatRegistry`, visible from the
+web sidebar too. There's no true token-by-token streaming (Telegram
+rate-limits message edits); a single placeholder message per turn is
+updated when the active tool changes and once more with the final text. A
+pending tool-approval interrupt (`accept_edit`/`manual` security mode)
+renders as one inline-keyboard Approve/Deny for the whole batch, not per
+call. Every CLI local command has a working equivalent — see `/help` inside
+the bot for the full list; interactive CLI pickers become inline keyboards,
+`/clear` deletes what Telegram lets a bot delete of its own recent messages
+(own messages only, ~48h window), and `/theme` is an intentional no-op
+(Telegram's own app controls that). Requires `TELEGRAM_BOT_TOKEN` in `.env`
+(see `.env.example`).
 
 Conversations are organized as chats, each with its own id and title,
 listed in the web UI's sidebar (create, rename, delete, switch between

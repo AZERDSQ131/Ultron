@@ -84,18 +84,28 @@ interface at a time.
 - `src/interfaces/telegram/index.ts` (grammY, long polling — `pnpm telegram` / `start:telegram`), a
   third entry point next to the CLI and web UI: same `buildGraph()`, same shared SQLite file, so a
   Telegram conversation has the same memory, tools and personality as the other two.
-- Each Telegram chat maps permanently to one ULTRON chat, `telegram-<telegramChatId>`, registered
-  through the same `ChatRegistry.ensure()` the CLI's legacy thread uses — it shows up in the web
-  sidebar too. No chat-switching UI on the Telegram side (a Telegram chat is inherently one
-  conversation with one person).
+- Which ULTRON chat a Telegram chat points at is a movable pointer (`TelegramLinkRegistry`,
+  `src/core/memory/telegramLinks.ts`), not a fixed derivation — `/archive`, `/chat` and `/resume`
+  all repoint it, mirroring the CLI's "current chat per session" model despite Telegram having no
+  sidebar of its own. Every chat it touches is a normal row in `ChatRegistry`, visible from the web
+  sidebar too.
 - No true token-by-token streaming: Telegram rate-limits `editMessageText`, so a single placeholder
   message is sent per turn, updated only when the active tool's name changes (a coarse "what's it
   doing" indicator) and once more with the final text.
 - Tool-approval interrupts (`accept_edit`/`manual` security mode) render as one inline-keyboard
   Approve/Deny covering the whole pending batch — not per-call like the CLI's y/n prompt or the
   web's approval block, since Telegram's UI doesn't lend itself to that level of granularity.
-- Deliberately minimal command set for v1: `/start`, `/status`, `/stop`. No `/task`, `/security`,
-  `/theme`, `/memory`, `/think`, `/compact` yet — CLI/web-only for now, add later if actually needed.
+- Full CLI command parity: `/help`, `/model`, `/status`, `/context`, `/stop`, `/retry`, `/compact`,
+  `/archive`, `/resume`, `/chat`, `/think`, `/task` (including `goal` mode's judge-then-continue
+  loop, ported as a sequential loop of independent turns — see `runTurn`'s comment on why it must
+  not recurse into a still-held per-chat lock, the way `server.ts`'s SSE goal continuation currently
+  does), `/permissions`, `/security`, `/verbose`, `/memory`, `/clear`, `/theme`, `/quit`. Interactive
+  CLI pickers (arrow-key selection) become inline keyboards; `/clear` deletes what Telegram lets a
+  bot delete of its own recent messages (own messages only, ~48h window) instead of redrawing a
+  screen; `/theme` is an intentional no-op (Telegram's own app controls that, not ULTRON).
+- Session state with no natural persistence slot (`thinkingMode`, `taskMode`, `verbose`) is
+  in-memory per ULTRON chat, reset on bot restart — same lifetime as the CLI's process-local
+  variables.
 
 ## Phase 3 — Tools (in progress)
 

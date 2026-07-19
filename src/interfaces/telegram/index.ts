@@ -1,16 +1,30 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Bot, InlineKeyboard } from "grammy";
 import { Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import { config } from "../../config.js";
 import {
+  archiveThread,
   buildGraph,
+  compactThread,
+  estimateContextUsage,
   getPendingApproval,
+  prepareRetry,
+  resumeThread,
   type TaskMode,
   type ToolApprovalDecision,
 } from "../../core/graph.js";
-import { getChatRegistry, LEGACY_CHAT_ID } from "../../core/memory/chats.js";
-import { getTodoRegistry } from "../../core/memory/todos.js";
+import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
+import { getUserModelRegistry } from "../../core/memory/userModel.js";
+import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
+import { getTodoRegistry } from "../../core/memory/todos.js";
+import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
+import { getTelegramLinkRegistry } from "../../core/memory/telegramLinks.js";
+import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
+import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { withThreadLock } from "../../core/threadLock.js";
 import { log } from "../../core/logger.js";
@@ -18,16 +32,10 @@ import { log } from "../../core/logger.js";
 // Third entry point alongside the CLI and the web UI (see CLAUDE.md's
 // "Interface" decision) — same buildGraph(), same shared SQLite file, so a
 // Telegram conversation shares memory, tools and personality with the other
-// two. It does NOT get its own chat-switching UI: a Telegram chat is a
-// single, fixed conversation with one person, so each Telegram chat id maps
-// to exactly one ULTRON chat id, permanently — `telegram-<telegramChatId>`,
-// registered through the same ChatRegistry.ensure() the CLI uses for its
-// legacy thread, so it shows up in the web sidebar too.
-//
-// Deliberately minimal command set for v1 (/start, /status, /stop) — no
-// /task, /security, /theme, /memory, /think here yet. Add them if actually
-// needed; nothing here is designed to make that harder later, but building
-// them unasked isn't the point of this pass.
+// two. Every CLI local command has a working equivalent here (see the
+// command handlers below); a few are necessarily reinterpreted for a chat
+// UI that has no terminal to redraw and no arrow-key pickers — see each
+// command's comment for the tradeoff made.
 
 function debugLog(message: string): void {
   log("telegram", message);
@@ -38,27 +46,77 @@ if (!config.telegramBotToken) {
 }
 
 const bot = new Bot(config.telegramBotToken);
-const graph = buildGraph();
+let graph = buildGraph();
 const chats = getChatRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
+const goals = getGoalRegistry(config.databasePath);
+const userModel = getUserModelRegistry(config.databasePath);
+const links = getTelegramLinkRegistry(config.databasePath);
 
 // Ensures pre-existing history from the CLI's original hardcoded thread
 // registers as a real chat — same migration every entry point does at
 // startup (see chats.ts's LEGACY_CHAT_ID comment).
 chats.ensure(LEGACY_CHAT_ID);
 
-function ultronChatIdFor(telegramChatId: number): string {
-  return `telegram-${telegramChatId}`;
+// Which ULTRON chat a Telegram chat currently points at is a movable
+// pointer (TelegramLinkRegistry), not a fixed derivation — /archive, /chat
+// and /resume all repoint it. On first contact from a given Telegram chat,
+// adopt `telegram-<id>` if it already has history (an earlier version of
+// this file derived the id that way with no indirection), otherwise start
+// a brand-new chat.
+function currentChatId(telegramChatId: number): string {
+  const linked = links.get(telegramChatId);
+  if (linked && chats.get(linked)) return linked;
+  const legacyDerived = `telegram-${telegramChatId}`;
+  const chat = chats.get(legacyDerived) ?? chats.create(DEFAULT_CHAT_TITLE);
+  links.set(telegramChatId, chat.id);
+  return chat.id;
+}
+
+// Per-chat session state that has no natural persistence slot elsewhere
+// (unlike security mode, which lives on the Chat row itself) — mirrors the
+// CLI's process-local `thinkingMode`/`taskMode`/`verbose` variables. Reset
+// on bot restart, same as the CLI resets on process restart.
+interface Session {
+  thinkingMode: ThinkingMode;
+  taskMode: TaskMode;
+  verbose: boolean;
+}
+const sessions = new Map<string, Session>();
+function getSession(ultronChatId: string): Session {
+  let session = sessions.get(ultronChatId);
+  if (!session) {
+    session = { thinkingMode: "full", taskMode: "none", verbose: false };
+    sessions.set(ultronChatId, session);
+  }
+  return session;
+}
+
+// Tracks message ids ULTRON has sent into each Telegram chat, purely so
+// /clear has something to actually delete (see its handler) — Telegram
+// gives bots no "clear this chat" API, only per-message deletion, and only
+// for messages up to ~48h old.
+const sentMessageIds = new Map<number, number[]>();
+function trackSent(telegramChatId: number, messageId: number): void {
+  const ids = sentMessageIds.get(telegramChatId) ?? [];
+  ids.push(messageId);
+  if (ids.length > 300) ids.shift();
+  sentMessageIds.set(telegramChatId, ids);
+}
+async function send(telegramChatId: number, text: string, extra?: Parameters<typeof bot.api.sendMessage>[2]): Promise<{ message_id: number }> {
+  const msg = await bot.api.sendMessage(telegramChatId, text.slice(0, 4096) || "(empty)", extra);
+  trackSent(telegramChatId, msg.message_id);
+  return msg;
 }
 
 const activeAborts = new Map<string, AbortController>();
 
 // Telegram rate-limits editMessageText; editing on every streamed token the
 // way the CLI/web do would trip that almost immediately. Instead: one
-// placeholder message per turn, updated only when the *tool name* changes
-// (a coarse "what's it doing" indicator) and once more with the final text
-// — cheap enough to never hit a limit, and edits Telegram silently 400s on
-// (content unchanged) are swallowed rather than logged as real errors.
+// placeholder message per turn, updated only when the active tool's name
+// changes (a coarse "what's it doing" indicator) and once more with the
+// final text. "message is not modified" 400s (editing to identical text)
+// are expected and swallowed rather than logged as real errors.
 async function safeEditMessage(chatId: number, messageId: number, text: string): Promise<void> {
   try {
     await bot.api.editMessageText(chatId, messageId, text.slice(0, 4096) || "(empty reply)");
@@ -77,19 +135,38 @@ function humanTextFromInput(input: { messages: HumanMessage[] } | Command): stri
   return text || undefined;
 }
 
-async function runTurn(telegramChatId: number, ultronChatId: string, input: { messages: HumanMessage[] } | Command): Promise<void> {
+type TurnOutcome = { status: "ok"; finalText: string } | { status: "approval" } | { status: "aborted" };
+
+// One graph.stream() pass, start to finish, inside a single withThreadLock
+// acquisition — never called recursively from inside another call for the
+// same chat (that reentrancy would deadlock threadLock.ts's per-chat
+// queue: the outer call would be waiting on the inner one to run, and the
+// inner one waits for the queue slot the still-running outer call is
+// holding). The goal auto-continuation loop below (see runTurn) instead
+// calls this in a plain sequential while-loop, same shape as the CLI's
+// driveGoalLoop — each iteration acquires and fully releases the lock
+// before the next one starts.
+async function runSingleTurn(
+  telegramChatId: number,
+  ultronChatId: string,
+  input: { messages: HumanMessage[] } | Command,
+): Promise<TurnOutcome> {
+  const session = getSession(ultronChatId);
   activeAborts.get(ultronChatId)?.abort();
   const abortController = new AbortController();
   activeAborts.set(ultronChatId, abortController);
 
-  const placeholder = await bot.api.sendMessage(telegramChatId, "…");
+  const placeholder = await send(telegramChatId, "…");
   let finalText = "";
   let lastToolName: string | undefined;
+  let outputTokens: number | undefined;
+  let inputTokens: number | undefined;
+  const turnStarted = Date.now();
 
   try {
-    await withThreadLock(ultronChatId, async () => {
+    return await withThreadLock(ultronChatId, async (): Promise<TurnOutcome> => {
       const stream = await graph.stream(input, {
-        configurable: { thread_id: ultronChatId, thinking: "full", taskMode: "none" as TaskMode },
+        configurable: { thread_id: ultronChatId, thinking: session.thinkingMode, taskMode: session.taskMode },
         signal: abortController.signal,
         streamMode: "messages",
         recursionLimit: config.graphRecursionLimit,
@@ -109,6 +186,11 @@ async function runTurn(telegramChatId: number, ultronChatId: string, input: { me
           continue;
         }
 
+        const usage = (chunk as unknown as { usage_metadata?: { input_tokens?: number; output_tokens?: number } })
+          .usage_metadata;
+        if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+        if (usage?.input_tokens !== undefined) inputTokens = usage.input_tokens;
+
         if (typeof chunk.content === "string" && chunk.content) finalText += chunk.content;
       }
 
@@ -118,69 +200,484 @@ async function runTurn(telegramChatId: number, ultronChatId: string, input: { me
           .map((c) => `• ${summarizeToolCall(c.name, JSON.stringify(c.args ?? {}))}`)
           .join("\n");
         await safeEditMessage(telegramChatId, placeholder.message_id, `Approval needed:\n${summary}`);
+        // One decision for the whole batch — Telegram's inline-keyboard UI
+        // doesn't lend itself to per-call approval the way the CLI's
+        // y/n-per-call prompt or the web's approval block do; approve-all
+        // or deny-all is the reasonable tradeoff here.
         const keyboard = new InlineKeyboard()
           .text("✅ Approve", `approve:${ultronChatId}`)
           .text("❌ Deny", `deny:${ultronChatId}`);
-        // One decision for the whole batch — Telegram's inline-keyboard UI
-        // doesn't lend itself to per-call approval the way the CLI's
-        // y/n-per-call prompt or the web's approval block do; a coarse
-        // approve-all/deny-all is the reasonable v1 tradeoff here.
-        await bot.api.sendMessage(telegramChatId, "Approve these actions?", { reply_markup: keyboard });
-        return;
+        await send(telegramChatId, "Approve these actions?", { reply_markup: keyboard });
+        return { status: "approval" };
       }
 
       todos.completeAll(ultronChatId);
-      await safeEditMessage(telegramChatId, placeholder.message_id, finalText.trim());
+      let replyText = finalText.trim() || "(empty reply)";
+      if (session.verbose) {
+        const elapsedSeconds = (Date.now() - turnStarted) / 1000;
+        const generatedTokens = outputTokens ?? Math.max(1, Math.round(finalText.length / 4));
+        replyText += `\n\n${formatTurnStats({
+          model: config.nemotronModel,
+          inputTokens: inputTokens ?? 0,
+          outputTokens: generatedTokens,
+          elapsedSeconds,
+        })}`;
+      }
+      await safeEditMessage(telegramChatId, placeholder.message_id, replyText);
 
       const humanText = humanTextFromInput(input);
       if (humanText && finalText.trim()) void recordUserModelObservation(ultronChatId, humanText, finalText);
+
+      return { status: "ok", finalText };
     });
   } catch (err) {
     if (abortController.signal.aborted) {
       await safeEditMessage(telegramChatId, placeholder.message_id, "[ultron] stopped.");
-    } else {
-      const message = err instanceof Error ? err.message : String(err);
-      debugLog(`turn error chat=${ultronChatId} error=${message}`);
-      await safeEditMessage(telegramChatId, placeholder.message_id, `[ultron] error: ${message}`);
+      return { status: "aborted" };
     }
+    const message = err instanceof Error ? err.message : String(err);
+    debugLog(`turn error chat=${ultronChatId} error=${message}`);
+    await safeEditMessage(telegramChatId, placeholder.message_id, `[ultron] error: ${message}`);
+    return { status: "aborted" };
   } finally {
     if (activeAborts.get(ultronChatId) === abortController) activeAborts.delete(ultronChatId);
   }
 }
 
+function goalStatusLine(goal: Goal | undefined): string {
+  if (!goal || goal.status === "cleared") return "no active goal — /task goal, then send a message";
+  const turns = `${goal.turnsUsed}/${goal.maxTurns} turns`;
+  if (goal.status === "active") return `active (${turns}): ${goal.objective}`;
+  if (goal.status === "paused") return `paused${goal.lastReason ? ` — ${goal.lastReason}` : ""} (${turns}): ${goal.objective}`;
+  if (goal.status === "complete") return `done${goal.lastReason ? ` — ${goal.lastReason}` : ""}: ${goal.objective}`;
+  return `${goal.status}: ${goal.objective}`;
+}
+
+// Public entry point: one turn, plus — if /task goal is active — the same
+// judge-then-continue auto-continuation the CLI's driveGoalLoop runs,
+// as a sequential loop of independent runSingleTurn calls (see that
+// function's comment for why this can't be recursive).
+async function runTurn(telegramChatId: number, ultronChatId: string, input: { messages: HumanMessage[] } | Command): Promise<void> {
+  let outcome = await runSingleTurn(telegramChatId, ultronChatId, input);
+  const session = getSession(ultronChatId);
+
+  while (outcome.status === "ok" && session.taskMode === "goal") {
+    const goal = goals.get(ultronChatId);
+    if (!goal || goal.status !== "active") return;
+    if (goal.turnsUsed >= goal.maxTurns) {
+      goals.pause(ultronChatId, `turn budget (${goal.maxTurns}) exhausted`);
+      await send(telegramChatId, `[ultron] goal paused — turn budget (${goal.maxTurns}) exhausted.`);
+      return;
+    }
+
+    let verdict;
+    try {
+      verdict = await judgeGoal({ objective: goal.objective, finalMessage: outcome.finalText, codeContext: gatherCodeContext() });
+    } catch (error) {
+      goals.pause(ultronChatId, "goal check failed");
+      await send(telegramChatId, `[ultron] goal paused — check failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+
+    if (verdict.verdict === "done") {
+      goals.markDone(ultronChatId, verdict.reason);
+      await send(telegramChatId, `[ultron] goal complete — ${verdict.reason}`);
+      return;
+    }
+    if (verdict.verdict === "blocked") {
+      goals.pause(ultronChatId, verdict.reason);
+      await send(telegramChatId, `[ultron] goal paused — ${verdict.reason}`);
+      return;
+    }
+
+    goals.recordTurn(ultronChatId);
+    await send(telegramChatId, `[ultron] goal continuing — ${verdict.reason}`);
+    outcome = await runSingleTurn(telegramChatId, ultronChatId, {
+      messages: [new HumanMessage(buildContinuationPrompt(goal.objective, verdict.reason))],
+    });
+  }
+}
+
+// ---- archive listing (mirrors the CLI's private listArchives) ----
+
+interface ArchiveEntry {
+  path: string;
+  title: string;
+}
+
+function listArchives(): ArchiveEntry[] {
+  const archiveDir = join(process.cwd(), "archives");
+  try {
+    return readdirSync(archiveDir)
+      .filter((name) => name.endsWith(".txt"))
+      .map((name) => {
+        const path = join(archiveDir, name);
+        const content = readFileSync(path, "utf-8");
+        const title = content.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || name.replace(/\.txt$/, "");
+        return { path, title };
+      })
+      .sort((a, b) => b.path.localeCompare(a.path));
+  } catch {
+    return [];
+  }
+}
+
+async function resumeInto(telegramChatId: number, ultronChatId: string, archivePath: string, title: string): Promise<void> {
+  try {
+    const count = await resumeThread(graph, ultronChatId, archivePath);
+    await send(telegramChatId, `[ultron] resumed ${count} messages from "${title}".`);
+  } catch (err) {
+    await send(telegramChatId, `[ultron] could not resume: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+// Short-lived caches so inline-keyboard callback data can stay a small
+// index instead of a full path/id (Telegram caps callback_data at 64 bytes,
+// and archive paths/chat titles routinely exceed that).
+const archivePickerCache = new Map<number, ArchiveEntry[]>();
+const chatPickerCache = new Map<number, Chat[]>();
+const modelPickerCache = new Map<number, string[]>();
+
+// ---- commands ----
+
+const HELP_TEXT = `local commands
+/help — show this help
+/model [query] — search and select an NVIDIA model
+/status — show model, memory, tool and runtime status
+/context — show current context usage
+/stop — stop the active generation
+/retry — remove the previous reply and run the last message again
+/compact — summarize old messages and keep the recent turns
+/archive [title] — archive this conversation and start a new one
+/resume [query] — restore a previously archived conversation
+/chat [query] — switch to a different existing chat
+/think on|low|off — set reasoning mode
+/task none|todo|plan|goal — set task mode (goal: next message becomes the objective)
+/permissions — choose bypass, accept_edit or manual
+/security bypass|accept_edit|manual — same, set directly
+/verbose on|off — show model/tokens/time/cost after each reply
+/memory [clear|forget <id>] — list, clear, or remove auto-accumulated observations about you
+/clear — delete what ULTRON can of its own recent messages here (Telegram limits bot deletions to ~48h, own messages only)
+/theme — not applicable here (no terminal to theme); accepted for parity, no-op
+/quit — stop the ULTRON Telegram bot process`;
+
+bot.command("help", async (ctx) => { await send(ctx.chat.id, HELP_TEXT); });
+
 bot.command("start", async (ctx) => {
-  const ultronChatId = ultronChatIdFor(ctx.chat.id);
-  chats.ensure(ultronChatId);
-  await ctx.reply("Online. Send anything.");
+  currentChatId(ctx.chat.id);
+  await send(ctx.chat.id, "Online. Send anything. /help for the full command list.");
 });
 
 bot.command("status", async (ctx) => {
-  const ultronChatId = ultronChatIdFor(ctx.chat.id);
-  const chat = chats.ensure(ultronChatId);
-  await ctx.reply(
-    `model: ${config.nemotronModel}\nchat: ${ultronChatId}\nsecurity: ${chat.securityMode}\nstatus: ready`,
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const chat = chats.get(ultronChatId)!;
+  const session = getSession(ultronChatId);
+  const goal = goals.get(ultronChatId);
+  await send(
+    ctx.chat.id,
+    [
+      `model: ${config.nemotronModel}`,
+      `chat: ${ultronChatId}`,
+      `tools: ${tools.length} available`,
+      `think: ${session.thinkingMode}`,
+      `task: ${session.taskMode}`,
+      `security: ${chat.securityMode}`,
+      `goal: ${goalStatusLine(goal)}`,
+      `verbose: ${session.verbose ? "on" : "off"}`,
+      "status: ready",
+    ].join("\n"),
   );
 });
 
+bot.command("context", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const usedTokens = await estimateContextUsage(graph, ultronChatId);
+  const maxTokens = config.contextWindowTokens;
+  const pct = Math.round(Math.min(usedTokens / maxTokens, 1) * 100);
+  await send(ctx.chat.id, `context: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${pct}%)`);
+});
+
 bot.command("stop", async (ctx) => {
-  const ultronChatId = ultronChatIdFor(ctx.chat.id);
+  const ultronChatId = currentChatId(ctx.chat.id);
   const controller = activeAborts.get(ultronChatId);
   if (!controller) {
-    await ctx.reply("[ultron] nothing running.");
+    await send(ctx.chat.id, "[ultron] nothing running.");
     return;
   }
   controller.abort();
-  await ctx.reply("[ultron] stopping…");
+  await send(ctx.chat.id, "[ultron] stopping…");
 });
+
+bot.command("retry", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const retryInput = await prepareRetry(graph, ultronChatId);
+  if (!retryInput) {
+    await send(ctx.chat.id, "[ultron] nothing to retry yet.");
+    return;
+  }
+  await runTurn(ctx.chat.id, ultronChatId, { messages: [new HumanMessage(retryInput)] });
+});
+
+bot.command("compact", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const result = await compactThread(graph, ultronChatId);
+  await send(
+    ctx.chat.id,
+    result.compacted
+      ? `[ultron] compacted ${result.before} messages into ${result.after} context messages.`
+      : "[ultron] not enough history to compact yet.",
+  );
+});
+
+bot.command("archive", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const title = ctx.match?.trim();
+  const archive = await archiveThread(graph, ultronChatId, title || undefined);
+  const fresh = chats.create();
+  links.set(ctx.chat.id, fresh.id);
+  await send(ctx.chat.id, `[ultron] archived "${archive.title}" (${archive.path}). Started a new chat.`);
+});
+
+bot.command("resume", async (ctx) => {
+  const query = ctx.match?.trim();
+  const archives = listArchives();
+  if (!archives.length) {
+    await send(ctx.chat.id, "[ultron] no archives found.");
+    return;
+  }
+  if (query) {
+    const match = archives.find((a) => a.path === query || a.title.toLowerCase().includes(query.toLowerCase()));
+    if (!match) {
+      await send(ctx.chat.id, `[ultron] no archive matches "${query}".`);
+      return;
+    }
+    await resumeInto(ctx.chat.id, currentChatId(ctx.chat.id), match.path, match.title);
+    return;
+  }
+  const top = archives.slice(0, 20);
+  archivePickerCache.set(ctx.chat.id, top);
+  const keyboard = new InlineKeyboard();
+  top.forEach((a, i) => {
+    keyboard.text(a.title.slice(0, 60) || "(untitled)", `resume:${i}`);
+    keyboard.row();
+  });
+  await send(ctx.chat.id, "Select an archive:", { reply_markup: keyboard });
+});
+
+bot.command("chat", async (ctx) => {
+  const query = ctx.match?.trim();
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const all = chats.list().filter((c) => c.id !== ultronChatId);
+  if (!all.length) {
+    await send(ctx.chat.id, "[ultron] no other chats yet.");
+    return;
+  }
+  if (query) {
+    const target = all.find((c) => c.id === query || c.title.toLowerCase().includes(query.toLowerCase()));
+    if (!target) {
+      await send(ctx.chat.id, `[ultron] no chat matches "${query}".`);
+      return;
+    }
+    links.set(ctx.chat.id, target.id);
+    await send(ctx.chat.id, `[ultron] switched to "${target.title}".`);
+    return;
+  }
+  const top = all.slice(0, 20);
+  chatPickerCache.set(ctx.chat.id, top);
+  const keyboard = new InlineKeyboard();
+  top.forEach((c, i) => {
+    keyboard.text(c.title.slice(0, 60) || "(untitled)", `chat:${i}`);
+    keyboard.row();
+  });
+  await send(ctx.chat.id, "Select a chat:", { reply_markup: keyboard });
+});
+
+bot.command("think", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const session = getSession(ultronChatId);
+  const arg = ctx.match?.trim().toLowerCase();
+  if (!arg) {
+    await send(ctx.chat.id, `[ultron] reasoning mode: ${session.thinkingMode} (use /think on|low|off).`);
+    return;
+  }
+  if (arg === "on" || arg === "full") session.thinkingMode = "full";
+  else if (arg === "low") session.thinkingMode = "low";
+  else if (arg === "off") session.thinkingMode = "off";
+  else {
+    await send(ctx.chat.id, "[ultron] use /think on, /think low or /think off.");
+    return;
+  }
+  await send(ctx.chat.id, `[ultron] reasoning mode set to ${session.thinkingMode}.`);
+});
+
+bot.command("task", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const session = getSession(ultronChatId);
+  const arg = ctx.match?.trim().toLowerCase();
+  if (!arg) {
+    await send(ctx.chat.id, `[ultron] task mode: ${session.taskMode} (use /task none|todo|plan|goal).`);
+    return;
+  }
+  if (arg !== "none" && arg !== "todo" && arg !== "plan" && arg !== "goal") {
+    await send(ctx.chat.id, "[ultron] use /task none, /task todo, /task plan or /task goal.");
+    return;
+  }
+  session.taskMode = arg;
+  // Same reset-at-selection rule as the CLI: dropping stale state at
+  // mode-switch time so the next message can't be mistaken for the
+  // continuation of an old plan/goal.
+  if (arg === "todo" || arg === "plan") todos.clear(ultronChatId);
+  if (arg !== "goal") goals.clear(ultronChatId);
+  await send(ctx.chat.id, `[ultron] task mode set to ${session.taskMode}.`);
+});
+
+bot.command("security", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const arg = ctx.match?.trim().toLowerCase();
+  if (!arg) {
+    await send(ctx.chat.id, `[ultron] tool approval: ${chats.getSecurityMode(ultronChatId)} (use /security bypass|accept_edit|manual).`);
+    return;
+  }
+  if (arg !== "bypass" && arg !== "accept_edit" && arg !== "manual") {
+    await send(ctx.chat.id, "[ultron] use /security bypass, /security accept_edit or /security manual.");
+    return;
+  }
+  chats.setSecurityMode(ultronChatId, arg);
+  await send(ctx.chat.id, `[ultron] tool approval set to ${arg}.`);
+});
+
+bot.command("permissions", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const keyboard = new InlineKeyboard()
+    .text("bypass", `security:${ultronChatId}:bypass`)
+    .row()
+    .text("accept_edit", `security:${ultronChatId}:accept_edit`)
+    .row()
+    .text("manual", `security:${ultronChatId}:manual`);
+  await send(ctx.chat.id, `Current: ${chats.getSecurityMode(ultronChatId)}\nChoose tool approval:`, { reply_markup: keyboard });
+});
+
+bot.command("verbose", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const session = getSession(ultronChatId);
+  const arg = ctx.match?.trim().toLowerCase();
+  if (arg === "on" || arg === "true") session.verbose = true;
+  else if (arg === "off" || arg === "false") session.verbose = false;
+  else if (arg) {
+    await send(ctx.chat.id, "[ultron] use /verbose on or /verbose off.");
+    return;
+  }
+  await send(ctx.chat.id, `[ultron] verbose is ${session.verbose ? "on" : "off"}.`);
+});
+
+bot.command("memory", async (ctx) => {
+  const arg = ctx.match?.trim().toLowerCase() ?? "";
+  if (!arg) {
+    const observations = userModel.list(30);
+    if (!observations.length) {
+      await send(ctx.chat.id, "[ultron] no observations accumulated yet.");
+      return;
+    }
+    const lines = observations.map((o) => `#${o.id} (${o.category}) ${o.content}`).join("\n");
+    await send(ctx.chat.id, `${userModel.count()} observation(s) — /memory clear or /memory forget <id>\n${lines}`);
+    return;
+  }
+  if (arg === "clear") {
+    userModel.clear();
+    await send(ctx.chat.id, "[ultron] all accumulated observations cleared.");
+    return;
+  }
+  if (arg.startsWith("forget ")) {
+    const id = Number(arg.slice("forget ".length).trim());
+    if (!Number.isInteger(id)) {
+      await send(ctx.chat.id, "[ultron] use /memory forget <id> (see /memory for ids).");
+      return;
+    }
+    userModel.remove(id);
+    await send(ctx.chat.id, `[ultron] observation #${id} forgotten (if it existed).`);
+    return;
+  }
+  await send(ctx.chat.id, "[ultron] use /memory, /memory clear or /memory forget <id>.");
+});
+
+// No terminal to theme here — accepted for command-set parity with the
+// CLI, deliberately a no-op rather than pretending Telegram has a light/dark
+// rendering mode of its own (that's controlled by the user's Telegram app,
+// not by ULTRON).
+bot.command("theme", async (ctx) => {
+  await send(ctx.chat.id, "[ultron] not applicable in Telegram — theme is controlled by your Telegram app, not ULTRON.");
+});
+
+bot.command("model", async (ctx) => {
+  const query = ctx.match?.trim().toLowerCase();
+  await send(ctx.chat.id, "[ultron] loading NVIDIA models…");
+  try {
+    const baseUrl = config.nemotronBaseUrl.replace(/\/+$/, "");
+    const response = await fetch(`${baseUrl}/models`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${config.nvidiaApiKey}` },
+    });
+    if (!response.ok) throw new Error(`NVIDIA returned HTTP ${response.status}`);
+    const payload = (await response.json()) as { data?: { id?: unknown }[] };
+    const ids = (payload.data ?? [])
+      .map((m) => (typeof m.id === "string" ? m.id : undefined))
+      .filter((id): id is string => Boolean(id))
+      .sort();
+    const matches = (query ? ids.filter((id) => id.toLowerCase().includes(query)) : ids)
+      .filter((id) => `model:${id}`.length <= 64)
+      .slice(0, 20);
+    if (!matches.length) {
+      await send(ctx.chat.id, "[ultron] no matching models.");
+      return;
+    }
+    modelPickerCache.set(ctx.chat.id, matches);
+    const keyboard = new InlineKeyboard();
+    matches.forEach((id, i) => {
+      keyboard.text(id, `model:${i}`);
+      keyboard.row();
+    });
+    await send(ctx.chat.id, `Current: ${config.nemotronModel}\nSelect a model:`, { reply_markup: keyboard });
+  } catch (error) {
+    await send(ctx.chat.id, `[ultron] could not list NVIDIA models: ${error instanceof Error ? error.message : String(error)}`);
+  }
+});
+
+// Best-effort "clear the screen": deletes what ULTRON can of its own
+// recently sent messages in this chat. Telegram bots cannot delete the
+// other party's messages in a private chat, and cannot delete any message
+// older than ~48h — a genuine terminal-style clear isn't possible here, this
+// is the closest real equivalent rather than a silent no-op.
+bot.command("clear", async (ctx) => {
+  const ids = sentMessageIds.get(ctx.chat.id) ?? [];
+  sentMessageIds.delete(ctx.chat.id);
+  let deleted = 0;
+  for (const id of ids) {
+    try {
+      await bot.api.deleteMessage(ctx.chat.id, id);
+      deleted++;
+    } catch {
+      // Too old (>48h) or already gone — nothing to do.
+    }
+  }
+  await send(ctx.chat.id, `[ultron] deleted ${deleted}/${ids.length} of my own recent message(s) (Telegram limits bot deletions to ~48h, own messages only).`);
+});
+
+bot.command("quit", async (ctx) => {
+  await send(ctx.chat.id, "[ultron] stopping the bot process.");
+  debugLog(`stopping — /quit from chat=${ctx.chat.id}`);
+  await bot.stop();
+  process.exit(0);
+});
+
+// ---- callback queries (inline-keyboard follow-ups) ----
 
 bot.callbackQuery(/^(approve|deny):(.+)$/, async (ctx) => {
   const [, decision, ultronChatId] = ctx.match as unknown as [string, string, string];
   await ctx.answerCallbackQuery();
-  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+  await ctx.editMessageReplyMarkup().catch(() => {});
 
   const pendingApproval = await getPendingApproval(graph, ultronChatId);
   if (!pendingApproval) {
-    await ctx.reply("[ultron] nothing pending anymore.");
+    await send(ctx.chat!.id, "[ultron] nothing pending anymore.");
     return;
   }
   const decisions: ToolApprovalDecision = {};
@@ -188,14 +685,70 @@ bot.callbackQuery(/^(approve|deny):(.+)$/, async (ctx) => {
   await runTurn(ctx.chat!.id, ultronChatId, new Command({ resume: decisions }));
 });
 
+bot.callbackQuery(/^security:(.+):(bypass|accept_edit|manual)$/, async (ctx) => {
+  const [, ultronChatId, mode] = ctx.match as unknown as [string, string, "bypass" | "accept_edit" | "manual"];
+  await ctx.answerCallbackQuery();
+  chats.setSecurityMode(ultronChatId, mode);
+  await ctx.editMessageText(`[ultron] tool approval set to ${mode}.`).catch(() => {});
+});
+
+bot.callbackQuery(/^resume:(\d+)$/, async (ctx) => {
+  const index = Number((ctx.match as unknown as [string, string])[1]);
+  await ctx.answerCallbackQuery();
+  const list = archivePickerCache.get(ctx.chat!.id);
+  const entry = list?.[index];
+  if (!entry) {
+    await send(ctx.chat!.id, "[ultron] selection expired — run /resume again.");
+    return;
+  }
+  await resumeInto(ctx.chat!.id, currentChatId(ctx.chat!.id), entry.path, entry.title);
+});
+
+bot.callbackQuery(/^chat:(\d+)$/, async (ctx) => {
+  const index = Number((ctx.match as unknown as [string, string])[1]);
+  await ctx.answerCallbackQuery();
+  const list = chatPickerCache.get(ctx.chat!.id);
+  const target = list?.[index];
+  if (!target) {
+    await send(ctx.chat!.id, "[ultron] selection expired — run /chat again.");
+    return;
+  }
+  links.set(ctx.chat!.id, target.id);
+  await send(ctx.chat!.id, `[ultron] switched to "${target.title}".`);
+});
+
+bot.callbackQuery(/^model:(\d+)$/, async (ctx) => {
+  const index = Number((ctx.match as unknown as [string, string])[1]);
+  await ctx.answerCallbackQuery();
+  const list = modelPickerCache.get(ctx.chat!.id);
+  const id = list?.[index];
+  if (!id) {
+    await send(ctx.chat!.id, "[ultron] selection expired — run /model again.");
+    return;
+  }
+  config.nemotronModel = id;
+  graph = buildGraph();
+  await ctx.editMessageText(`[ultron] model set to ${id}.`).catch(() => {});
+});
+
+// ---- plain messages ----
+
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text.trim();
   if (!text || text.startsWith("/")) return;
 
-  const ultronChatId = ultronChatIdFor(ctx.chat.id);
-  chats.ensure(ultronChatId);
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const session = getSession(ultronChatId);
   chats.maybeAutoTitle(ultronChatId, text);
   chats.touch(ultronChatId);
+
+  // Same as the CLI/web: selecting "goal" mode just arms it, and the next
+  // non-retry message sent becomes the objective — every message while
+  // armed overwrites whatever goal existed before (goals.set()).
+  if (session.taskMode === "goal") {
+    goals.set(ultronChatId, text, config.goalMaxTurns);
+    await send(ctx.chat.id, `[ultron] goal: ${text} (self-checking after each turn, max ${config.goalMaxTurns})`);
+  }
 
   await ctx.replyWithChatAction("typing").catch(() => {});
   await runTurn(ctx.chat.id, ultronChatId, { messages: [new HumanMessage(text)] });
