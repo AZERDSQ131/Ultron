@@ -1,13 +1,17 @@
 import { DatabaseSync } from "node:sqlite";
 
-// Per-chat /goal state (CLI-only feature — see src/core/goalJudge.ts and the
-// CLI's driveGoalLoop). Same one-row-per-chat shape as TodoRegistry
+// Per-chat /task goal state (CLI-only feature — see src/core/goalJudge.ts
+// and the CLI's driveGoalLoop). Same one-row-per-chat shape as TodoRegistry
 // (todos.ts): a goal is always read and replaced as a whole, never queried
 // by field, so there's no need for a child table.
 //
-// Only one goal can exist per chat at a time, mirroring OpenClaw's /goal:
-// starting a new one while another is active/paused is a caller error, not
-// a silent overwrite — see the CLI's "a goal is already active" guard.
+// "goal" is a task-mode selector alongside todo/plan (/task none|todo|plan|
+// goal) rather than a standalone command: selecting it arms the mode, and
+// the next non-retry message the user sends becomes the objective — every
+// such message calls set() again, which always overwrites whatever goal
+// existed for the chat before. There's no separate resume/pause-by-command
+// surface; a paused goal (turn budget exhausted, or the judge reported
+// "blocked") is simply superseded by the next message sent in goal mode.
 
 export type GoalStatus = "active" | "paused" | "complete" | "cleared";
 
@@ -104,21 +108,6 @@ export class GoalRegistry {
     this.db
       .prepare("UPDATE goals SET status = 'paused', last_verdict = 'paused', last_reason = ?, updated_at = ? WHERE chat_id = ?")
       .run(reason, new Date().toISOString(), chatId);
-    return this.get(chatId);
-  }
-
-  // Only resumes a paused goal — a cleared/complete/already-active goal has
-  // nothing to resume, so callers get undefined and can message accordingly.
-  // Resets turns_used to open a fresh turn-budget window, same rationale as
-  // OpenClaw's goal resume: otherwise a goal paused for exhausting its
-  // budget would immediately re-trip the same check on its very next
-  // evaluation, making "/goal resume" a no-op for that pause reason.
-  resume(chatId: string): Goal | undefined {
-    const goal = this.get(chatId);
-    if (!goal || goal.status !== "paused") return undefined;
-    this.db
-      .prepare("UPDATE goals SET status = 'active', turns_used = 0, last_verdict = NULL, last_reason = NULL, updated_at = ? WHERE chat_id = ?")
-      .run(new Date().toISOString(), chatId);
     return this.get(chatId);
   }
 
