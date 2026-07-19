@@ -8,6 +8,7 @@ import {
   compactThread,
   estimateContextUsage,
   getPendingApproval,
+  listChatMessages,
   prepareRetry,
   type TaskMode,
   type ToolApprovalDecision,
@@ -354,15 +355,28 @@ async function runTurn(telegramChatId: number, ultronChatId: string, input: { me
   }
 }
 
+// How many of the most recent human/ai turns to preview right after
+// resuming — enough to remind the user where the conversation left off
+// without dumping the whole history into the chat.
+const RESUME_PREVIEW_MESSAGES = 6;
+
 // Resuming an archived chat unarchives it (chats.unarchive) and repoints
 // this Telegram chat's link at it — its LangGraph checkpoint state was
 // never touched by archiving, so this is a real resume, not a text
 // reconstruction (the old .txt-export mechanism this replaced only carried
-// human/ai text and lost tool-call context).
+// human/ai text and lost tool-call context). Unlike the CLI/web, which
+// redraw the whole thread on resume, Telegram has no persistent scrollback
+// to fall back on — without a preview here, "resumed" told the user
+// nothing about what they were actually resuming.
 async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
   chats.unarchive(chat.id);
   links.set(telegramChatId, chat.id);
-  await send(telegramChatId, `[ultron] resumed "${chat.title}".`);
+  const messages = await listChatMessages(graph, chat.id);
+  const recent = messages.filter((m) => m.role === "human" || m.role === "ai").slice(-RESUME_PREVIEW_MESSAGES);
+  const preview = recent.length
+    ? `\n\n${recent.map((m) => `${m.role === "human" ? "You" : "ULTRON"} › ${m.content}`).join("\n\n")}`
+    : "";
+  await send(telegramChatId, `[ultron] resumed "${chat.title}".${preview}`);
 }
 
 // Short-lived cache so inline-keyboard callback data can stay a small index
