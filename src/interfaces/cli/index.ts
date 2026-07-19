@@ -162,7 +162,8 @@ async function main() {
   // Resume whichever chat was most recently active, from either interface —
   // not always the legacy thread, since /archive or the web UI may have
   // moved on to a newer one since the CLI last ran.
-  let currentChatId = chats.list()[0].id;
+  let currentChatId = chats.getFocus()?.id ?? chats.list()[0].id;
+  chats.setFocus(currentChatId);
   setActivePermissionLabel(chats.getSecurityMode(currentChatId));
 
   let abortController: AbortController | undefined;
@@ -233,6 +234,7 @@ async function main() {
 
     const archived = chats.archive(currentChatId, title || undefined);
     const nextChat = chats.create();
+    chats.setFocus(nextChat.id);
     currentChatId = nextChat.id;
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
     appendTranscript(`${chalk.greenBright(`Chat Archived "${archived?.title ?? title ?? ""}"`)}\n\n`);
@@ -251,6 +253,7 @@ async function main() {
       return;
     }
     chats.unarchive(target.id);
+    chats.setFocus(target.id);
     currentChatId = target.id;
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
     showRestoredMessages(await listChatMessages(graph, currentChatId), config.nemotronModel);
@@ -791,6 +794,7 @@ async function main() {
       }
 
       if (command !== "/retry") chats.maybeAutoTitle(currentChatId, input);
+      chats.setFocus(currentChatId);
       chats.touch(currentChatId);
 
       // The selector describes the current request, not the whole chat.

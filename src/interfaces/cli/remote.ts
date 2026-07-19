@@ -114,7 +114,8 @@ async function main() {
   let currentChatTitle: string;
   {
     const { chats } = await apiGet("/api/chats");
-    const chat: Chat | undefined = chats[0];
+    const focus = await apiGet("/api/focus");
+    const chat: Chat | undefined = focus.chat ?? chats[0];
     if (chat) {
       currentChatId = chat.id;
       currentChatTitle = chat.title;
@@ -129,16 +130,33 @@ async function main() {
   let eventPollTimer: ReturnType<typeof setInterval> | undefined;
   let eventPollBusy = false;
   let currentContextLine = "";
+  let modelName = "";
+  let toolCount = 0;
 
   const syncEventCursor = async (): Promise<void> => {
     const data = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/events?after=9007199254740991`);
     eventCursor = data.latestId ?? eventCursor;
   };
 
+  const syncFocusedChat = async (): Promise<boolean> => {
+    const data = await apiGet("/api/focus");
+    const focused = data.chat as Chat | undefined;
+    if (!focused || focused.id === currentChatId) return false;
+    currentChatId = focused.id;
+    currentChatTitle = focused.title;
+    await syncEventCursor();
+    setActivePermissionLabel(focused.securityMode);
+    const history = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/messages`);
+    showRestoredMessages(history.messages as ChatMessage[], modelName);
+    appendTranscript(uiDim(`[ultron] switched to "${focused.title}" from the other interface.\n\n`));
+    return true;
+  };
+
   const pollExternalEvents = async (): Promise<void> => {
     if (eventPollBusy) return;
     eventPollBusy = true;
     try {
+      if (await syncFocusedChat()) return;
       const data = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/events?after=${eventCursor}`);
       for (const event of data.events ?? []) {
         eventCursor = Math.max(eventCursor, event.id);
@@ -158,8 +176,6 @@ async function main() {
   await syncEventCursor();
   eventPollTimer = setInterval(() => { void pollExternalEvents(); }, 750);
 
-  let modelName = "";
-  let toolCount = 0;
   const refreshStatus = async (): Promise<{ contextTokens: number; maxTokens: number; goal: Goal | null }> => {
     const data = await apiGet(`/api/status?chatId=${encodeURIComponent(currentChatId)}`);
     modelName = data.model;
@@ -380,6 +396,7 @@ async function main() {
   }
 
   async function executeTurn(contextLine: string, body: { text?: string; retry?: boolean }): Promise<{ finalText: string; aborted: boolean; errored: boolean }> {
+    await syncFocusedChat();
     collapseDanglingToolBlock();
     abortController = new AbortController();
     const controller = abortController;

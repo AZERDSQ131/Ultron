@@ -94,6 +94,12 @@ export class ChatRegistry {
     try { this.db.exec("ALTER TABLE chats ADD COLUMN security_mode TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN archived_at TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN export_path TEXT"); } catch { /* already migrated */ }
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_focus (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        chat_id TEXT NOT NULL
+      )
+    `);
   }
 
   // Active chats only — what every sidebar/picker/startup-resume should see.
@@ -154,7 +160,23 @@ export class ChatRegistry {
   activateMain(): Chat {
     const existing = this.ensure(LEGACY_CHAT_ID, "Main");
     if (existing.title === DEFAULT_CHAT_TITLE) this.rename(existing.id, "Main");
-    return this.unarchive(existing.id) ?? this.get(existing.id)!;
+    const main = this.unarchive(existing.id) ?? this.get(existing.id)!;
+    this.setFocus(main.id);
+    return main;
+  }
+
+  getFocus(): Chat | undefined {
+    const row = this.db.prepare("SELECT chat_id FROM chat_focus WHERE id = 1").get() as { chat_id: string } | undefined;
+    return row ? this.get(row.chat_id) : undefined;
+  }
+
+  setFocus(id: string): Chat | undefined {
+    const chat = this.get(id);
+    if (!chat) return undefined;
+    this.db
+      .prepare("INSERT INTO chat_focus (id, chat_id) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET chat_id = excluded.chat_id")
+      .run(id);
+    return chat;
   }
 
   // Archiving is purely a metadata flag, not a data export: the chat's full

@@ -394,6 +394,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     sendJson(res, 400, { error: "message text is required" });
     return;
   } else {
+    chats.setFocus(chatId);
     chatEvents.append(chatId, "human", payload.source === "telegram" ? "telegram" : "cli", input);
     chats.maybeAutoTitle(chatId, input);
     if (taskMode === "goal") goals.set(chatId, input, config.goalMaxTurns);
@@ -540,17 +541,23 @@ async function handleArchiveChat(req: IncomingMessage, res: ServerResponse, chat
   const payload = await readJson<{ title?: string }>(req);
   const archived = chats.archive(chatId, payload?.title);
   const fresh = chats.create();
+  chats.setFocus(fresh.id);
   sendJson(res, 200, { archived, fresh });
 }
 
 async function handleResumeChat(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   const resumed = chats.unarchive(chatId);
+  chats.setFocus(chatId);
   sendJson(res, 200, { chat: resumed });
 }
 
 async function handleMainChat(res: ServerResponse): Promise<void> {
   sendJson(res, 200, { chat: chats.activateMain() });
+}
+
+async function handleChatFocus(res: ServerResponse): Promise<void> {
+  sendJson(res, 200, { chat: chats.getFocus() ?? chats.activateMain() });
 }
 
 // Lightweight liveness probe — a real (cheap) DB query but no LLM call — so
@@ -738,6 +745,10 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/main") {
     handleMainChat(res).catch((err) => console.error("[ultron-web] activate main chat failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/focus") {
+    handleChatFocus(res).catch((err) => console.error("[ultron-web] get chat focus failed:", err));
     return;
   }
   if (chatMatch && chatMatch[2] === "/archive" && req.method === "POST") {

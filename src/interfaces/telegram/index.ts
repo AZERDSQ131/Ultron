@@ -68,6 +68,12 @@ chats.ensure(LEGACY_CHAT_ID);
 // a brand-new chat.
 function currentChatId(telegramChatId: number): string {
   const linked = links.get(telegramChatId);
+  const focused = chats.getFocus();
+  if (focused && chats.get(focused.id) && focused.id !== linked) {
+    links.set(telegramChatId, focused.id);
+    restartEventSync(telegramChatId, focused.id);
+    return focused.id;
+  }
   if (linked && chats.get(linked)) {
     startEventSync(telegramChatId, linked);
     return linked;
@@ -91,6 +97,14 @@ function startEventSync(telegramChatId: number, chatId: string): void {
     if (links.get(telegramChatId) !== chatId) {
       clearInterval(timer);
       eventSyncTimers.delete(telegramChatId);
+      return;
+    }
+    const focused = chats.getFocus();
+    if (focused && focused.id !== chatId) {
+      links.set(telegramChatId, focused.id);
+      clearInterval(timer);
+      eventSyncTimers.delete(telegramChatId);
+      startEventSync(telegramChatId, focused.id);
       return;
     }
     eventSyncBusy.add(telegramChatId);
@@ -433,6 +447,7 @@ const RESUME_PREVIEW_MESSAGES = 3;
 // nothing about what they were actually resuming.
 async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
   chats.unarchive(chat.id);
+  chats.setFocus(chat.id);
   links.set(telegramChatId, chat.id);
   restartEventSync(telegramChatId, chat.id);
   await send(telegramChatId, `[ultron] resumed "${chat.title}".`);
@@ -548,6 +563,7 @@ bot.command("archive", async (ctx) => {
   const title = ctx.match?.trim();
   const archived = chats.archive(ultronChatId, title || undefined);
   const fresh = chats.create();
+  chats.setFocus(fresh.id);
   links.set(ctx.chat.id, fresh.id);
   restartEventSync(ctx.chat.id, fresh.id);
   await send(ctx.chat.id, `[ultron] archived "${archived?.title ?? title ?? ""}". Started a new chat.`);
@@ -899,6 +915,7 @@ bot.on("message:text", async (ctx) => {
 
   const ultronChatId = currentChatId(ctx.chat.id);
   const session = getSession(ultronChatId);
+  chats.setFocus(ultronChatId);
   chatEvents.append(ultronChatId, "human", "telegram", text);
   chats.maybeAutoTitle(ultronChatId, text);
   chats.touch(ultronChatId);
