@@ -17,6 +17,10 @@ export const config = {
   nvidiaApiKey: required("NVIDIA_API_KEY"),
   nemotronModel: process.env.NEMOTRON_MODEL ?? "deepseek-ai/deepseek-v4-flash",
   nemotronBaseUrl: process.env.NEMOTRON_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
+  // Only required to run the Telegram interface (src/interfaces/telegram) —
+  // not validated with required() since every other entry point (CLI, web,
+  // scheduled tasks) must keep working without it.
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   webSearchProvider: process.env.WEB_SEARCH_PROVIDER ?? "auto",
   tavilyApiKey: process.env.TAVILY_API_KEY,
   // Reference point for the context gauge in the CLI: 262,144 tokens

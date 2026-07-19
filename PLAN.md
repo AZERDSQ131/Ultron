@@ -79,11 +79,23 @@ interface at a time.
   `chats.ts`) is registered into the chat table on startup via `chats.ensure(...)`, so upgrading
   doesn't orphan whatever history already existed.
 
-## Phase 2 — Telegram interface
+## Phase 2 — Telegram interface (done)
 
-- Replace/complement the terminal with a Telegram bot (grammY)
-- Same LangGraph core and `MEMORY.md` — Telegram is just a new entry point, not a rewrite
-- Streaming responses via Telegram's Bot API message editing
+- `src/interfaces/telegram/index.ts` (grammY, long polling — `pnpm telegram` / `start:telegram`), a
+  third entry point next to the CLI and web UI: same `buildGraph()`, same shared SQLite file, so a
+  Telegram conversation has the same memory, tools and personality as the other two.
+- Each Telegram chat maps permanently to one ULTRON chat, `telegram-<telegramChatId>`, registered
+  through the same `ChatRegistry.ensure()` the CLI's legacy thread uses — it shows up in the web
+  sidebar too. No chat-switching UI on the Telegram side (a Telegram chat is inherently one
+  conversation with one person).
+- No true token-by-token streaming: Telegram rate-limits `editMessageText`, so a single placeholder
+  message is sent per turn, updated only when the active tool's name changes (a coarse "what's it
+  doing" indicator) and once more with the final text.
+- Tool-approval interrupts (`accept_edit`/`manual` security mode) render as one inline-keyboard
+  Approve/Deny covering the whole pending batch — not per-call like the CLI's y/n prompt or the
+  web's approval block, since Telegram's UI doesn't lend itself to that level of granularity.
+- Deliberately minimal command set for v1: `/start`, `/status`, `/stop`. No `/task`, `/security`,
+  `/theme`, `/memory`, `/think`, `/compact` yet — CLI/web-only for now, add later if actually needed.
 
 ## Phase 3 — Tools (in progress)
 

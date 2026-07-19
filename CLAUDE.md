@@ -14,7 +14,7 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 - **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
 - **Memory**: local SQLite checkpoint database (`ultron-state.sqlite3`), custom `SqliteSaver` in `src/core/memory/checkpointer.ts` implementing LangGraph's `BaseCheckpointSaver` directly on Node's built-in `node:sqlite` (no `@langchain/langgraph-checkpoint-postgres`/`pg`, no `@langchain/langgraph-checkpoint-sqlite` — neither package's published versions match this project's `@langchain/core` ^0.3 / `langgraph` ^0.2 pin, and `node:sqlite` needs zero extra dependencies since Node 24 is already required).
 - **Chats**: conversations are no longer a single hardcoded thread. `src/core/memory/chats.ts` (`ChatRegistry`) tracks every chat (id, title, timestamps) in the same database file; a chat's `id` doubles as its LangGraph `thread_id`. The web UI's sidebar lists/creates/renames/deletes chats. The CLI keeps one "current chat" per process, resuming whichever chat was most recently active on either interface at startup; `/archive` finalizes the current chat and starts a fresh one rather than exiting. The legacy hardcoded thread id (`ultron-main`, exported as `LEGACY_CHAT_ID`) is migrated into the registry on first run via `chats.ensure(...)` so pre-existing history isn't orphaned.
-- **Interface**: terminal (v0.1) and a local web UI (`src/interfaces/web/`) — both point at the same SQLite file and thread, so they share memory and slash commands (`/compact`, `/retry`, `/archive`, `/resume`, `/chat`). Telegram is next (grammY planned). `/chat` (CLI, `src/interfaces/cli/index.ts`) opens any chat by search/id — including a `spawn_agent` sub-agent's own execution chat — mirroring what the web sidebar already let you do; bare `/chat` opens a picker (same UX as `/resume`), `/chat <text>` switches directly.
+- **Interface**: terminal (v0.1), a local web UI (`src/interfaces/web/`), and a Telegram bot (`src/interfaces/telegram/`, grammY, long polling — `pnpm telegram`/`start:telegram`) — all three point at the same SQLite file, so they share memory, tools and personality. Each Telegram chat maps permanently to one ULTRON chat (`telegram-<telegramChatId>`, via the same `ChatRegistry.ensure()`), visible in the web sidebar too; no chat-switching UI on the Telegram side since a Telegram chat is inherently one conversation. `/chat` (CLI, `src/interfaces/cli/index.ts`) opens any chat by search/id — including a `spawn_agent` sub-agent's own execution chat — mirroring what the web sidebar already let you do; bare `/chat` opens a picker (same UX as `/resume`), `/chat <text>` switches directly.
 - **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [AGENT.md](AGENT.md). Do not let it default to English regardless of input language.
 - **System prompt split**: [SOUL.md](SOUL.md) is personality only (voice, tone, examples). [AGENT.md](AGENT.md) is everything else — tool-use protocol, language matching, other operational rules. Don't fold one into the other; `src/core/graph.ts` concatenates both at startup.
 - **Security intentionally minimal**: the user explicitly asked for **no Docker, no hardened secret management, full bypass of manual permissions/confirmations**. This is NOT an oversight — do not reintroduce sandboxing or confirmation gates without an explicit request.
@@ -26,7 +26,7 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 ## Known roadmap (do not build ahead of a request)
 
 1. Loop + memory (current stage, done)
-2. Telegram interface
+2. Telegram interface (done — `src/interfaces/telegram/`)
 3. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity. In progress: shell + filesystem tools done (`src/core/tools/`), mail/calendar still pending (need OAuth).
 4. Separate "Codex-style" app for vibe coding, with a main conversation orchestrating background sub-agents to manage projects. Do not start this without an explicit request — it was deliberately deferred during initial design.
 
@@ -49,10 +49,11 @@ TypeScript (Node 24+) / pnpm / LangGraph.js / SQLite (`node:sqlite`, no external
 ULTRON est un agent IA personnel développé directement par l'utilisateur pour
 conserver la maîtrise de la boucle d'exécution, des outils et de la mémoire.
 La version actuelle fournit plusieurs conversations persistantes, accessibles
-depuis deux interfaces qui partagent le même état : le terminal
-(`src/interfaces/cli/index.ts`) et une interface web locale (`src/interfaces/web/`). Telegram,
-les intégrations mail/calendrier et l'application de vibe-coding sont prévues
-mais ne sont pas implémentées.
+depuis trois interfaces qui partagent le même état : le terminal
+(`src/interfaces/cli/index.ts`), une interface web locale (`src/interfaces/web/`)
+et un bot Telegram (`src/interfaces/telegram/`). Les intégrations
+mail/calendrier et l'application de vibe-coding sont prévues mais ne sont pas
+implémentées.
 
 ## Stack technique
 
@@ -290,8 +291,9 @@ nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
 
 1. Ajouter des tests unitaires ciblés sans changer la posture de sécurité
    choisie.
-2. Préparer la phase Telegram avec grammY en réutilisant `buildGraph` et le
-   même `thread_id`, sans démarrer la phase vibe-coding.
+2. Étendre le bot Telegram si besoin (`/task`, `/security`, `/memory`,
+   streaming incrémental des messages) — volontairement minimal pour l'instant
+   (`/start`, `/status`, `/stop`), sans démarrer la phase vibe-coding.
 3. Concevoir les intégrations mail/calendrier et leur OAuth avant d'ajouter
    leurs outils.
 4. Définir le modèle persistant et le cycle de vie des tâches planifiées avant

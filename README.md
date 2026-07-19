@@ -45,8 +45,22 @@ SQLite database (`ultron-state.sqlite3`) — a message sent from one interface
 shows up in the other, and `/compact`, `/retry` and `/archive` act on the
 same history no matter which interface issued them. `GET /api/health` is a
 liveness probe (process uptime, model, whether the shared SQLite file is
-reachable) — useful for a future Telegram process or a supervisor script to
-check before assuming ULTRON is up.
+reachable) — useful for the Telegram process or a supervisor script to check
+before assuming ULTRON is up.
+
+A Telegram bot (`pnpm telegram`, grammY, long polling) is a third entry
+point: same `buildGraph()`, same shared SQLite file, so a Telegram chat has
+the same memory, tools and personality as the CLI and the web UI. Each
+Telegram chat maps permanently to one ULTRON chat (`telegram-<chatId>`),
+visible in the web sidebar too — there's no chat-switching UI on the
+Telegram side, since a Telegram chat is inherently one conversation with one
+person. There's no true token-by-token streaming (Telegram rate-limits
+message edits); a single placeholder message per turn is updated when the
+active tool changes and once more with the final text. A pending
+tool-approval interrupt (`accept_edit`/`manual` security mode) renders as one
+inline-keyboard Approve/Deny for the whole batch, not per call. Command set
+is deliberately minimal for now: `/start`, `/status`, `/stop`. Requires
+`TELEGRAM_BOT_TOKEN` in `.env` (see `.env.example`).
 
 Conversations are organized as chats, each with its own id and title,
 listed in the web UI's sidebar (create, rename, delete, switch between
@@ -71,9 +85,8 @@ The web UI also has:
 - a small set of global keyboard shortcuts (new chat, search, settings,
   toggle sidebar…) — the full list is in the Shortcuts tab of that panel.
 
-Telegram is the next interface planned. Mail and calendar integrations are
-still pending because they require OAuth. The separate Codex-style coding app
-is explicitly deferred.
+Mail and calendar integrations are still pending because they require OAuth.
+The separate Codex-style coding app is explicitly deferred.
 
 ## Design principles
 
@@ -118,16 +131,19 @@ Available configuration:
 | `DATABASE_PATH` | `ultron-state.sqlite3` | Shared checkpoint database (CLI + web) |
 | `WEB_SEARCH_PROVIDER` | `auto` | `auto`, `tavily` or `duckduckgo` |
 | `TAVILY_API_KEY` | empty | Optional Tavily API key; required when the provider is `tavily` |
+| `TELEGRAM_BOT_TOKEN` | empty | Required only to run the Telegram interface |
 
 ## Run and verify
 
 ```bash
 pnpm dev          # run the terminal interface directly from TypeScript
 pnpm web          # run the local web interface (http://localhost:4173 by default)
+pnpm telegram     # run the Telegram bot (long polling)
 pnpm typecheck    # strict TypeScript check
 pnpm build        # compile to dist/, including the web frontend assets
 pnpm start        # run the compiled terminal interface
 pnpm start:web    # run the compiled web interface
+pnpm start:telegram # run the compiled Telegram bot
 ```
 
 There are currently no automated tests or lint script. The first tests should
@@ -189,6 +205,7 @@ src/interfaces/                      presentation layers — import from core, n
     js/api.js                        fetch wrappers for every backend route
     js/store.js                      shared app state
     js/markdown.js                   the same lightweight Markdown renderer as the CLI
+  telegram/index.ts                  Telegram bot (grammY, long polling)
 src/config.ts                        shared configuration (env vars, paths)
 MEMORY.md                            durable human-readable memory loaded each turn
 AGENT.md                             operational rules injected into the prompt
@@ -199,7 +216,7 @@ PLAN.md                              project roadmap and scope
 ## Roadmap
 
 1. ~~Terminal loop and classic file memory~~ — done.
-2. Telegram interface with grammY.
+2. ~~Telegram interface with grammY~~ — done.
 3. Mail and calendar tools with OAuth.
 4. ~~Background scheduled tasks once the core loop is trusted~~ — web foundation started: Agents, Agent-owned chats, persisted five-field cron schedules and scheduled execution chats are available in the web interface. Schedules are created conversationally through ULTRON's `schedule_task` tool.
 5. Separate Codex-style vibe-coding application — deferred.
