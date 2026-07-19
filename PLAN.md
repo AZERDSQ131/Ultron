@@ -85,8 +85,8 @@ interface at a time.
   third entry point next to the CLI and web UI: same `buildGraph()`, same shared SQLite file, so a
   Telegram conversation has the same memory, tools and personality as the other two.
 - Which ULTRON chat a Telegram chat points at is a movable pointer (`TelegramLinkRegistry`,
-  `src/core/memory/telegramLinks.ts`), not a fixed derivation — `/archive`, `/chat` and `/resume`
-  all repoint it, mirroring the CLI's "current chat per session" model despite Telegram having no
+  `src/core/memory/telegramLinks.ts`), not a fixed derivation — `/archive` and `/resume` both
+  repoint it, mirroring the CLI's "current chat per session" model despite Telegram having no
   sidebar of its own. Every chat it touches is a normal row in `ChatRegistry`, visible from the web
   sidebar too.
 - No true token-by-token streaming: Telegram rate-limits `editMessageText`, so a single placeholder
@@ -96,14 +96,14 @@ interface at a time.
   Approve/Deny covering the whole pending batch — not per-call like the CLI's y/n prompt or the
   web's approval block, since Telegram's UI doesn't lend itself to that level of granularity.
 - Full CLI command parity: `/help`, `/model`, `/status`, `/context`, `/stop`, `/retry`, `/compact`,
-  `/archive`, `/resume`, `/chat`, `/think`, `/task` (including `goal` mode's judge-then-continue
+  `/archive`, `/resume`, `/think`, `/task` (including `goal` mode's judge-then-continue
   loop, ported as a sequential loop of independent turns — see `runTurn`'s comment on why it must
   not recurse into a still-held per-chat lock, the way `server.ts`'s SSE goal continuation currently
   does), `/permissions`, `/security`, `/verbose`, `/memory`, `/clear`, `/theme`, `/quit`. Interactive
   CLI pickers (arrow-key selection) become inline keyboards; `/theme` is an intentional no-op
   (Telegram's own app controls that, not ULTRON).
-- `/clear` wipes the conversation's actual message state (`clearThreadMessages` in `graph.ts`,
-  reusing `resumeThread`'s `RemoveMessage(REMOVE_ALL_MESSAGES)` pattern), on top of deleting what
+- `/clear` wipes the conversation's actual message state (`clearThreadMessages` in `graph.ts`, a
+  `RemoveMessage(REMOVE_ALL_MESSAGES)` update), on top of deleting what
   Telegram lets a bot delete of its own recent messages (own messages only, ~48h window). This is
   deliberately different from the CLI/web, where `/clear` only redraws the terminal and leaves the
   model's memory of the thread untouched — there the visible scrollback is a constant reminder that
