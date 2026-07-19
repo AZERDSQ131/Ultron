@@ -28,6 +28,13 @@ export class TelegramLinkRegistry {
     return row?.ultron_chat_id;
   }
 
+  list(): Array<{ telegramChatId: number; ultronChatId: string }> {
+    const rows = this.db
+      .prepare("SELECT telegram_chat_id, ultron_chat_id FROM telegram_links")
+      .all() as Array<{ telegram_chat_id: string; ultron_chat_id: string }>;
+    return rows.map((row) => ({ telegramChatId: Number(row.telegram_chat_id), ultronChatId: row.ultron_chat_id }));
+  }
+
   set(telegramChatId: number, ultronChatId: string): void {
     this.db
       .prepare(

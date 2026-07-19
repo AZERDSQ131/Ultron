@@ -26,6 +26,7 @@ import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../cor
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
+import { getChatEventRegistry, type ChatEventSource } from "../../core/memory/chatEvents.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
 import { listSkills, readSkill } from "../../core/skills.js";
 import { installHubSkill, listHubSkills } from "../../core/skillsHub.js";
@@ -48,6 +49,7 @@ const chats = getChatRegistry(config.databasePath);
 const agents = new AgentRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
 const goals = getGoalRegistry(config.databasePath);
+const chatEvents = getChatEventRegistry(config.databasePath);
 // Migrates the CLI's original hardcoded thread ("ultron-main", used before
 // chats existed) into the registry on first run, so pre-existing history
 // shows up as a chat instead of being orphaned.
@@ -197,6 +199,7 @@ async function streamGraphTurn(
   thinkingMode: ThinkingMode,
   taskMode: TaskMode,
   input: { messages: HumanMessage[] } | Command,
+  source: ChatEventSource = "cli",
   nested = false,
 ): Promise<void> {
   if (!nested) res.writeHead(200, {
@@ -320,6 +323,8 @@ async function streamGraphTurn(
           if (humanText && finalText.trim()) void recordUserModelObservation(chatId, humanText, finalText);
         }
 
+        if (finalText.trim()) chatEvents.append(chatId, "ai", source, finalText.trim());
+
         if (taskMode === "goal") {
           const goal = goals.get(chatId);
           if (goal?.status === "active") {
@@ -340,7 +345,7 @@ async function streamGraphTurn(
                   sseWrite(res, "goal", { status: "continuing", reason: verdict.reason });
                   await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, {
                     messages: [new HumanMessage(buildContinuationPrompt(goal.objective, verdict.reason))],
-                  }, true);
+                  }, source, true);
                 }
               } catch (error) {
                 goals.pause(chatId, "goal check failed");
@@ -365,7 +370,7 @@ async function streamGraphTurn(
 }
 
 async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ chatId?: string; text?: string; thinking?: ThinkingMode; taskMode?: TaskMode; retry?: boolean }>(req);
+  const payload = await readJson<{ chatId?: string; text?: string; thinking?: ThinkingMode; taskMode?: TaskMode; retry?: boolean; source?: ChatEventSource }>(req);
   if (!payload) {
     sendJson(res, 400, { error: "invalid JSON body" });
     return;
@@ -389,6 +394,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     sendJson(res, 400, { error: "message text is required" });
     return;
   } else {
+    chatEvents.append(chatId, "human", payload.source === "telegram" ? "telegram" : "cli", input);
     chats.maybeAutoTitle(chatId, input);
     if (taskMode === "goal") goals.set(chatId, input, config.goalMaxTurns);
     else goals.clear(chatId);
@@ -401,7 +407,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   // retries intentionally keep their existing list.
   if (!isRetry && (taskMode === "todo" || taskMode === "plan")) todos.clear(chatId);
 
-  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(expandSkillMentions(input))] });
+  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(expandSkillMentions(input))] }, payload.source === "telegram" ? "telegram" : "cli");
   const exportedChat = chats.get(chatId);
   if (exportedChat) void maybeExportChat(graph, exportedChat);
 }
@@ -519,6 +525,11 @@ async function handleCompact(req: IncomingMessage, res: ServerResponse): Promise
 
 async function handleListArchivedChats(res: ServerResponse): Promise<void> {
   sendJson(res, 200, { chats: chats.listArchived() });
+}
+
+async function handleChatEvents(res: ServerResponse, chatId: string, after: number): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  sendJson(res, 200, { events: chatEvents.listAfter(chatId, after), latestId: chatEvents.latestId(chatId) });
 }
 
 // Archiving is a metadata flag (see ChatRegistry.archive), not a data
@@ -702,7 +713,7 @@ async function handleStatus(res: ServerResponse, chatId: string | undefined): Pr
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
-  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/todos|\/archive|\/resume|\/export)?$/);
+  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/events|\/todos|\/archive|\/resume|\/export)?$/);
 
   if (req.method === "GET" && path === "/api/chats") {
     handleListChats(res).catch((err) => console.error("[ultron-web] list chats failed:", err));
@@ -710,6 +721,11 @@ const server = createServer((req, res) => {
   }
   if (req.method === "GET" && path === "/api/chats/archived") {
     handleListArchivedChats(res).catch((err) => console.error("[ultron-web] list archived chats failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/events" && req.method === "GET") {
+    const after = Number(new URL(req.url ?? "/", "http://localhost").searchParams.get("after") ?? "0");
+    handleChatEvents(res, decodeURIComponent(chatMatch[1]), Number.isFinite(after) ? after : 0).catch((err) => console.error("[ultron-web] chat events failed:", err));
     return;
   }
   if (req.method === "POST" && path === "/api/chats") {

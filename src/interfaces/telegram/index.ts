@@ -23,6 +23,7 @@ import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../cor
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
 import { getTelegramLinkRegistry } from "../../core/memory/telegramLinks.js";
+import { getChatEventRegistry } from "../../core/memory/chatEvents.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
@@ -52,6 +53,7 @@ const todos = getTodoRegistry(config.databasePath);
 const goals = getGoalRegistry(config.databasePath);
 const userModel = getUserModelRegistry(config.databasePath);
 const links = getTelegramLinkRegistry(config.databasePath);
+const chatEvents = getChatEventRegistry(config.databasePath);
 
 // Ensures pre-existing history from the CLI's original hardcoded thread
 // registers as a real chat — same migration every entry point does at
@@ -66,11 +68,61 @@ chats.ensure(LEGACY_CHAT_ID);
 // a brand-new chat.
 function currentChatId(telegramChatId: number): string {
   const linked = links.get(telegramChatId);
-  if (linked && chats.get(linked)) return linked;
+  if (linked && chats.get(linked)) {
+    startEventSync(telegramChatId, linked);
+    return linked;
+  }
   const legacyDerived = `telegram-${telegramChatId}`;
   const chat = chats.get(legacyDerived) ?? chats.create(DEFAULT_CHAT_TITLE);
   links.set(telegramChatId, chat.id);
+  startEventSync(telegramChatId, chat.id);
   return chat.id;
+}
+
+const eventCursors = new Map<number, number>();
+const eventSyncTimers = new Map<number, ReturnType<typeof setInterval>>();
+const eventSyncBusy = new Set<number>();
+
+function startEventSync(telegramChatId: number, chatId: string): void {
+  if (eventSyncTimers.has(telegramChatId)) return;
+  eventCursors.set(telegramChatId, chatEvents.latestId(chatId));
+  const timer = setInterval(async () => {
+    if (eventSyncBusy.has(telegramChatId)) return;
+    if (links.get(telegramChatId) !== chatId) {
+      clearInterval(timer);
+      eventSyncTimers.delete(telegramChatId);
+      return;
+    }
+    eventSyncBusy.add(telegramChatId);
+    try {
+      let cursor = eventCursors.get(telegramChatId) ?? 0;
+      for (const event of chatEvents.listAfter(chatId, cursor)) {
+        cursor = event.id;
+        if (event.source === "telegram") continue;
+        if (event.kind === "human") await send(telegramChatId, `🖥️ CLI › ${event.content}`);
+        else await send(telegramChatId, event.content);
+      }
+      eventCursors.set(telegramChatId, cursor);
+    } finally {
+      eventSyncBusy.delete(telegramChatId);
+    }
+  }, 750);
+  eventSyncTimers.set(telegramChatId, timer);
+}
+
+function resetEventCursor(telegramChatId: number, chatId: string): void {
+  eventCursors.set(telegramChatId, chatEvents.latestId(chatId));
+}
+
+function restartEventSync(telegramChatId: number, chatId: string): void {
+  const timer = eventSyncTimers.get(telegramChatId);
+  if (timer) clearInterval(timer);
+  eventSyncTimers.delete(telegramChatId);
+  startEventSync(telegramChatId, chatId);
+}
+
+for (const link of links.list()) {
+  if (chats.get(link.ultronChatId)) startEventSync(link.telegramChatId, link.ultronChatId);
 }
 
 // Per-chat session state that has no natural persistence slot elsewhere
@@ -270,6 +322,7 @@ async function runSingleTurn(
       todos.completeAll(ultronChatId);
       const visibleText = stripThinking(finalText);
       await safeEditMessage(telegramChatId, placeholder.message_id, visibleText.trim() || "(empty reply)");
+      if (visibleText.trim()) chatEvents.append(ultronChatId, "ai", "telegram", visibleText.trim());
 
       // A separate message, sent after the reply is already on screen —
       // not appended to it — per explicit request: the stats line is a
@@ -381,6 +434,7 @@ const RESUME_PREVIEW_MESSAGES = 3;
 async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
   chats.unarchive(chat.id);
   links.set(telegramChatId, chat.id);
+  restartEventSync(telegramChatId, chat.id);
   await send(telegramChatId, `[ultron] resumed "${chat.title}".`);
   const messages = await listChatMessages(graph, chat.id);
   const recent = messages.filter((m) => m.role === "ai").slice(-RESUME_PREVIEW_MESSAGES);
@@ -388,6 +442,7 @@ async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
   // own paragraphs together so resume preserves the original message
   // boundaries instead of turning one reply into a sequence of fragments.
   for (const message of recent) await send(telegramChatId, message.content);
+  resetEventCursor(telegramChatId, chat.id);
 }
 
 // Short-lived cache so inline-keyboard callback data can stay a small index
@@ -493,6 +548,7 @@ bot.command("archive", async (ctx) => {
   const archived = chats.archive(ultronChatId, title || undefined);
   const fresh = chats.create();
   links.set(ctx.chat.id, fresh.id);
+  restartEventSync(ctx.chat.id, fresh.id);
   await send(ctx.chat.id, `[ultron] archived "${archived?.title ?? title ?? ""}". Started a new chat.`);
 });
 
@@ -837,6 +893,7 @@ bot.on("message:text", async (ctx) => {
 
   const ultronChatId = currentChatId(ctx.chat.id);
   const session = getSession(ultronChatId);
+  chatEvents.append(ultronChatId, "human", "telegram", text);
   chats.maybeAutoTitle(ultronChatId, text);
   chats.touch(ultronChatId);
 

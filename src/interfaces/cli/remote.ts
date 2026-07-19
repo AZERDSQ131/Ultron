@@ -125,6 +125,39 @@ async function main() {
     }
   }
 
+  let eventCursor = 0;
+  let eventPollTimer: ReturnType<typeof setInterval> | undefined;
+  let eventPollBusy = false;
+  let currentContextLine = "";
+
+  const syncEventCursor = async (): Promise<void> => {
+    const data = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/events?after=9007199254740991`);
+    eventCursor = data.latestId ?? eventCursor;
+  };
+
+  const pollExternalEvents = async (): Promise<void> => {
+    if (eventPollBusy) return;
+    eventPollBusy = true;
+    try {
+      const data = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/events?after=${eventCursor}`);
+      for (const event of data.events ?? []) {
+        eventCursor = Math.max(eventCursor, event.id);
+        if (event.source === "cli") continue;
+        const speaker = event.kind === "human" ? chalk.yellow("telegram") : chalk.redBright.bold("ultron");
+        appendTranscript(`${speaker} ${uiDim("›")} ${event.content}\n\n`);
+      }
+      eventCursor = Math.max(eventCursor, data.latestId ?? eventCursor);
+      if ((data.events ?? []).length) renderScreen("", 0, currentContextLine);
+    } catch {
+      // A temporary network failure must not interrupt the interactive CLI.
+    } finally {
+      eventPollBusy = false;
+    }
+  };
+
+  await syncEventCursor();
+  eventPollTimer = setInterval(() => { void pollExternalEvents(); }, 750);
+
   let modelName = "";
   let toolCount = 0;
   const refreshStatus = async (): Promise<{ contextTokens: number; maxTokens: number; goal: Goal | null }> => {
@@ -190,6 +223,7 @@ async function main() {
     const data = await apiPost(`/api/chats/${encodeURIComponent(currentChatId)}/archive`, title ? { title } : {});
     currentChatId = data.fresh.id;
     currentChatTitle = data.fresh.title;
+    await syncEventCursor();
     setActivePermissionLabel(data.fresh.securityMode);
     appendTranscript(`${chalk.greenBright(`Chat Archived "${data.archived?.title ?? title ?? ""}"`)}\n\n`);
   };
@@ -210,6 +244,7 @@ async function main() {
     await apiPost(`/api/chats/${encodeURIComponent(target.id)}/resume`);
     currentChatId = target.id;
     currentChatTitle = target.title;
+    await syncEventCursor();
     setActivePermissionLabel(target.securityMode);
     const { messages } = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/messages`);
     showRestoredMessages(messages as ChatMessage[], modelName);
@@ -368,6 +403,7 @@ async function main() {
     while (!stopping) {
       const status = await refreshStatus();
       const contextLine = renderContextBar(status.contextTokens, status.maxTokens);
+      currentContextLine = contextLine;
       let input = await readInput(contextLine);
       if (stopping) break;
       if (!input.trim()) continue;
@@ -534,6 +570,7 @@ async function main() {
       await executeTurn(contextLine, turnInput);
     }
   } finally {
+    if (eventPollTimer) clearInterval(eventPollTimer);
     cancelActiveInput?.();
     appendTranscript(uiDim("[ultron] stopped.\n"));
     stdout.write(uiDim("[ultron] stopped.\n"));
