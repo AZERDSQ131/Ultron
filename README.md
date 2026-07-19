@@ -15,6 +15,10 @@ The current version provides a terminal conversation loop with:
 
 - Nemotron through NVIDIA's OpenAI-compatible API;
 - a human-readable `MEMORY.md` for durable facts, preferences and context;
+- a passive user model: a separate LLM call quietly extracts durable
+  preferences/facts/patterns after each turn, without being asked, and feeds
+  them back into the prompt to adjust tone and defaults — never merged into
+  `MEMORY.md` automatically, reviewable and clearable with `/memory`;
 - token streaming, elapsed-time statistics with an exact generated-token count
   (real usage from NVIDIA's endpoint, not an estimate) and an estimated
   context gauge;
@@ -146,6 +150,7 @@ The terminal handles these commands without sending them to Nemotron:
 | `/verbose on\|off` | Show or hide the per-turn stats line (model, input/output tokens, elapsed time, estimated cost) |
 | `/archive [title]` | Save the current session as a readable text file under `archives/`; without a title, use the first user message |
 | `/resume <archive-path>` | Restore a previously archived session into the current thread |
+| `/memory [clear\|forget <id>]` | List, clear, or remove auto-accumulated observations about you (see below) |
 | `/clear` | Clear the terminal display |
 | `/quit` | Exit ULTRON |
 

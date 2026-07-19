@@ -318,3 +318,44 @@ nouvelle — reproduit et corrigé sur deux fronts :
   `AGENT.md` disent maintenant explicitement de repartir d'un `todo_write`/
   `plan_propose` neuf (pas `todo_update`) si la demande courante n'est pas
   la continuation de ce que la liste existante suivait.
+
+## Modèle utilisateur passif (parité Hermes Agent)
+
+Ajouté pour combler un écart identifié face à Hermes Agent (voir
+`docs/agent-ia-personnel.md`, section 2) : une mémoire qui apprend en
+continu, sans qu'on le lui demande, plutôt qu'uniquement sur déclaration
+explicite de l'utilisateur (`MEMORY.md`, `memory_write`).
+
+- `src/core/memory/userModel.ts` (`UserModelRegistry`) : table SQLite
+  `user_model_observations`, globale (pas scoppée par chat, comme
+  `MEMORY.md`) — chaque ligne est une observation courte
+  (`preference`/`fact`/`pattern`) avec sa source (`chat_id` d'origine) et sa
+  date. Volontairement **séparée** de `MEMORY.md` : ce fichier reste la
+  mémoire éditée et validée à la main par l'utilisateur, jamais réécrite
+  automatiquement — voir l'historique du projet (incident OpenClaw,
+  suppression de mails malgré l'instruction d'attendre) qui est la raison
+  d'être de tout ULTRON ; reproduire la même perte de contrôle côté mémoire
+  aurait été absurde.
+- `src/core/userModelExtractor.ts` : après chaque tour réussi (CLI
+  `executeTurn`, web `streamGraphTurn`), un appel LLM séparé et bon marché
+  (`createNemotronModel("low")`, même schéma que `judgeGoal` dans
+  `goalJudge.ts`) lit uniquement le dernier échange (message utilisateur +
+  réponse d'ULTRON, pas tout l'historique) et répond soit `{"observation":
+  null}`, soit une observation courte. Jamais attendu par le flux principal
+  (`void recordUserModelObservation(...)`) : une extraction ratée est
+  silencieuse, jamais bloquante ni remontée à l'utilisateur.
+- `graph.ts` : `buildSystemPrompt` injecte un nouveau bloc `<user_model>`
+  (même mécanisme que `<daily_memory>`), entre `<memory>` et
+  `<daily_memory>`, résumant les observations accumulées (plafonné à 40
+  pour ne pas faire grossir le prompt sans limite). Absent du prompt d'un
+  sous-agent (`buildAgentSystemPrompt`), pour la même raison que
+  `MEMORY.md` en est déjà exclu.
+- `/memory` (CLI uniquement, `src/interfaces/cli/index.ts`) : liste les
+  observations accumulées (`/memory`), les efface toutes (`/memory clear`)
+  ou une seule par id (`/memory forget <id>`) — la surface de revue/purge
+  explicitement promise avant l'implémentation, pas de fusion automatique
+  vers `MEMORY.md`.
+- Pas encore fait : promotion explicite d'une observation vers `MEMORY.md`
+  (l'utilisateur ou ULTRON, sur demande, édite `MEMORY.md` à la main via les
+  outils fichiers existants — aucun outil dédié pour l'instant), et aucune
+  passe de consolidation/dédoublonnage des observations dans le temps.

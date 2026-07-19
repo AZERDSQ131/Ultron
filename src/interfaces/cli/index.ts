@@ -22,6 +22,8 @@ import {
 import { withThreadLock } from "../../core/threadLock.js";
 import { config } from "../../config.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
+import { recordUserModelObservation } from "../../core/userModelExtractor.js";
+import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type Chat, type SecurityMode } from "../../core/memory/chats.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
@@ -38,7 +40,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/chat", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/chat", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -1210,7 +1212,7 @@ stdout.on("resize", () => {
 
 function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/chat")}     search and switch to any chat (including a sub-agent's)\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/chat")}     search and switch to any chat (including a sub-agent's)\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -1591,6 +1593,16 @@ async function main() {
         );
       }
       renderScreen("", 0, contextLine);
+      // Passive memory extraction (see userModelExtractor.ts) — never
+      // awaited, never blocks the next prompt from appearing; only runs for
+      // an actual new user message, not an approval-decision Command resume.
+      if ("messages" in turnInput) {
+        const humanText = turnInput.messages
+          .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+          .join("\n")
+          .trim();
+        if (humanText && finalText.trim()) void recordUserModelObservation(chatId, humanText, finalText);
+      }
       return { finalText, aborted: false, errored: false };
     } catch (err) {
       if (controller.signal.aborted) {
@@ -1916,6 +1928,41 @@ async function main() {
             if (command === "/verbose off" || command === "/verbose false") {
               verbose = false;
               appendTranscript(uiDim("[ultron] verbose off.\n\n"));
+              continue;
+            }
+            if (commandName === "/memory") {
+              const arg = commandArgument.toLowerCase();
+              const registry = getUserModelRegistry(config.databasePath);
+              if (!arg) {
+                const observations = registry.list(30);
+                if (!observations.length) {
+                  appendTranscript(uiDim("[ultron] no observations accumulated yet.\n\n"));
+                  continue;
+                }
+                const lines = observations
+                  .map((o) => `  ${uiDim(`#${o.id}`)} ${chalk.cyanBright(`(${o.category})`)} ${o.content}`)
+                  .join("\n");
+                appendTranscript(
+                  `${uiDim(`[ultron] ${registry.count()} observation(s) accumulated automatically — /memory clear or /memory forget <id>`)}\n${lines}\n\n`,
+                );
+                continue;
+              }
+              if (arg === "clear") {
+                registry.clear();
+                appendTranscript(uiDim("[ultron] all accumulated observations cleared.\n\n"));
+                continue;
+              }
+              if (command.startsWith("/memory forget ")) {
+                const id = Number(command.slice("/memory forget ".length).trim());
+                if (!Number.isInteger(id)) {
+                  appendTranscript(chalk.yellow("[ultron] use /memory forget <id> (see /memory for ids).\n\n"));
+                  continue;
+                }
+                registry.remove(id);
+                appendTranscript(uiDim(`[ultron] observation #${id} forgotten (if it existed).\n\n`));
+                continue;
+              }
+              appendTranscript(chalk.yellow("[ultron] use /memory, /memory clear or /memory forget <id>.\n\n"));
               continue;
             }
             appendTranscript(chalk.yellow(`[ultron] unknown command: ${input.trim()} — try /help\n\n`));

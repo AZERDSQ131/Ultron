@@ -21,6 +21,8 @@ import {
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
+import { recordUserModelObservation } from "../../core/userModelExtractor.js";
+import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -307,6 +309,17 @@ async function streamGraphTurn(
           contextTokens,
           maxTokens: config.contextWindowTokens,
         });
+
+        // Passive memory extraction (see userModelExtractor.ts) — never
+        // awaited, never blocks the SSE response; only for an actual new
+        // user message, not an approval-decision Command resume.
+        if ("messages" in input) {
+          const humanText = input.messages
+            .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+            .join("\n")
+            .trim();
+          if (humanText && finalText.trim()) void recordUserModelObservation(chatId, humanText, finalText);
+        }
 
         if (taskMode === "goal") {
           const goal = goals.get(chatId);
