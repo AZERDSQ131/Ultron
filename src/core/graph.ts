@@ -267,8 +267,14 @@ function routeAfterAgent(state: typeof MessagesAnnotation.State) {
 // worker-side overload (e.g. "ResourceExhausted: Worker local total
 // request limit reached") that the OpenAI SDK's own retry logic doesn't
 // catch, since it only covers the initial request, not stream errors.
+// This is typically a per-minute rate limit, not a momentary blip — a real
+// run still surfaced this error to the user after exhausting retries with
+// the previous 1s base delay (1s/2s/4s ≈ 7s total across 3 retries),
+// nowhere near long enough for a per-minute window to clear. Raised so the
+// same MAX_ATTEMPTS budget spends its wait actually giving the limit a
+// chance to reset instead of just adding latency.
 const RETRYABLE_ERROR = /resourceexhausted|rate.?limit/i;
-const RETRY_BASE_DELAY_MS = 1000;
+const RETRY_BASE_DELAY_MS = 4000;
 
 // Nemotron occasionally "calls" a tool by writing its arguments as plain
 // reply text instead of using the real tool_calls mechanism — no tool
