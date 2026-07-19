@@ -5,12 +5,17 @@
   "type": "module",
   "private": true,
   "main": "dist/interfaces/cli/index.js",
+  "bin": {
+    "ultron": "dist/interfaces/cli/remote.js"
+  },
   "scripts": {
     "dev": "tsx src/interfaces/cli/index.ts",
+    "remote": "tsx src/interfaces/cli/remote.ts",
     "web": "tsx src/interfaces/web/server.ts",
     "telegram": "tsx src/interfaces/telegram/index.ts",
     "build": "tsc -p tsconfig.json && cp -r src/interfaces/web/public dist/interfaces/web/public && cp src/interfaces/cli/ascii-art.txt dist/interfaces/cli/ascii-art.txt",
     "start": "node dist/interfaces/cli/index.js",
+    "start:remote": "node dist/interfaces/cli/remote.js",
     "start:web": "node dist/interfaces/web/server.js",
     "start:telegram": "node dist/interfaces/telegram/index.js",
     "typecheck": "tsc --noEmit",
