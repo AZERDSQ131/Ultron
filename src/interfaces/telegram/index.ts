@@ -1,18 +1,14 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { Bot, InlineKeyboard } from "grammy";
 import { Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import { config } from "../../config.js";
 import {
-  archiveThread,
   buildGraph,
   clearThreadMessages,
   compactThread,
   estimateContextUsage,
   getPendingApproval,
   prepareRetry,
-  resumeThread,
   type TaskMode,
   type ToolApprovalDecision,
 } from "../../core/graph.js";
@@ -61,8 +57,8 @@ const links = getTelegramLinkRegistry(config.databasePath);
 chats.ensure(LEGACY_CHAT_ID);
 
 // Which ULTRON chat a Telegram chat currently points at is a movable
-// pointer (TelegramLinkRegistry), not a fixed derivation — /archive, /chat
-// and /resume all repoint it. On first contact from a given Telegram chat,
+// pointer (TelegramLinkRegistry), not a fixed derivation — /archive and
+// /resume both repoint it. On first contact from a given Telegram chat,
 // adopt `telegram-<id>` if it already has history (an earlier version of
 // this file derived the id that way with no indirection), otherwise start
 // a brand-new chat.
@@ -358,44 +354,21 @@ async function runTurn(telegramChatId: number, ultronChatId: string, input: { me
   }
 }
 
-// ---- archive listing (mirrors the CLI's private listArchives) ----
-
-interface ArchiveEntry {
-  path: string;
-  title: string;
+// Resuming an archived chat unarchives it (chats.unarchive) and repoints
+// this Telegram chat's link at it — its LangGraph checkpoint state was
+// never touched by archiving, so this is a real resume, not a text
+// reconstruction (the old .txt-export mechanism this replaced only carried
+// human/ai text and lost tool-call context).
+async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
+  chats.unarchive(chat.id);
+  links.set(telegramChatId, chat.id);
+  await send(telegramChatId, `[ultron] resumed "${chat.title}".`);
 }
 
-function listArchives(): ArchiveEntry[] {
-  const archiveDir = join(process.cwd(), "archives");
-  try {
-    return readdirSync(archiveDir)
-      .filter((name) => name.endsWith(".txt"))
-      .map((name) => {
-        const path = join(archiveDir, name);
-        const content = readFileSync(path, "utf-8");
-        const title = content.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || name.replace(/\.txt$/, "");
-        return { path, title };
-      })
-      .sort((a, b) => b.path.localeCompare(a.path));
-  } catch {
-    return [];
-  }
-}
-
-async function resumeInto(telegramChatId: number, ultronChatId: string, archivePath: string, title: string): Promise<void> {
-  try {
-    const count = await resumeThread(graph, ultronChatId, archivePath);
-    await send(telegramChatId, `[ultron] resumed ${count} messages from "${title}".`);
-  } catch (err) {
-    await send(telegramChatId, `[ultron] could not resume: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-// Short-lived caches so inline-keyboard callback data can stay a small
-// index instead of a full path/id (Telegram caps callback_data at 64 bytes,
-// and archive paths/chat titles routinely exceed that).
-const archivePickerCache = new Map<number, ArchiveEntry[]>();
-const chatPickerCache = new Map<number, Chat[]>();
+// Short-lived cache so inline-keyboard callback data can stay a small index
+// instead of a full chat id (Telegram caps callback_data at 64 bytes, and
+// chat ids/titles routinely exceed that combined).
+const archivePickerCache = new Map<number, Chat[]>();
 const modelPickerCache = new Map<number, string[]>();
 
 // ---- commands ----
@@ -408,9 +381,8 @@ const HELP_TEXT = `local commands
 /stop — stop the active generation
 /retry — remove the previous reply and run the last message again
 /compact — summarize old messages and keep the recent turns
-/archive [title] — archive this conversation and start a new one
-/resume [query] — restore a previously archived conversation
-/chat [query] — switch to a different existing chat
+/archive [title] — rename (optional), archive this conversation and start a new one
+/resume [query] — reopen an archived conversation with its full context; no query lists them with buttons to open or delete
 /think on|low|off — set reasoning mode
 /task none|todo|plan|goal — set task mode (goal: next message becomes the objective)
 /permissions — choose bypass, accept_edit or manual
@@ -492,64 +464,37 @@ bot.command("compact", async (ctx) => {
 bot.command("archive", async (ctx) => {
   const ultronChatId = currentChatId(ctx.chat.id);
   const title = ctx.match?.trim();
-  const archive = await archiveThread(graph, ultronChatId, title || undefined);
+  const archived = chats.archive(ultronChatId, title || undefined);
   const fresh = chats.create();
   links.set(ctx.chat.id, fresh.id);
-  await send(ctx.chat.id, `[ultron] archived "${archive.title}" (${archive.path}). Started a new chat.`);
+  await send(ctx.chat.id, `[ultron] archived "${archived?.title ?? title ?? ""}". Started a new chat.`);
 });
 
 bot.command("resume", async (ctx) => {
   const query = ctx.match?.trim();
-  const archives = listArchives();
-  if (!archives.length) {
-    await send(ctx.chat.id, "[ultron] no archives found.");
+  const archived = chats.listArchived();
+  if (!archived.length) {
+    await send(ctx.chat.id, "[ultron] no archived chats.");
     return;
   }
   if (query) {
-    const match = archives.find((a) => a.path === query || a.title.toLowerCase().includes(query.toLowerCase()));
+    const match = archived.find((c) => c.id === query || c.title.toLowerCase().includes(query.toLowerCase()));
     if (!match) {
-      await send(ctx.chat.id, `[ultron] no archive matches "${query}".`);
+      await send(ctx.chat.id, `[ultron] no archived chat matches "${query}".`);
       return;
     }
-    await resumeInto(ctx.chat.id, currentChatId(ctx.chat.id), match.path, match.title);
+    await resumeInto(ctx.chat.id, match);
     return;
   }
-  const top = archives.slice(0, 20);
+  const top = archived.slice(0, 20);
   archivePickerCache.set(ctx.chat.id, top);
   const keyboard = new InlineKeyboard();
-  top.forEach((a, i) => {
-    keyboard.text(a.title.slice(0, 60) || "(untitled)", `resume:${i}`);
-    keyboard.row();
-  });
-  await send(ctx.chat.id, "Select an archive:", { reply_markup: keyboard });
-});
-
-bot.command("chat", async (ctx) => {
-  const query = ctx.match?.trim();
-  const ultronChatId = currentChatId(ctx.chat.id);
-  const all = chats.list().filter((c) => c.id !== ultronChatId);
-  if (!all.length) {
-    await send(ctx.chat.id, "[ultron] no other chats yet.");
-    return;
-  }
-  if (query) {
-    const target = all.find((c) => c.id === query || c.title.toLowerCase().includes(query.toLowerCase()));
-    if (!target) {
-      await send(ctx.chat.id, `[ultron] no chat matches "${query}".`);
-      return;
-    }
-    links.set(ctx.chat.id, target.id);
-    await send(ctx.chat.id, `[ultron] switched to "${target.title}".`);
-    return;
-  }
-  const top = all.slice(0, 20);
-  chatPickerCache.set(ctx.chat.id, top);
-  const keyboard = new InlineKeyboard();
   top.forEach((c, i) => {
-    keyboard.text(c.title.slice(0, 60) || "(untitled)", `chat:${i}`);
+    keyboard.text(`▶ ${c.title.slice(0, 50) || "(untitled)"}`, `resume_open:${i}`);
+    keyboard.text("🗑", `resume_del:${i}`);
     keyboard.row();
   });
-  await send(ctx.chat.id, "Select a chat:", { reply_markup: keyboard });
+  await send(ctx.chat.id, "Archived chats:", { reply_markup: keyboard });
 });
 
 bot.command("think", async (ctx) => {
@@ -767,7 +712,7 @@ bot.callbackQuery(/^security:(.+):(bypass|accept_edit|manual)$/, async (ctx) => 
   await ctx.editMessageText(`[ultron] tool approval set to ${mode}.`).catch(() => {});
 });
 
-bot.callbackQuery(/^resume:(\d+)$/, async (ctx) => {
+bot.callbackQuery(/^resume_open:(\d+)$/, async (ctx) => {
   const index = Number((ctx.match as unknown as [string, string])[1]);
   await ctx.answerCallbackQuery();
   const list = archivePickerCache.get(ctx.chat!.id);
@@ -776,20 +721,47 @@ bot.callbackQuery(/^resume:(\d+)$/, async (ctx) => {
     await send(ctx.chat!.id, "[ultron] selection expired — run /resume again.");
     return;
   }
-  await resumeInto(ctx.chat!.id, currentChatId(ctx.chat!.id), entry.path, entry.title);
+  await ctx.editMessageText(`[ultron] resuming "${entry.title}"…`).catch(() => {});
+  await resumeInto(ctx.chat!.id, entry);
 });
 
-bot.callbackQuery(/^chat:(\d+)$/, async (ctx) => {
+// Delete goes through a one-tap confirm step (editing the same message with
+// Yes/No) rather than deleting immediately — unlike resuming, this is
+// destructive and can't be undone (chats.delete purges the checkpoint too).
+bot.callbackQuery(/^resume_del:(\d+)$/, async (ctx) => {
   const index = Number((ctx.match as unknown as [string, string])[1]);
   await ctx.answerCallbackQuery();
-  const list = chatPickerCache.get(ctx.chat!.id);
-  const target = list?.[index];
-  if (!target) {
-    await send(ctx.chat!.id, "[ultron] selection expired — run /chat again.");
+  const list = archivePickerCache.get(ctx.chat!.id);
+  const entry = list?.[index];
+  if (!entry) {
+    await send(ctx.chat!.id, "[ultron] selection expired — run /resume again.");
     return;
   }
-  links.set(ctx.chat!.id, target.id);
-  await send(ctx.chat!.id, `[ultron] switched to "${target.title}".`);
+  const keyboard = new InlineKeyboard()
+    .text("Yes, delete", `resume_del_yes:${index}`)
+    .text("Cancel", `resume_del_no:${index}`);
+  await ctx.editMessageText(`Delete "${entry.title}" permanently?`, { reply_markup: keyboard }).catch(() => {});
+});
+
+bot.callbackQuery(/^resume_del_yes:(\d+)$/, async (ctx) => {
+  const index = Number((ctx.match as unknown as [string, string])[1]);
+  await ctx.answerCallbackQuery();
+  const list = archivePickerCache.get(ctx.chat!.id);
+  const entry = list?.[index];
+  if (!entry) {
+    await send(ctx.chat!.id, "[ultron] selection expired — run /resume again.");
+    return;
+  }
+  chats.delete(entry.id);
+  await ctx.editMessageText(`[ultron] deleted "${entry.title}".`).catch(() => {});
+});
+
+bot.callbackQuery(/^resume_del_no:(\d+)$/, async (ctx) => {
+  const index = Number((ctx.match as unknown as [string, string])[1]);
+  await ctx.answerCallbackQuery();
+  const list = archivePickerCache.get(ctx.chat!.id);
+  const entry = list?.[index];
+  await ctx.editMessageText(entry ? `[ultron] kept "${entry.title}".` : "[ultron] cancelled.").catch(() => {});
 });
 
 bot.callbackQuery(/^model:(\d+)$/, async (ctx) => {
