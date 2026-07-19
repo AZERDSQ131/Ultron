@@ -1679,6 +1679,20 @@ main::-webkit-scrollbar-thumb,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.palette-item .p-delete {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--text-dimmer);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+.palette-item .p-delete:hover {
+  color: var(--text);
+  background: var(--bg-raised);
+}
 .palette-empty {
   padding: 24px 12px;
   text-align: center;

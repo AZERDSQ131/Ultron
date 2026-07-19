@@ -5,7 +5,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import {
-  archiveThread,
   buildGraph,
   compactThread,
   estimateContextUsage,
@@ -13,7 +12,6 @@ import {
   listChatMessages,
   prepareEdit,
   prepareRetry,
-  resumeThread,
   searchMessages,
   type TaskMode,
   type ToolApprovalDecision,
@@ -488,28 +486,25 @@ async function handleCompact(req: IncomingMessage, res: ServerResponse): Promise
   sendJson(res, 200, result);
 }
 
-async function handleArchive(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ chatId?: string; title?: string }>(req);
-  if (!payload || !requireChat(res, payload.chatId)) return;
-  const chatId = payload.chatId as string;
-  if (payload.title?.trim()) chats.rename(chatId, payload.title.trim());
-  const archive = await archiveThread(graph, chatId, chats.get(chatId)?.title);
-  sendJson(res, 200, archive);
+async function handleListArchivedChats(res: ServerResponse): Promise<void> {
+  sendJson(res, 200, { chats: chats.listArchived() });
 }
 
-async function handleResume(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ chatId?: string; path?: string }>(req);
-  if (!payload || !requireChat(res, payload.chatId)) return;
-  if (!payload.path) {
-    sendJson(res, 400, { error: "archive path is required" });
-    return;
-  }
-  try {
-    const count = await resumeThread(graph, payload.chatId as string, payload.path);
-    sendJson(res, 200, { count });
-  } catch (err) {
-    sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
-  }
+// Archiving is a metadata flag (see ChatRegistry.archive), not a data
+// export: the chat's LangGraph checkpoint state is untouched, so resuming
+// it later gets full context back, not a lossy text reconstruction.
+async function handleArchiveChat(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const payload = await readJson<{ title?: string }>(req);
+  const archived = chats.archive(chatId, payload?.title);
+  const fresh = chats.create();
+  sendJson(res, 200, { archived, fresh });
+}
+
+async function handleResumeChat(res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const resumed = chats.unarchive(chatId);
+  sendJson(res, 200, { chat: resumed });
 }
 
 // Lightweight liveness probe — a real (cheap) DB query but no LLM call — so
@@ -630,7 +625,7 @@ async function handleCreateAgent(req: IncomingMessage, res: ServerResponse): Pro
 }
 async function handleDeleteAgent(res: ServerResponse, id: string): Promise<void> {
   if (!agents.getAgent(id)) { sendJson(res, 404, { error: "unknown agent" }); return; }
-  for (const chat of chats.list().filter((candidate) => candidate.agentId === id)) chats.delete(chat.id);
+  for (const chat of chats.listAll().filter((candidate) => candidate.agentId === id)) chats.delete(chat.id);
   agents.deleteAgent(id);
   sendJson(res, 200, { deleted: true });
 }
@@ -676,14 +671,26 @@ async function handleStatus(res: ServerResponse, chatId: string | undefined): Pr
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
-  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/todos)?$/);
+  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/todos|\/archive|\/resume)?$/);
 
   if (req.method === "GET" && path === "/api/chats") {
     handleListChats(res).catch((err) => console.error("[ultron-web] list chats failed:", err));
     return;
   }
+  if (req.method === "GET" && path === "/api/chats/archived") {
+    handleListArchivedChats(res).catch((err) => console.error("[ultron-web] list archived chats failed:", err));
+    return;
+  }
   if (req.method === "POST" && path === "/api/chats") {
     handleCreateChat(req, res).catch((err) => console.error("[ultron-web] create chat failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/archive" && req.method === "POST") {
+    handleArchiveChat(req, res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] archive chat failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/resume" && req.method === "POST") {
+    handleResumeChat(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] resume chat failed:", err));
     return;
   }
   if (chatMatch && chatMatch[2] === "/messages" && req.method === "GET") {
@@ -740,14 +747,6 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/compact") {
     handleCompact(req, res).catch((err) => console.error("[ultron-web] compact handler failed:", err));
-    return;
-  }
-  if (req.method === "POST" && path === "/api/archive") {
-    handleArchive(req, res).catch((err) => console.error("[ultron-web] archive handler failed:", err));
-    return;
-  }
-  if (req.method === "POST" && path === "/api/resume") {
-    handleResume(req, res).catch((err) => console.error("[ultron-web] resume handler failed:", err));
     return;
   }
   if (req.method === "POST" && path === "/api/edit") {
