@@ -355,10 +355,16 @@ async function runTurn(telegramChatId: number, ultronChatId: string, input: { me
   }
 }
 
-// How many of the most recent human/ai turns to preview right after
+// How many of the most recent ULTRON replies to preview right after
 // resuming — enough to remind the user where the conversation left off
-// without dumping the whole history into the chat.
-const RESUME_PREVIEW_MESSAGES = 6;
+// without dumping the whole history into the chat. Only ULTRON's own
+// replies are replayed, one per Telegram message: the Bot API has no way
+// to send a message that appears as coming from the real user account, so
+// echoing the user's own past messages back through the bot would just be
+// misleading, especially for a chat that was actually typed on a different
+// interface (CLI/web) in the first place — those were never real Telegram
+// messages to begin with.
+const RESUME_PREVIEW_MESSAGES = 3;
 
 // Resuming an archived chat unarchives it (chats.unarchive) and repoints
 // this Telegram chat's link at it — its LangGraph checkpoint state was
@@ -371,12 +377,10 @@ const RESUME_PREVIEW_MESSAGES = 6;
 async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
   chats.unarchive(chat.id);
   links.set(telegramChatId, chat.id);
+  await send(telegramChatId, `[ultron] resumed "${chat.title}".`);
   const messages = await listChatMessages(graph, chat.id);
-  const recent = messages.filter((m) => m.role === "human" || m.role === "ai").slice(-RESUME_PREVIEW_MESSAGES);
-  const preview = recent.length
-    ? `\n\n${recent.map((m) => `${m.role === "human" ? "You" : "ULTRON"} › ${m.content}`).join("\n\n")}`
-    : "";
-  await send(telegramChatId, `[ultron] resumed "${chat.title}".${preview}`);
+  const recent = messages.filter((m) => m.role === "ai").slice(-RESUME_PREVIEW_MESSAGES);
+  for (const message of recent) await send(telegramChatId, message.content);
 }
 
 // Short-lived cache so inline-keyboard callback data can stay a small index
