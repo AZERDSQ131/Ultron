@@ -143,7 +143,7 @@ The terminal handles these commands without sending them to Nemotron:
 | `/retry` | Remove the previous assistant turn and run the last user message again |
 | `/compact` | Summarize old session messages and keep the recent turns |
 | `/think on\|low\|off` | Enable full reasoning, low-effort reasoning, or no reasoning |
-| `/verbose on\|off` | Show or hide elapsed time and exact generated token count |
+| `/verbose on\|off` | Show or hide the per-turn stats line (model, input/output tokens, elapsed time, estimated cost) |
 | `/archive [title]` | Save the current session as a readable text file under `archives/`; without a title, use the first user message |
 | `/resume <archive-path>` | Restore a previously archived session into the current thread |
 | `/clear` | Clear the terminal display |

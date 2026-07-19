@@ -492,7 +492,7 @@ export async function streamTurn(body) {
           finishAssistant();
           updateContextGauge(data.contextTokens, data.maxTokens);
           if (state.verbose) {
-            addMetaLine(`⏱ ${data.elapsedSeconds.toFixed(1)}s   ${data.generatedTokens.toLocaleString()} tokens`);
+            addMetaLine(data.stats);
           }
         } else if (eventName === "goal") {
           addSystemNote(`[ultron] goal ${data.status}${data.reason ? ` — ${data.reason}` : ""}`);

@@ -20,6 +20,7 @@ import {
 } from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import { formatTurnStats } from "../../core/llm/usage.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -229,6 +230,7 @@ async function streamGraphTurn(
 
       let generatedChars = 0;
       let outputTokens: number | undefined;
+      let inputTokens: number | undefined;
       const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
 
       for await (const [chunk] of stream) {
@@ -266,8 +268,10 @@ async function streamGraphTurn(
           continue;
         }
 
-        const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
+        const usage = (chunk as unknown as { usage_metadata?: { input_tokens?: number; output_tokens?: number } })
+          .usage_metadata;
         if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+        if (usage?.input_tokens !== undefined) inputTokens = usage.input_tokens;
 
         if (typeof chunk.content !== "string" || !chunk.content) continue;
         generatedChars += chunk.content.length;
@@ -289,7 +293,20 @@ async function streamGraphTurn(
         // was interrupted before that chunk arrived.
         const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
         const contextTokens = await estimateContextUsage(graph, chatId);
-        sseWrite(res, "done", { elapsedSeconds, generatedTokens, contextTokens, maxTokens: config.contextWindowTokens });
+        const stats = formatTurnStats({
+          model: config.nemotronModel,
+          inputTokens: inputTokens ?? 0,
+          outputTokens: generatedTokens,
+          elapsedSeconds,
+        });
+        sseWrite(res, "done", {
+          elapsedSeconds,
+          generatedTokens,
+          inputTokens: inputTokens ?? 0,
+          stats,
+          contextTokens,
+          maxTokens: config.contextWindowTokens,
+        });
 
         if (taskMode === "goal") {
           const goal = goals.get(chatId);

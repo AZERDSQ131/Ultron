@@ -21,6 +21,7 @@ import {
 } from "../../core/graph.js";
 import { withThreadLock } from "../../core/threadLock.js";
 import { config } from "../../config.js";
+import { formatTurnStats } from "../../core/llm/usage.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type Chat, type SecurityMode } from "../../core/memory/chats.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
@@ -1403,6 +1404,7 @@ async function main() {
       let inToolCall = false;
       let generatedChars = 0;
       let outputTokens: number | undefined;
+      let inputTokens: number | undefined;
       const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
       const markdown = new MarkdownStreamRenderer();
 
@@ -1473,8 +1475,10 @@ async function main() {
               continue;
             }
 
-            const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
+            const usage = (chunk as unknown as { usage_metadata?: { input_tokens?: number; output_tokens?: number } })
+              .usage_metadata;
             if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+            if (usage?.input_tokens !== undefined) inputTokens = usage.input_tokens;
 
             if (typeof chunk.content !== "string" || !chunk.content) continue;
 
@@ -1518,8 +1522,18 @@ async function main() {
       // (see nemotron.ts); fall back to the chars/4 estimate only if a
       // turn was interrupted before that chunk arrived.
       const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
-      const tokenLabel = outputTokens !== undefined ? `${generatedTokens.toLocaleString()} tokens` : `≈${generatedTokens.toLocaleString()} tokens`;
-      if (verbose) appendTranscript(uiDim(`  ⏱ ${elapsedSeconds.toFixed(1)}s   ${tokenLabel}\n\n`));
+      if (verbose) {
+        appendTranscript(
+          uiDim(
+            `  ${formatTurnStats({
+              model: config.nemotronModel,
+              inputTokens: inputTokens ?? 0,
+              outputTokens: generatedTokens,
+              elapsedSeconds,
+            })}\n\n`,
+          ),
+        );
+      }
       renderScreen("", 0, contextLine);
       return { finalText, aborted: false, errored: false };
     } catch (err) {

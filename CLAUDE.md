@@ -89,7 +89,13 @@ mais ne sont pas implémentées.
   caractères/16 lignes affichés, le modèle garde le contenu complet) pour
   qu'un gros résultat n'inonde plus le terminal. Réutilisé à la fois par
   le flux live et par `showRestoredMessages` (relecture d'un chat) pour
-  un rendu identique.
+  un rendu identique. La ligne de stats `/verbose` (`formatTurnStats`,
+  `src/core/llm/usage.ts`, partagée avec `server.ts`) affiche désormais
+  `model | X in | Y out | Zs | $coût` (ex. `deepseek-v4-flash | 7,688 in |
+  303 out | 10s | $0.14`) au lieu du seul temps écoulé/tokens de sortie ;
+  le coût est une estimation configurable (`NEMOTRON_PRICE_IN_PER_M`/
+  `NEMOTRON_PRICE_OUT_PER_M`, `.env.example`), pas un tarif réel de
+  NVIDIA NIM qui n'en publie pas.
 - `src/interfaces/web/server.ts` + `src/interfaces/web/public/` : interface web locale (HTTP + SSE),
   sidebar de gestion des chats (créer, renommer, supprimer, changer de chat) ;
   frontend HTML/CSS + modules ES natifs (`public/js/*.js`), sans framework ni bundler.
