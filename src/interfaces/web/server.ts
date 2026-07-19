@@ -539,9 +539,7 @@ async function handleChatEvents(res: ServerResponse, chatId: string, after: numb
 async function handleArchiveChat(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   const payload = await readJson<{ title?: string }>(req);
-  const archived = chats.archive(chatId, payload?.title);
-  const fresh = chats.create();
-  chats.setFocus(fresh.id);
+  const { archived, fresh } = chats.archiveAndCreate(chatId, payload?.title);
   sendJson(res, 200, { archived, fresh });
 }
 

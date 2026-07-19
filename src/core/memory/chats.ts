@@ -97,9 +97,11 @@ export class ChatRegistry {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS chat_focus (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        chat_id TEXT NOT NULL
+        chat_id TEXT NOT NULL,
+        main_chat_id TEXT
       )
     `);
+    try { this.db.exec("ALTER TABLE chat_focus ADD COLUMN main_chat_id TEXT"); } catch { /* already migrated */ }
   }
 
   // Active chats only — what every sidebar/picker/startup-resume should see.
@@ -154,15 +156,33 @@ export class ChatRegistry {
     return chat;
   }
 
-  // The main conversation is a stable return point shared by the CLI and
-  // Telegram. It is never a separate in-memory pointer: the legacy stable
-  // thread id is the canonical chat row, and activating it also unarchives it.
+  // The main conversation is a shared return point for the CLI and Telegram.
+  // Its chat id may rotate when the main conversation is archived; the
+  // main_chat_id pointer keeps /main separate from archived history.
   activateMain(): Chat {
-    const existing = this.ensure(LEGACY_CHAT_ID, "Main");
-    if (existing.title === DEFAULT_CHAT_TITLE) this.rename(existing.id, "Main");
-    const main = this.unarchive(existing.id) ?? this.get(existing.id)!;
-    this.setFocus(main.id);
-    return main;
+    const main = this.getMain();
+    if (main.title === DEFAULT_CHAT_TITLE) this.rename(main.id, "Main");
+    const activeMain = this.unarchive(main.id) ?? this.get(main.id)!;
+    this.setFocus(activeMain.id);
+    return activeMain;
+  }
+
+  getMain(): Chat {
+    const row = this.db.prepare("SELECT main_chat_id FROM chat_focus WHERE id = 1").get() as { main_chat_id?: string | null } | undefined;
+    const configured = row?.main_chat_id ? this.get(row.main_chat_id) : undefined;
+    if (configured) return configured;
+    const legacy = this.ensure(LEGACY_CHAT_ID, "Main");
+    this.setMain(legacy.id);
+    return legacy;
+  }
+
+  setMain(id: string): Chat | undefined {
+    const chat = this.get(id);
+    if (!chat) return undefined;
+    this.db
+      .prepare("INSERT INTO chat_focus (id, chat_id, main_chat_id) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET main_chat_id = excluded.main_chat_id")
+      .run(this.getFocus()?.id ?? id, id);
+    return chat;
   }
 
   getFocus(): Chat | undefined {
@@ -188,6 +208,15 @@ export class ChatRegistry {
     if (title?.trim()) this.rename(id, title.trim());
     this.db.prepare("UPDATE chats SET archived_at = ?, updated_at = ? WHERE id = ?").run(new Date().toISOString(), new Date().toISOString(), id);
     return this.get(id);
+  }
+
+  archiveAndCreate(id: string, title?: string): { archived: Chat | undefined; fresh: Chat } {
+    const wasMain = this.getMain().id === id;
+    const archived = this.archive(id, title);
+    const fresh = this.create(wasMain ? "Main" : DEFAULT_CHAT_TITLE);
+    if (wasMain) this.setMain(fresh.id);
+    this.setFocus(fresh.id);
+    return { archived, fresh };
   }
 
   // Reopens an archived chat as active again — used by /resume's "invoke"

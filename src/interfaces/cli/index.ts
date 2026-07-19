@@ -232,9 +232,7 @@ async function main() {
       ).trim();
     }
 
-    const archived = chats.archive(currentChatId, title || undefined);
-    const nextChat = chats.create();
-    chats.setFocus(nextChat.id);
+    const { archived, fresh: nextChat } = chats.archiveAndCreate(currentChatId, title || undefined);
     currentChatId = nextChat.id;
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
     appendTranscript(`${chalk.greenBright(`Chat Archived "${archived?.title ?? title ?? ""}"`)}\n\n`);

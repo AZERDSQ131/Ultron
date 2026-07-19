@@ -561,9 +561,7 @@ bot.command("compact", async (ctx) => {
 bot.command("archive", async (ctx) => {
   const ultronChatId = currentChatId(ctx.chat.id);
   const title = ctx.match?.trim();
-  const archived = chats.archive(ultronChatId, title || undefined);
-  const fresh = chats.create();
-  chats.setFocus(fresh.id);
+  const { archived, fresh } = chats.archiveAndCreate(ultronChatId, title || undefined);
   links.set(ctx.chat.id, fresh.id);
   restartEventSync(ctx.chat.id, fresh.id);
   await send(ctx.chat.id, `[ultron] archived "${archived?.title ?? title ?? ""}". Started a new chat.`);
