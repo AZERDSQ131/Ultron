@@ -140,6 +140,16 @@ interface at a time.
 - Still to come: mail, calendar (both need OAuth setup — bigger lift than the filesystem/shell tools)
 - Background scheduled tasks (cron-style) once the core loop is trusted
 
+## Jetson deployment + Mac access (in progress)
+
+Target architecture (see `docs/agent-ia-personnel.md`'s follow-up discussion, not yet written back into that file): ULTRON's process — web server, Telegram bot, database — lives permanently on a Jetson Orin Nano, reachable over Tailscale; the Mac is a client plus a remote-controllable target, not where the graph runs.
+
+- Jetson: repo cloned at `~/ultron` (not the earlier `~/t9-backup/ULTRON`, which was a manual duplicate, not Syncthing-managed, and has been deleted), built, `.env` in place. Two systemd user units are prepared but **not enabled** — `~/.config/systemd/user/ultron-web.service` and `ultron-telegram.service` (the latter still needs `TELEGRAM_BOT_TOKEN` added to `.env` before it can run). Verified manually: the web server answers on both `127.0.0.1:4173` and the Jetson's Tailscale IP.
+- `src/interfaces/cli/remote.ts` (new, see Phase "CLI" note below) is the piece that makes `ultron` on the Mac a thin client instead of a local process — this is what the Mac-side `ultron` command should invoke, pointed at the Jetson's Tailscale IP via `ULTRON_SERVER_URL`.
+- `src/core/tools/remoteHost.ts` + the `host: "jetson" | "mac"` param on the fs/shell tools + `macos.ts`'s platform-branching (see below) is what lets ULTRON act on the Mac's filesystem/apps once it's running on the Jetson instead of on the Mac itself.
+- **Blocked on the user**: Tailscale SSH is enabled on this tailnet and intercepts the Jetson→Mac SSH connection with an interactive per-session browser check (`https://login.tailscale.com/a/...`) — plain key auth (already set up: a fresh `ultron-jetson-to-mac` ed25519 key on the Jetson, its pubkey in the Mac's `~/.ssh/authorized_keys`, a `Host mac` alias in the Jetson's `~/.ssh/config`) can't complete that check non-interactively. Until the user either approves that check once from a browser or adjusts the tailnet's SSH policy/ACL, the `host: "mac"` tool path only works from wherever a session can pass that check — verified instead against a local loopback SSH target (`MAC_SSH_HOST=localhost` on the Mac itself) to prove the tool logic is correct.
+- Not yet done: enabling the two systemd services (deliberately left for the user — see "prepare without activating"), `TELEGRAM_BOT_TOKEN` in the Jetson's `.env`, resolving the Tailscale SSH check above.
+
 ## Phase 4 — Vibe-coding app (deferred, not started)
 
 - Separate app, Codex-style interface
