@@ -171,6 +171,16 @@ async function main() {
   };
 
   const archiveCurrentChat = async (contextLine: string, requestedTitle?: string): Promise<void> => {
+    // The remote CLI can outlive a server-side chat switch (for example, a
+    // fresh chat created by another interface). Verify the checkpoint behind
+    // our local pointer before archiving it; otherwise /archive can mark an
+    // empty row and /resume later appears to have lost the visible reply.
+    const history = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/messages`);
+    const hasConversation = (history.messages as ChatMessage[]).some((message) => message.role === "human" || message.role === "ai");
+    if (!hasConversation) {
+      appendTranscript(chalk.yellow(`[ultron] cannot archive "${currentChatTitle}": this chat has no saved messages.\n\n`));
+      return;
+    }
     let title = requestedTitle?.trim();
     if (!title) {
       title = (
