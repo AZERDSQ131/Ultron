@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as readline from "node:readline";
@@ -7,14 +7,12 @@ import chalk from "chalk";
 import { Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import {
-  archiveThread,
   buildGraph,
   compactThread,
   estimateContextUsage,
   getPendingApproval,
   listChatMessages,
   prepareRetry,
-  resumeThread,
   type PendingToolCall,
   type TaskMode,
   type ToolApprovalDecision,
@@ -26,7 +24,6 @@ import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type Chat, type SecurityMode } from "../../core/memory/chats.js";
-import { AgentRegistry } from "../../core/memory/agents.js";
 import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
@@ -40,7 +37,7 @@ import { MarkdownStreamRenderer } from "./markdown.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_BAR_WIDTH = 20;
 const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/chat", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
+const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
@@ -550,31 +547,15 @@ function readInput(
   });
 }
 
-interface ArchiveEntry {
-  path: string;
-  title: string;
-}
-
-function listArchives(): ArchiveEntry[] {
-  const archiveDir = join(process.cwd(), "archives");
-  try {
-    return readdirSync(archiveDir)
-      .filter((name) => name.endsWith(".txt"))
-      .map((name) => {
-        const path = join(archiveDir, name);
-        const content = readFileSync(path, "utf-8");
-        const title = content.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || name.replace(/\.txt$/, "");
-        return { path, title };
-      })
-      .sort((a, b) => b.path.localeCompare(a.path));
-  } catch {
-    return [];
-  }
-}
-
-function pickArchive(contextLine: string): Promise<string | undefined> {
-  const archives = listArchives();
-  if (archives.length === 0) return Promise.resolve(undefined);
+// Backs /resume: browse archived chats, invoke one (Enter — unarchives it
+// and returns it as the new current chat, with its full LangGraph
+// checkpoint state intact, not a lossy text reconstruction) or delete one
+// (Ctrl+D — purges it via chats.delete, including its checkpoint rows, and
+// keeps the picker open on the remaining list). Mirrors the CLI's other
+// arrow-key pickers (same keyboard/search/redraw behavior).
+function pickArchivedChat(contextLine: string, chats: ReturnType<typeof getChatRegistry>): Promise<Chat | undefined> {
+  let archived = chats.listArchived();
+  if (archived.length === 0) return Promise.resolve(undefined);
 
   return new Promise((resolve) => {
     let query = "";
@@ -582,111 +563,19 @@ function pickArchive(contextLine: string): Promise<string | undefined> {
     let finished = false;
 
     const redraw = () => {
-      const matches = archives.filter((archive) => archive.title.toLowerCase().includes(query.toLowerCase()));
-      selected = Math.min(selected, Math.max(0, matches.length - 1));
-      const rows = matches.length
-        ? matches
-            .map((archive, index) => {
-              const marker = index === selected ? chalk.greenBright("›") : " ";
-              return `  ${marker} ${archive.title}`;
-            })
-            .join("\n")
-        : uiDim("  no matching chats");
-      const prompt = `${chalk.magentaBright.bold("resume")} ${uiDim("›")} `;
-      const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
-      const picker = `${uiDim("Select a chat · type to search · ↑/↓ navigate · Enter confirm")}\n${rows}`;
-      const footer = `${rule()}\n${prompt}${query}\n${contextLine}\n${rule()}`;
-      const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
-      stdout.write(`\x1b[2J\x1b[H${content}${picker}\n${"\n".repeat(padding)}${footer}`);
-      readline.moveCursor(stdout, 0, -2);
-      readline.cursorTo(stdout, prompt.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + query.length);
-    };
-
-    const finish = (path?: string) => {
-      if (finished) return;
-      finished = true;
-      stdin.setRawMode?.(false);
-      stdin.removeListener("keypress", onKeypress);
-      cancelActiveInput = undefined;
-      renderScreen("", 0, contextLine);
-      flushRender();
-      resolve(path);
-    };
-
-    const onKeypress = (input: string, key: readline.Key) => {
-      const matches = archives.filter((archive) => archive.title.toLowerCase().includes(query.toLowerCase()));
-      if (key.name === "return" || key.name === "enter") {
-        finish(matches[selected]?.path);
-        return;
-      }
-      if (key.name === "escape") {
-        finish();
-        return;
-      }
-      if (key.name === "up") {
-        if (matches.length) selected = (selected - 1 + matches.length) % matches.length;
-        redraw();
-        return;
-      }
-      if (key.name === "down") {
-        if (matches.length) selected = (selected + 1) % matches.length;
-        redraw();
-        return;
-      }
-      if (key.name === "backspace") {
-        query = query.slice(0, -1);
-        selected = 0;
-        redraw();
-        return;
-      }
-      if (!key.ctrl && !key.meta && input && !input.includes("\n") && !input.includes("\r")) {
-        query += input;
-        selected = 0;
-        redraw();
-      }
-    };
-
-    cancelActiveInput = () => finish();
-    readline.emitKeypressEvents(stdin);
-    stdin.setRawMode?.(true);
-    stdin.on("keypress", onKeypress);
-    redraw();
-  });
-}
-
-// Lets the CLI open any chat by title/id — in particular a sub-agent's
-// execution chat (spawn_agent, see tools/agents.ts), which until now could
-// only be opened from the web UI's sidebar. Mirrors pickArchive's picker
-// exactly (same keyboard/search/redraw behavior) but sources rows from the
-// live ChatRegistry instead of the on-disk archive list, and tags each row
-// with its owning Agent's name when the chat has one (chat.agentId).
-function pickChat(contextLine: string, chats: ReturnType<typeof getChatRegistry>, agents: AgentRegistry, excludeId?: string): Promise<Chat | undefined> {
-  const all = chats.list().filter((chat) => chat.id !== excludeId);
-  if (all.length === 0) return Promise.resolve(undefined);
-  const label = (chat: Chat): string => {
-    const agentName = chat.agentId ? agents.getAgent(chat.agentId)?.name : undefined;
-    return agentName ? `${chat.title} ${uiDim(`[agent: ${agentName}]`)}` : chat.title;
-  };
-
-  return new Promise((resolve) => {
-    let query = "";
-    let selected = 0;
-    let finished = false;
-
-    const redraw = () => {
-      const matches = all.filter((chat) => label(chat).toLowerCase().includes(query.toLowerCase()));
+      const matches = archived.filter((chat) => chat.title.toLowerCase().includes(query.toLowerCase()));
       selected = Math.min(selected, Math.max(0, matches.length - 1));
       const rows = matches.length
         ? matches
             .map((chat, index) => {
               const marker = index === selected ? chalk.greenBright("›") : " ";
-              return `  ${marker} ${label(chat)}`;
+              return `  ${marker} ${chat.title}`;
             })
             .join("\n")
-        : uiDim("  no matching chats");
-      const prompt = `${chalk.magentaBright.bold("chat")} ${uiDim("›")} `;
+        : uiDim("  no matching archived chats");
+      const prompt = `${chalk.magentaBright.bold("resume")} ${uiDim("›")} `;
       const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
-      const picker = `${uiDim("Select a chat · type to search · ↑/↓ navigate · Enter confirm")}\n${rows}`;
+      const picker = `${uiDim("Select an archived chat · type to search · ↑/↓ navigate · Enter to resume · Ctrl+D to delete")}\n${rows}`;
       const footer = `${rule()}\n${prompt}${query}\n${contextLine}\n${rule()}`;
       const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
       stdout.write(`\x1b[2J\x1b[H${content}${picker}\n${"\n".repeat(padding)}${footer}`);
@@ -706,7 +595,17 @@ function pickChat(contextLine: string, chats: ReturnType<typeof getChatRegistry>
     };
 
     const onKeypress = (input: string, key: readline.Key) => {
-      const matches = all.filter((chat) => label(chat).toLowerCase().includes(query.toLowerCase()));
+      const matches = archived.filter((chat) => chat.title.toLowerCase().includes(query.toLowerCase()));
+      if (key.ctrl && key.name === "d") {
+        const target = matches[selected];
+        if (target) {
+          chats.delete(target.id);
+          archived = archived.filter((chat) => chat.id !== target.id);
+          if (archived.length === 0) { finish(); return; }
+        }
+        redraw();
+        return;
+      }
       if (key.name === "return" || key.name === "enter") {
         finish(matches[selected]);
         return;
@@ -1212,7 +1111,7 @@ stdout.on("resize", () => {
 
 function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  edit the title, then archive the chat\n  ${chalk.cyanBright("/resume")}   search and select an archived chat\n  ${chalk.cyanBright("/chat")}     search and switch to any chat (including a sub-agent's)\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  rename (optional), then archive the chat and start a new one\n  ${chalk.cyanBright("/resume")}   browse archived chats — Enter to resume, Ctrl+D to delete\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 
@@ -1325,7 +1224,6 @@ async function main() {
 
   let graph = buildGraph();
   const chats = getChatRegistry(config.databasePath);
-  const agents = new AgentRegistry(config.databasePath);
   const goals = getGoalRegistry(config.databasePath);
   const todos = getTodoRegistry(config.databasePath);
   // Registers the CLI's original hardcoded thread (from before chats
@@ -1404,12 +1302,11 @@ async function main() {
       ).trim();
     }
 
-    if (title) chats.rename(currentChatId, title);
-    const archive = await archiveThread(graph, currentChatId, title || undefined);
+    const archived = chats.archive(currentChatId, title || undefined);
     const nextChat = chats.create();
     currentChatId = nextChat.id;
     activePermissionLabel = chats.getSecurityMode(currentChatId);
-    appendTranscript(`${chalk.greenBright(`Chat Archived "${archive.title}"`)}\n\n`);
+    appendTranscript(`${chalk.greenBright(`Chat Archived "${archived?.title ?? title ?? ""}"`)}\n\n`);
   };
 
   process.on("SIGINT", () => {
@@ -1757,40 +1654,23 @@ async function main() {
             await archiveCurrentChat(contextLine, commandArgument);
             continue;
           }
-          case "/resume":
+          case "/resume": {
+            let target: Chat | undefined;
             if (!commandArgument) {
-              const selectedArchive = await pickArchive(contextLine);
-              if (!selectedArchive) {
-                appendTranscript(chalk.yellow("[ultron] no archive selected.\n\n"));
-                continue;
-              }
-              try {
-                const messageCount = await resumeThread(graph, currentChatId, selectedArchive);
-                await showRestoredMessages(graph, currentChatId);
-                appendTranscript(uiDim(`[ultron] resumed ${messageCount} messages.\n\n`));
-              } catch (error) {
-                appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
-              }
-              continue;
+              target = await pickArchivedChat(contextLine, chats);
+            } else {
+              const query = commandArgument.toLowerCase();
+              target = chats.listArchived().find((chat) => chat.id === commandArgument || chat.title.toLowerCase().includes(query));
             }
-            try {
-              const messageCount = await resumeThread(graph, currentChatId, commandArgument);
-              await showRestoredMessages(graph, currentChatId);
-              appendTranscript(uiDim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
-            } catch (error) {
-              appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
-            }
-            continue;
-          case "/chat": {
-            const target = await pickChat(contextLine, chats, agents, currentChatId);
             if (!target) {
-              appendTranscript(chalk.yellow("[ultron] no chat selected.\n\n"));
+              appendTranscript(chalk.yellow("[ultron] no archived chat selected.\n\n"));
               continue;
             }
+            chats.unarchive(target.id);
             currentChatId = target.id;
             activePermissionLabel = chats.getSecurityMode(currentChatId);
             await showRestoredMessages(graph, currentChatId);
-            appendTranscript(uiDim(`[ultron] switched to "${target.title}"${target.agentId ? ` (agent: ${agents.getAgent(target.agentId)?.name ?? "?"})` : ""}.\n\n`));
+            appendTranscript(uiDim(`[ultron] resumed "${target.title}".\n\n`));
             continue;
           }
           case "/think":
@@ -1824,46 +1704,27 @@ async function main() {
             stopping = true;
             continue;
           default:
-            if (commandName === "/chat") {
-              const query = commandArgument.toLowerCase();
-              const target = chats.list().find((chat) => chat.id === commandArgument || chat.title.toLowerCase().includes(query));
-              if (!target) {
-                appendTranscript(chalk.yellow(`[ultron] no chat matches "${commandArgument}".\n\n`));
-                continue;
-              }
-              currentChatId = target.id;
-              activePermissionLabel = chats.getSecurityMode(currentChatId);
-              await showRestoredMessages(graph, currentChatId);
-              appendTranscript(uiDim(`[ultron] switched to "${target.title}"${target.agentId ? ` (agent: ${agents.getAgent(target.agentId)?.name ?? "?"})` : ""}.\n\n`));
-              continue;
-            }
             if (commandName === "/archive") {
               await archiveCurrentChat(contextLine, commandArgument);
               continue;
             }
             if (commandName === "/resume") {
+              let target: Chat | undefined;
               if (!commandArgument) {
-                const selectedArchive = await pickArchive(contextLine);
-                if (!selectedArchive) {
-                  appendTranscript(chalk.yellow("[ultron] no archive selected.\n\n"));
-                  continue;
-                }
-                try {
-                  const messageCount = await resumeThread(graph, currentChatId, selectedArchive);
-                  await showRestoredMessages(graph, currentChatId);
-                  appendTranscript(uiDim(`[ultron] resumed ${messageCount} messages.\n\n`));
-                } catch (error) {
-                  appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
-                }
+                target = await pickArchivedChat(contextLine, chats);
+              } else {
+                const query = commandArgument.toLowerCase();
+                target = chats.listArchived().find((chat) => chat.id === commandArgument || chat.title.toLowerCase().includes(query));
+              }
+              if (!target) {
+                appendTranscript(chalk.yellow("[ultron] no archived chat selected.\n\n"));
                 continue;
               }
-              try {
-                const messageCount = await resumeThread(graph, currentChatId, commandArgument);
-                await showRestoredMessages(graph, currentChatId);
-                appendTranscript(uiDim(`[ultron] resumed ${messageCount} messages from ${commandArgument}\n\n`));
-              } catch (error) {
-                appendTranscript(chalk.red(`[ultron] could not resume archive: ${error instanceof Error ? error.message : String(error)}\n\n`));
-              }
+              chats.unarchive(target.id);
+              currentChatId = target.id;
+              activePermissionLabel = chats.getSecurityMode(currentChatId);
+              await showRestoredMessages(graph, currentChatId);
+              appendTranscript(uiDim(`[ultron] resumed "${target.title}".\n\n`));
               continue;
             }
             if (command.startsWith("/think ")) {
