@@ -18,11 +18,13 @@ import { config } from "../../config.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
+import { getHealthRegistry, sparkline } from "../../core/memory/health.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
+import { getChatEventRegistry } from "../../core/memory/chatEvents.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
 import { disableConsoleEcho } from "../../core/logger.js";
 import { tools } from "../../core/tools/index.js";
@@ -155,6 +157,7 @@ async function main() {
   const chats = getChatRegistry(config.databasePath);
   const goals = getGoalRegistry(config.databasePath);
   const todos = getTodoRegistry(config.databasePath);
+  const chatEvents = getChatEventRegistry(config.databasePath);
   // Registers the CLI's original hardcoded thread (from before chats
   // existed) so its history shows up in the registry instead of being
   // orphaned — same migration the web server runs on its own startup.
@@ -450,6 +453,7 @@ async function main() {
       }
       const exportedChat = chats.get(chatId);
       if (exportedChat) void maybeExportChat(graph, exportedChat);
+      if (finalText.trim()) chatEvents.append(chatId, "ai", "cli", finalText.trim());
       return { finalText, aborted: false, errored: false };
     } catch (err) {
       if (controller.signal.aborted) {
@@ -768,6 +772,29 @@ async function main() {
               appendTranscript(chalk.yellow("[ultron] use /memory, /memory clear or /memory forget <id>.\n\n"));
               continue;
             }
+            if (commandName === "/health") {
+              const health = getHealthRegistry(config.databasePath);
+              const to = new Date().toISOString().slice(0, 10);
+              const from = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+              const days = health.getRange(from, to);
+              if (!days.length) {
+                appendTranscript(uiDim("[ultron] no health data ingested yet.\n\n"));
+                continue;
+              }
+              const steps = sparkline(days.map((d) => d.steps));
+              const lines = days
+                .map((day) => {
+                  const parts: string[] = [];
+                  if (day.steps !== null) parts.push(`${day.steps} steps`);
+                  if (day.sleepDurationSec !== null) parts.push(`${(day.sleepDurationSec / 3600).toFixed(1)}h sleep`);
+                  if (day.restingHR !== null) parts.push(`resting HR ${day.restingHR}`);
+                  if (day.hrvAvg !== null) parts.push(`HRV ${day.hrvAvg}ms`);
+                  return `  ${uiDim(day.date)} ${parts.length ? parts.join(", ") : uiDim("no data")}`;
+                })
+                .join("\n");
+              appendTranscript(`${uiDim(`[ultron] last 7 days — steps ${steps}`)}\n${lines}\n\n`);
+              continue;
+            }
             appendTranscript(chalk.yellow(`[ultron] unknown command: ${input.trim()} — try /help\n\n`));
             continue;
         }
@@ -798,6 +825,7 @@ async function main() {
       const turnInput: { messages: HumanMessage[] } | Command = {
         messages: command === "/retry" ? [] : [new HumanMessage(expandSkillMentions(input))],
       };
+      if (command !== "/retry") chatEvents.append(currentChatId, "human", "cli", input);
       const result = await executeTurn(currentChatId, turnInput, contextLine);
       // A goal stays "active" in the DB across an aborted/interrupted turn
       // (see driveGoalLoop's early returns) — checked fresh here rather than
