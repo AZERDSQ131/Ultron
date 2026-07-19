@@ -14,6 +14,7 @@ import { getChatRegistry } from "./memory/chats.js";
 import { getTodoRegistry } from "./memory/todos.js";
 import { readTodayNote } from "./memory/daily.js";
 import { getUserModelRegistry } from "./memory/userModel.js";
+import { getHealthRegistry } from "./memory/health.js";
 import { listSkills } from "./skills.js";
 import { AgentRegistry, type Agent } from "./memory/agents.js";
 import { tools, toolScopes } from "./tools/index.js";
@@ -140,6 +141,7 @@ pauses and shows the user your plan:
 
 const todoRegistryForPrompt = getTodoRegistry(appConfig.databasePath);
 const userModelRegistryForPrompt = getUserModelRegistry(appConfig.databasePath);
+const healthRegistryForPrompt = getHealthRegistry(appConfig.databasePath);
 
 type TodoState = "active" | "plan_denied" | "not_started";
 
@@ -197,6 +199,7 @@ function buildSystemPrompt(threadId?: string, taskMode: TaskMode = "none"): stri
 
   const todayNote = readTodayNote();
   const userModelSummary = userModelRegistryForPrompt.renderForPrompt();
+  const healthSummary = healthRegistryForPrompt.renderForPrompt();
   return `${BASE_SYSTEM_PROMPT}
 
 ---
@@ -217,7 +220,14 @@ them:
 
 <user_model>
 ${userModelSummary}
-</user_model>` : ""}${todayNote ? `
+</user_model>` : ""}${healthSummary ? `
+
+Health data from the last 7 days (ingested from a daily export, see
+health_query for more detail or a longer range):
+
+<health_recent>
+${healthSummary}
+</health_recent>` : ""}${todayNote ? `
 
 Today's memory log (append-only, written with memory_write — only today's
 entries are shown here; earlier days are on disk but not injected):

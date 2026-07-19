@@ -1,5 +1,7 @@
 import { execSync } from "node:child_process";
 import { createNemotronModel } from "./llm/nemotron.js";
+import { config as appConfig } from "../config.js";
+import { getHealthRegistry } from "./memory/health.js";
 
 // The verification half of /goal mode (CLI-only — see interfaces/cli/index.ts's
 // driveGoalLoop). This is a SEPARATE, short-lived LLM call, not another turn
@@ -32,6 +34,18 @@ export function gatherCodeContext(cwd: string = process.cwd()): string {
     }).trim();
     if (!status && !diff) return "";
     return truncate(`git status:\n${status || "(clean)"}\n\ngit diff:\n${diff || "(no tracked changes against HEAD)"}`, MAX_CODE_CONTEXT_CHARS);
+  } catch {
+    return "";
+  }
+}
+
+// Sibling to gatherCodeContext — a snapshot of recent health data (see
+// HealthRegistry.renderForPrompt) for goals about health/fitness rather
+// than code, e.g. "/task goal lower my resting HR". Same fail-open shape:
+// never throws, returns "" if there's nothing recorded yet.
+export function gatherHealthContext(): string {
+  try {
+    return getHealthRegistry(appConfig.databasePath).renderForPrompt() ?? "";
   } catch {
     return "";
   }
@@ -83,6 +97,10 @@ export interface GoalJudgeInput {
   objective: string;
   finalMessage: string;
   codeContext: string;
+  // Optional recent-health snapshot (see gatherHealthContext) — only
+  // relevant for health-related goals; omitted entirely from the prompt
+  // when empty, same as codeContext.
+  healthContext?: string;
 }
 
 export async function judgeGoal(input: GoalJudgeInput, signal?: AbortSignal): Promise<GoalJudgeResult> {
@@ -93,8 +111,11 @@ export async function judgeGoal(input: GoalJudgeInput, signal?: AbortSignal): Pr
     input.codeContext
       ? `Actual state of the code on disk:\n${input.codeContext}`
       : "No code context available (not a git repo, or nothing tracked changed).",
+    input.healthContext ? `Recent health data (last 7 days):\n${input.healthContext}` : undefined,
     "Verdict — done, continue, or blocked?",
-  ].join("\n\n");
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n\n");
 
   const response = await model.invoke(
     [
