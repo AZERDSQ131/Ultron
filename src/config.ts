@@ -40,6 +40,11 @@ export const config = {
   // burning tokens forever on a goal that never resolves.
   goalMaxTurns: Number(process.env.GOAL_MAX_TURNS ?? 20),
   webPort: Number(process.env.WEB_PORT ?? 4173),
+  // Shared secret for POST /api/health-data/ingest — the only web server
+  // route that checks an auth header, since it's meant to be called
+  // directly by an external health-export app/shortcut, not the browser
+  // UI. Undefined disables the endpoint (it always 401s).
+  healthIngestToken: process.env.HEALTH_INGEST_TOKEN,
   // Per-turn cost shown in the stats line (CLI /verbose and web's verbose
   // toggle). NVIDIA NIM doesn't expose per-model public pricing the way
   // Anthropic/OpenAI do, so this is a configurable estimate rather than a

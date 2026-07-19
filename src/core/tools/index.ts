@@ -11,6 +11,7 @@ import { planPropose } from "./plan.js";
 import { memoryWrite } from "./memory.js";
 import { skillRead } from "./skills.js";
 import { openApp, runAppleScript } from "./macos.js";
+import { healthIngest, healthQuery, healthSetProfile, healthReport, healthExport } from "./health.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -37,6 +38,11 @@ export const tools: StructuredToolInterface[] = [
   skillRead,
   openApp,
   runAppleScript,
+  healthIngest,
+  healthQuery,
+  healthSetProfile,
+  healthReport,
+  healthExport,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -78,4 +84,12 @@ export const toolScopes: Record<string, ToolScope> = {
   // scripting) — same scope as run_shell_command, not the narrower
   // open_app.
   applescript_run: "destructive",
+  // Manual fallback for pasting an export into the conversation — the
+  // primary path is the token-authenticated POST /api/health-data/ingest
+  // endpoint, called by an external app/shortcut, not this tool.
+  health_ingest: "write",
+  health_query: "read",
+  health_set_profile: "write",
+  health_report: "read",
+  health_export: "write",
 };
