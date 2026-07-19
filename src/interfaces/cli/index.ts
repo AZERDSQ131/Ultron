@@ -18,13 +18,16 @@ import { config } from "../../config.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
+import { getHealthRegistry, sparkline, type HealthMetric } from "../../core/memory/health.js";
+import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
+import { detectAnomalies } from "../../core/health/trends.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getChatEventRegistry } from "../../core/memory/chatEvents.js";
-import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
+import { buildContinuationPrompt, gatherCodeContext, gatherHealthContext, judgeGoal } from "../../core/goalJudge.js";
 import { disableConsoleEcho } from "../../core/logger.js";
 import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
@@ -531,7 +534,7 @@ async function main() {
       let verdict: Awaited<ReturnType<typeof judgeGoal>>;
       try {
         verdict = await judgeGoal(
-          { objective: goal.objective, finalMessage: lastFinalText, codeContext: gatherCodeContext() },
+          { objective: goal.objective, finalMessage: lastFinalText, codeContext: gatherCodeContext(), healthContext: gatherHealthContext() },
           judgeController.signal,
         );
       } catch (err) {
@@ -796,6 +799,37 @@ async function main() {
                 continue;
               }
               appendTranscript(chalk.yellow("[ultron] use /memory, /memory clear or /memory forget <id>.\n\n"));
+              continue;
+            }
+            if (commandName === "/health") {
+              const health = getHealthRegistry(config.databasePath);
+              const to = new Date().toISOString().slice(0, 10);
+              const from = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+              const days = health.getRange(from, to);
+              if (!days.length) {
+                appendTranscript(uiDim("[ultron] no health data ingested yet.\n\n"));
+                continue;
+              }
+              const steps = sparkline(days.map((d) => d.steps));
+              const lines = days
+                .map((day) => {
+                  const parts: string[] = [];
+                  if (day.steps !== null) parts.push(`${day.steps} steps`);
+                  if (day.sleepDurationSec !== null) parts.push(`${(day.sleepDurationSec / 3600).toFixed(1)}h sleep`);
+                  if (day.restingHR !== null) parts.push(`resting HR ${day.restingHR}`);
+                  if (day.hrvAvg !== null) parts.push(`HRV ${day.hrvAvg}ms`);
+                  return `  ${uiDim(day.date)} ${parts.length ? parts.join(", ") : uiDim("no data")}`;
+                })
+                .join("\n");
+              const latest = days[days.length - 1];
+              const getBaseline30 = (m: HealthMetric) => health.getBaseline(m, 30);
+              const recovery = computeRecoveryScore(latest, getBaseline30);
+              const activity = computeActivityScore(latest, getBaseline30);
+              const anomalies = detectAnomalies(latest, getBaseline30);
+              const records = health.getRecords();
+              const scoreLine = `${uiDim("recovery")} ${recovery}/100  ${uiDim("activity")} ${activity}/100  ${uiDim("streak")} ${records.currentActivityStreakDays}d`;
+              const anomalyLine = anomalies.length ? chalk.yellow(`  ⚠ ${anomalies[0].message}`) : "";
+              appendTranscript(`${uiDim(`[ultron] last 7 days — steps ${steps}`)}\n${lines}\n${scoreLine}\n${anomalyLine ? `${anomalyLine}\n` : ""}\n`);
               continue;
             }
             appendTranscript(chalk.yellow(`[ultron] unknown command: ${input.trim()} — try /help\n\n`));

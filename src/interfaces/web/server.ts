@@ -26,8 +26,12 @@ import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../cor
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
+import { getHealthRegistry, type HealthExportPayload, type HealthMetric } from "../../core/memory/health.js";
+import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
+import { detectAnomalies } from "../../core/health/trends.js";
+import { estimateBiologicalAge } from "../../core/health/bioAge.js";
 import { getChatEventRegistry, type ChatEventSource } from "../../core/memory/chatEvents.js";
-import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
+import { buildContinuationPrompt, gatherCodeContext, gatherHealthContext, judgeGoal } from "../../core/goalJudge.js";
 import { listSkills, readSkill } from "../../core/skills.js";
 import { installHubSkill, listHubSkills } from "../../core/skillsHub.js";
 import { tools, toolScopes } from "../../core/tools/index.js";
@@ -337,7 +341,7 @@ async function streamGraphTurn(
               sseWrite(res, "goal", { status: "paused", reason: `turn budget (${goal.maxTurns}) exhausted` });
             } else {
               try {
-                const verdict = await judgeGoal({ objective: goal.objective, finalMessage: finalText, codeContext: gatherCodeContext() }, abortController.signal);
+                const verdict = await judgeGoal({ objective: goal.objective, finalMessage: finalText, codeContext: gatherCodeContext(), healthContext: gatherHealthContext() }, abortController.signal);
                 if (verdict.verdict === "done") {
                   goals.markDone(chatId, verdict.reason);
                   sseWrite(res, "goal", { status: "complete", reason: verdict.reason });
@@ -579,6 +583,79 @@ async function handleHealth(res: ServerResponse): Promise<void> {
     model: config.nemotronModel,
     databaseReachable,
   });
+}
+
+// Ingestion for daily health-export payloads (see src/core/memory/health.ts).
+// The only route on this server that requires auth: meant to be called
+// directly by an external health-export app/shortcut rather than the
+// browser UI, so unlike every other route here it can't rely on only being
+// reachable from the local machine's own frontend.
+async function handleHealthIngest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!config.healthIngestToken) {
+    sendJson(res, 503, { error: "health ingest disabled: HEALTH_INGEST_TOKEN not set" });
+    return;
+  }
+  if (req.headers["x-health-token"] !== config.healthIngestToken) {
+    sendJson(res, 401, { error: "invalid or missing x-health-token" });
+    return;
+  }
+  const payload = await readJson<HealthExportPayload>(req);
+  if (!payload) {
+    sendJson(res, 400, { error: "invalid JSON body" });
+    return;
+  }
+  const { dates } = getHealthRegistry(config.databasePath).ingest(payload);
+  sendJson(res, 200, { status: "ok", dates });
+}
+
+// Read-only data for the health dashboard (public/health.html). Computes
+// per-day recovery/activity scores against the CURRENT baseline for every
+// day in the window (not a historical baseline-at-the-time), same
+// simplification the <health_recent> prompt block and health_query's
+// 'scores' mode already make — good enough for a personal trend chart.
+async function handleHealthSummary(res: ServerResponse): Promise<void> {
+  const health = getHealthRegistry(config.databasePath);
+  if (!health.hasData()) {
+    sendJson(res, 200, { hasData: false });
+    return;
+  }
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const rangeDays = health.getRange(from, to);
+  const getBaseline30 = (m: HealthMetric) => health.getBaseline(m, 30);
+
+  const days = rangeDays.map((day) => ({
+    date: day.date,
+    steps: day.steps,
+    activeEnergyKcal: day.activeEnergyKcal,
+    exerciseMinutes: day.exerciseMinutes,
+    restingHR: day.restingHR,
+    walkingHR: day.walkingHR,
+    sleepDurationSec: day.sleepDurationSec,
+    hrvAvg: day.hrvAvg,
+    respiratoryRateAvg: day.respiratoryRateAvg,
+    recovery: computeRecoveryScore(day, getBaseline30),
+    activity: computeActivityScore(day, getBaseline30),
+  }));
+
+  const latest = rangeDays[rangeDays.length - 1];
+  const anomalies = detectAnomalies(latest, getBaseline30);
+  const records = health.getRecords();
+  const sleepDebt = health.getSleepDebt();
+  const profile = health.getProfile();
+  const bioAge = profile.birthdate
+    ? estimateBiologicalAge((Date.now() - new Date(profile.birthdate).getTime()) / (365.25 * 24 * 60 * 60 * 1000), {
+        restingHR: latest.restingHR,
+        hrvAvg: latest.hrvAvg,
+        sleepEfficiencyPct:
+          latest.sleepAsleepSec !== null && latest.sleepDurationSec !== null && latest.sleepDurationSec > 0
+            ? (latest.sleepAsleepSec / latest.sleepDurationSec) * 100
+            : null,
+        activityScore: days[days.length - 1].activity,
+      })
+    : undefined;
+
+  sendJson(res, 200, { hasData: true, from, to, days, records, sleepDebt, anomalies, bioAge, latestRawJson: latest.rawJson });
 }
 
 async function handleEdit(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -868,6 +945,14 @@ const server = createServer((req, res) => {
   if (scheduleMatch && req.method === "DELETE") { handleDeleteSchedule(res, decodeURIComponent(scheduleMatch[1])).catch((err) => console.error("[ultron-web] delete schedule failed:", err)); return; }
   if (req.method === "GET" && path === "/api/health") {
     handleHealth(res).catch((err) => console.error("[ultron-web] health handler failed:", err));
+    return;
+  }
+  if (req.method === "POST" && path === "/api/health-data/ingest") {
+    handleHealthIngest(req, res).catch((err) => console.error("[ultron-web] health ingest failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/health-data/summary") {
+    handleHealthSummary(res).catch((err) => console.error("[ultron-web] health summary failed:", err));
     return;
   }
   if (req.method === "GET" && path === "/api/status") {

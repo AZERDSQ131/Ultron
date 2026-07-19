@@ -17,6 +17,9 @@ import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
+import { getHealthRegistry, sparkline, type HealthMetric } from "../../core/memory/health.js";
+import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
+import { detectAnomalies } from "../../core/health/trends.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -51,6 +54,7 @@ const chats = getChatRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
 const goals = getGoalRegistry(config.databasePath);
 const userModel = getUserModelRegistry(config.databasePath);
+const health = getHealthRegistry(config.databasePath);
 const links = getTelegramLinkRegistry(config.databasePath);
 const chatEvents = getChatEventRegistry(config.databasePath);
 
@@ -463,6 +467,7 @@ const HELP_TEXT = `local commands
 /security bypass|accept_edit|manual — same, set directly
 /verbose on|off — show model/tokens/time/cost after each reply
 /memory [clear|forget <id>] — list, clear, or remove auto-accumulated observations about you
+/health — show the last 7 days of ingested health data
 /export [path|on|off] — live-export this chat to a file, updated after every turn
 /theme — not applicable here (no terminal to theme); accepted for parity, no-op
 /quit — stop the ULTRON Telegram bot process`;
@@ -713,6 +718,36 @@ bot.command("memory", async (ctx) => {
     return;
   }
   await send(ctx.chat.id, "[ultron] use /memory, /memory clear or /memory forget <id>.");
+});
+
+bot.command("health", async (ctx) => {
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const days = health.getRange(from, to);
+  if (!days.length) {
+    await send(ctx.chat.id, "[ultron] no health data ingested yet.");
+    return;
+  }
+  const steps = sparkline(days.map((d) => d.steps));
+  const lines = days
+    .map((day) => {
+      const parts: string[] = [];
+      if (day.steps !== null) parts.push(`${day.steps} steps`);
+      if (day.sleepDurationSec !== null) parts.push(`${(day.sleepDurationSec / 3600).toFixed(1)}h sleep`);
+      if (day.restingHR !== null) parts.push(`resting HR ${day.restingHR}`);
+      if (day.hrvAvg !== null) parts.push(`HRV ${day.hrvAvg}ms`);
+      return `${day.date}: ${parts.length ? parts.join(", ") : "no data"}`;
+    })
+    .join("\n");
+  const latest = days[days.length - 1];
+  const getBaseline30 = (m: HealthMetric) => health.getBaseline(m, 30);
+  const recovery = computeRecoveryScore(latest, getBaseline30);
+  const activity = computeActivityScore(latest, getBaseline30);
+  const anomalies = detectAnomalies(latest, getBaseline30);
+  const records = health.getRecords();
+  const scoreLine = `recovery ${recovery}/100, activity ${activity}/100, streak ${records.currentActivityStreakDays}d`;
+  const anomalyLine = anomalies.length ? `\n⚠ ${anomalies[0].message}` : "";
+  await send(ctx.chat.id, `[ultron] last 7 days — steps ${steps}\n${lines}\n${scoreLine}${anomalyLine}`);
 });
 
 // No terminal to theme here — accepted for command-set parity with the
