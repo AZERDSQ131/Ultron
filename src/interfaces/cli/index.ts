@@ -217,25 +217,20 @@ async function main() {
     // The model can still be used with the configured fallback window.
   }
 
-  const archiveCurrentChat = async (contextLine: string, requestedTitle?: string): Promise<void> => {
-    let title = requestedTitle?.trim();
-    if (!title) {
-      const chat = chats.get(currentChatId);
-      const suggestedTitle = chat && chat.title !== DEFAULT_CHAT_TITLE ? chat.title : "";
-      title = (
-        await readInput(
-          contextLine,
-          suggestedTitle,
-          `${chalk.magentaBright.bold("title")} ${uiDim("›")} `,
-          false,
-        )
-      ).trim();
+  const deleteCurrentChat = async (): Promise<void> => {
+    const current = chats.get(currentChatId);
+    const main = chats.getMain();
+    if (!current || current.id === main.id) {
+      appendTranscript(chalk.yellow("[ultron] the main conversation cannot be deleted.\n\n"));
+      return;
     }
-
-    const { archived, fresh: nextChat } = chats.archiveAndCreate(currentChatId, title || undefined);
-    currentChatId = nextChat.id;
+    chats.delete(current.id);
+    const next = chats.activateMain();
+    currentChatId = next.id;
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
-    appendTranscript(`${chalk.greenBright(`Chat Archived "${archived?.title ?? title ?? ""}"`)}\n\n`);
+    setTranscript("");
+    printBanner(config.nemotronModel);
+    appendTranscript(uiDim(`[ultron] deleted "${current.title}". Memory preserved. Returned to main.\n\n`));
   };
 
   const resumeChat = async (contextLine: string, commandArgument: string): Promise<void> => {
@@ -250,7 +245,6 @@ async function main() {
       appendTranscript(chalk.yellow("[ultron] no archived chat selected.\n\n"));
       return;
     }
-    chats.unarchive(target.id);
     chats.setFocus(target.id);
     currentChatId = target.id;
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
@@ -577,11 +571,6 @@ async function main() {
           case "/status":
             printStatus(config.nemotronModel, tools.length, thinkingMode, taskMode, verbose, currentChatId, chats.getSecurityMode(currentChatId), goals.get(currentChatId));
             continue;
-          case "/clear":
-            setTranscript("");
-            setDanglingToolBlock(null);
-            printBanner(config.nemotronModel);
-            continue;
           case "/context": {
             const contextTokens = await estimateContextUsage(graph, currentChatId);
             appendTranscript(`${renderContextBar(contextTokens, config.contextWindowTokens)}\n\n`);
@@ -608,10 +597,6 @@ async function main() {
             );
             continue;
           }
-          case "/archive": {
-            await archiveCurrentChat(contextLine, commandArgument);
-            continue;
-          }
           case "/resume": {
             await resumeChat(contextLine, commandArgument);
             continue;
@@ -620,6 +605,9 @@ async function main() {
             await switchToMain();
             continue;
           }
+          case "/delete":
+            await deleteCurrentChat();
+            continue;
           case "/think":
             appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
@@ -651,10 +639,6 @@ async function main() {
             stopping = true;
             continue;
           default:
-            if (commandName === "/archive") {
-              await archiveCurrentChat(contextLine, commandArgument);
-              continue;
-            }
             if (commandName === "/resume") {
               await resumeChat(contextLine, commandArgument);
               continue;

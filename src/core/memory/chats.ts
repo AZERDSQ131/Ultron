@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { getCheckpointer } from "./checkpointer.js";
 
 // Registry of chats — each row's `id` doubles as the LangGraph thread_id
 // used against the SqliteSaver checkpointer, so a chat and its message
@@ -104,20 +103,19 @@ export class ChatRegistry {
     try { this.db.exec("ALTER TABLE chat_focus ADD COLUMN main_chat_id TEXT"); } catch { /* already migrated */ }
   }
 
-  // Active chats only — what every sidebar/picker/startup-resume should see.
-  // Archived chats are deliberately excluded here rather than filtered by
-  // each caller, so a chat can't accidentally reappear as "current" (e.g.
-  // the CLI's startup pick of chats.list()[0]) just because archiving forgot
-  // to also handle it.
+  // Every registered conversation. The archived_at column is retained only
+  // as a migration detail for older databases; conversations are no longer
+  // archived by the user-facing interfaces.
   list(): Chat[] {
-    const rows = this.db.prepare("SELECT * FROM chats WHERE archived_at IS NULL ORDER BY updated_at DESC").all() as unknown as ChatRow[];
+    const rows = this.db.prepare("SELECT * FROM chats ORDER BY updated_at DESC").all() as unknown as ChatRow[];
     return rows.map(toChat);
   }
 
-  // Archived chats, most recently archived first — backs /resume's picker.
+  // Compatibility name for older callers. /resume now browses every
+  // non-main conversation, regardless of the legacy archived_at flag.
   listArchived(): Chat[] {
-    const rows = this.db.prepare("SELECT * FROM chats WHERE archived_at IS NOT NULL ORDER BY archived_at DESC").all() as unknown as ChatRow[];
-    return rows.map(toChat);
+    const mainId = this.getMain().id;
+    return this.list().filter((chat) => chat.id !== mainId);
   }
 
   // Every chat regardless of archived state — for bulk cleanup (e.g. an
@@ -162,7 +160,7 @@ export class ChatRegistry {
   activateMain(): Chat {
     const main = this.getMain();
     if (main.title === DEFAULT_CHAT_TITLE) this.rename(main.id, "Main");
-    const activeMain = this.unarchive(main.id) ?? this.get(main.id)!;
+    const activeMain = this.get(main.id)!;
     this.setFocus(activeMain.id);
     return activeMain;
   }
@@ -263,9 +261,14 @@ export class ChatRegistry {
     this.rename(id, deriveTitle(text));
   }
 
-  delete(id: string): void {
-    this.db.prepare("DELETE FROM chats WHERE id = ?").run(id);
-    getCheckpointer(this.dbPath).deleteThread(id);
+  // Delete the conversation from the registry only. Its LangGraph checkpoint
+  // is intentionally preserved, so this command removes it from /resume and
+  // the sidebars without destroying the underlying memory.
+  delete(id: string): boolean {
+    if (this.getMain().id === id) return false;
+    const deleted = this.db.prepare("DELETE FROM chats WHERE id = ?").run(id);
+    if (this.getFocus()?.id === id) this.activateMain();
+    return Number(deleted.changes ?? 0) > 0;
   }
 }
 

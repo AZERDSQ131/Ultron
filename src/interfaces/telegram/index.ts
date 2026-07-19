@@ -4,7 +4,6 @@ import { HumanMessage } from "@langchain/core/messages";
 import { config } from "../../config.js";
 import {
   buildGraph,
-  clearThreadMessages,
   compactThread,
   estimateContextUsage,
   getPendingApproval,
@@ -158,10 +157,6 @@ function getSession(ultronChatId: string): Session {
   return session;
 }
 
-// Tracks message ids ULTRON has sent into each Telegram chat, purely so
-// /clear has something to actually delete (see its handler) — Telegram
-// gives bots no "clear this chat" API, only per-message deletion, and only
-// for messages up to ~48h old.
 const sentMessageIds = new Map<number, number[]>();
 function trackSent(telegramChatId: number, messageId: number): void {
   const ids = sentMessageIds.get(telegramChatId) ?? [];
@@ -437,16 +432,13 @@ async function runTurn(telegramChatId: number, ultronChatId: string, input: { me
 // messages to begin with.
 const RESUME_PREVIEW_MESSAGES = 3;
 
-// Resuming an archived chat unarchives it (chats.unarchive) and repoints
-// this Telegram chat's link at it — its LangGraph checkpoint state was
-// never touched by archiving, so this is a real resume, not a text
-// reconstruction (the old .txt-export mechanism this replaced only carried
-// human/ai text and lost tool-call context). Unlike the CLI/web, which
+// /resume repoints this Telegram chat at an existing conversation. Its
+// LangGraph checkpoint is never copied or rewritten, so the full context is
+// restored. Unlike the CLI/web, which
 // redraw the whole thread on resume, Telegram has no persistent scrollback
 // to fall back on — without a preview here, "resumed" told the user
 // nothing about what they were actually resuming.
 async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
-  chats.unarchive(chat.id);
   chats.setFocus(chat.id);
   links.set(telegramChatId, chat.id);
   restartEventSync(telegramChatId, chat.id);
@@ -476,9 +468,9 @@ const HELP_TEXT = `local commands
 /stop — stop the active generation
 /retry — remove the previous reply and run the last message again
 /compact — summarize old messages and keep the recent turns
-/archive [title] — rename (optional), archive this conversation and start a new one
 /main — return to the main conversation
-/resume [query] — reopen an archived conversation with its full context; no query lists them with buttons to open or delete
+/resume [query] — list saved conversations and open one with its full context
+/delete — remove this conversation from the list (memory preserved)
 /think on|low|off — set reasoning mode
 /task none|todo|plan|goal — set task mode (goal: next message becomes the objective)
 /permissions — choose bypass, accept_edit or manual
@@ -486,7 +478,6 @@ const HELP_TEXT = `local commands
 /verbose on|off — show model/tokens/time/cost after each reply
 /memory [clear|forget <id>] — list, clear, or remove auto-accumulated observations about you
 /export [path|on|off] — live-export this chat to a file, updated after every turn
-/clear — wipe this conversation's memory and delete what ULTRON can of its own recent messages here (Telegram limits bot deletions to ~48h, own messages only)
 /theme — not applicable here (no terminal to theme); accepted for parity, no-op
 /quit — stop the ULTRON Telegram bot process`;
 
@@ -558,15 +549,6 @@ bot.command("compact", async (ctx) => {
   );
 });
 
-bot.command("archive", async (ctx) => {
-  const ultronChatId = currentChatId(ctx.chat.id);
-  const title = ctx.match?.trim();
-  const { archived, fresh } = chats.archiveAndCreate(ultronChatId, title || undefined);
-  links.set(ctx.chat.id, fresh.id);
-  restartEventSync(ctx.chat.id, fresh.id);
-  await send(ctx.chat.id, `[ultron] archived "${archived?.title ?? title ?? ""}". Started a new chat.`);
-});
-
 bot.command("main", async (ctx) => {
   const main = chats.activateMain();
   await resumeInto(ctx.chat.id, main);
@@ -574,21 +556,21 @@ bot.command("main", async (ctx) => {
 
 bot.command("resume", async (ctx) => {
   const query = ctx.match?.trim();
-  const archived = chats.listArchived();
-  if (!archived.length) {
-    await send(ctx.chat.id, "[ultron] no archived chats.");
+  const conversations = chats.listArchived();
+  if (!conversations.length) {
+    await send(ctx.chat.id, "[ultron] no saved conversations.");
     return;
   }
   if (query) {
-    const match = archived.find((c) => c.id === query || c.title.toLowerCase().includes(query.toLowerCase()));
+    const match = conversations.find((c) => c.id === query || c.title.toLowerCase().includes(query.toLowerCase()));
     if (!match) {
-      await send(ctx.chat.id, `[ultron] no archived chat matches "${query}".`);
+      await send(ctx.chat.id, `[ultron] no conversation matches "${query}".`);
       return;
     }
     await resumeInto(ctx.chat.id, match);
     return;
   }
-  const top = archived.slice(0, 20);
+  const top = conversations.slice(0, 20);
   archivePickerCache.set(ctx.chat.id, top);
   const keyboard = new InlineKeyboard();
   top.forEach((c, i) => {
@@ -596,7 +578,22 @@ bot.command("resume", async (ctx) => {
     keyboard.text("🗑", `resume_del:${i}`);
     keyboard.row();
   });
-  await send(ctx.chat.id, "Archived chats:", { reply_markup: keyboard });
+  await send(ctx.chat.id, "Conversations:", { reply_markup: keyboard });
+});
+
+bot.command("delete", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const current = chats.get(ultronChatId);
+  const main = chats.getMain();
+  if (!current || current.id === main.id) {
+    await send(ctx.chat.id, "[ultron] the main conversation cannot be deleted.");
+    return;
+  }
+  chats.delete(current.id);
+  const next = chats.activateMain();
+  links.set(ctx.chat.id, next.id);
+  restartEventSync(ctx.chat.id, next.id);
+  await send(ctx.chat.id, `[ultron] deleted "${current.title}". Memory preserved. Returned to main.`);
 });
 
 bot.command("think", async (ctx) => {
@@ -771,41 +768,6 @@ bot.command("model", async (ctx) => {
   } catch (error) {
     await send(ctx.chat.id, `[ultron] could not list NVIDIA models: ${error instanceof Error ? error.message : String(error)}`);
   }
-});
-
-// Best-effort "clear the screen": deletes what ULTRON can of its own
-// recently sent messages in this chat. Telegram bots cannot delete the
-// other party's messages in a private chat, and cannot delete any message
-// older than ~48h — a genuine terminal-style clear isn't possible here, this
-// is the closest real equivalent rather than a silent no-op.
-bot.command("clear", async (ctx) => {
-  // Unlike the CLI/web, where /clear only redraws the terminal (the
-  // scrollback is still visible, so the user can see for themselves that
-  // history persists), Telegram shows no such reminder — a user typing
-  // /clear here reasonably means "forget this conversation", not just
-  // "tidy up my screen". Confirmed by a real report: saying "Salut" after
-  // /clear got a reply that referenced the pre-clear greeting, because only
-  // the visible messages were being touched, not the model's actual memory
-  // of the thread. So /clear now wipes the thread's message state too, on
-  // top of deleting what Telegram lets a bot delete of its own messages.
-  const ultronChatId = currentChatId(ctx.chat.id);
-  await clearThreadMessages(graph, ultronChatId);
-
-  const ids = sentMessageIds.get(ctx.chat.id) ?? [];
-  sentMessageIds.delete(ctx.chat.id);
-  let deleted = 0;
-  for (const id of ids) {
-    try {
-      await bot.api.deleteMessage(ctx.chat.id, id);
-      deleted++;
-    } catch {
-      // Too old (>48h) or already gone — nothing to do.
-    }
-  }
-  await send(
-    ctx.chat.id,
-    `[ultron] conversation memory cleared. Deleted ${deleted}/${ids.length} of my own recent message(s) too (Telegram limits bot deletions to ~48h, own messages only).`,
-  );
 });
 
 bot.command("quit", async (ctx) => {

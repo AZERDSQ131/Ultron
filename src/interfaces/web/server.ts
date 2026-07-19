@@ -154,6 +154,10 @@ async function handleRenameChat(req: IncomingMessage, res: ServerResponse, chatI
 
 async function handleDeleteChat(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
+  if (chats.getMain().id === chatId) {
+    sendJson(res, 400, { error: "the main conversation cannot be deleted" });
+    return;
+  }
   activeAborts.get(chatId)?.abort();
   chats.delete(chatId);
   sendJson(res, 200, { deleted: true });

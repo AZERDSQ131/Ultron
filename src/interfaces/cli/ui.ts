@@ -27,7 +27,7 @@ import { listHubSkills, installHubSkill, type HubSkill } from "../../core/skills
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const CONTEXT_BAR_WIDTH = 20;
 export const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-export const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/main", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
+export const LOCAL_COMMANDS = ["/help", "/model", "/status", "/context", "/stop", "/retry", "/compact", "/resume", "/main", "/delete", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
 
 // A lone plan_propose call gets rendered as a numbered plan, so callers need
 // this shape rather than the fuller LangGraph-native PendingToolCall from
@@ -539,10 +539,10 @@ export function readInput(
 // (local mode) and by a small REST-backed adapter (remote mode).
 export interface ArchivedChatSource {
   listArchived(): Chat[] | Promise<Chat[]>;
-  delete(id: string): void | Promise<void>;
+  delete(id: string): boolean | void | Promise<boolean | void>;
 }
 
-// Backs /resume: browse archived chats, invoke one (Enter — unarchives it
+// Backs /resume: browse saved conversations, invoke one (Enter
 // and returns it as the new current chat) or delete one (Ctrl+D — purges it
 // via source.delete, keeps the picker open on the remaining list). Mirrors
 // the CLI's other arrow-key pickers (same keyboard/search/redraw behavior).
@@ -568,7 +568,7 @@ export async function pickArchivedChat(contextLine: string, source: ArchivedChat
         : uiDim("  no matching archived chats");
       const prompt = `${chalk.magentaBright.bold("resume")} ${uiDim("›")} `;
       const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
-      const picker = `${uiDim("Select an archived chat · type to search · ↑/↓ navigate · Enter to resume · Ctrl+D to delete")}\n${rows}`;
+      const picker = `${uiDim("Select a conversation · type to search · ↑/↓ navigate · Enter to resume · Ctrl+D to delete")}\n${rows}`;
       const footer = `${rule()}\n${prompt}${query}\n${contextLine}\n${rule()}`;
       const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
       stdout.write(`\x1b[2J\x1b[H${content}${picker}\n${"\n".repeat(padding)}${footer}`);
@@ -1040,9 +1040,9 @@ export function initResizeHandler(getModelName: () => string): void {
 
 export function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  rename (optional), then archive the chat and start a new one\n  ${chalk.cyanBright("/resume")}   browse archived chats — Enter to resume, Ctrl+D to delete\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/export")}   [path|on|off] live-export this chat to a file, updated after every turn\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/resume")}   browse conversations — Enter to resume, Ctrl+D to delete\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/export")}   [path|on|off] live-export this chat to a file, updated after every turn\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
-  appendTranscript(`  ${chalk.cyanBright("/main")}     return to the main conversation\n\n`);
+  appendTranscript(`  ${chalk.cyanBright("/main")}     return to the main conversation\n  ${chalk.cyanBright("/delete")}   delete this conversation from the registry (memory preserved)\n\n`);
 }
 
 // Shared by /status and /task goal (bare or "status") — same one-liner

@@ -77,10 +77,9 @@ The current version provides a terminal conversation loop with:
   context gauge;
 - basic terminal Markdown styling, including `**bold**` text;
 - local slash commands for stopping, retrying, compacting and tuning reasoning;
-- `/archive` and `/resume`: archiving flips a metadata flag on a chat (its
-  full LangGraph checkpoint state is left untouched), so resuming reopens it
-  with everything intact — tool calls included, not a lossy text
-  reconstruction;
+- `/resume`, `/main` and `/delete`: browse saved conversations, return to the
+  permanent main conversation, or remove a conversation from the registry
+  while preserving its LangGraph checkpoint memory;
 - over twenty tools for shell commands, files, HTTP/web requests, processes,
   schedules, macOS automation and the current date/time;
 - declared tool scopes (`read`, `write`, `destructive`) for architectural clarity;
@@ -245,10 +244,10 @@ The terminal handles these commands without sending them to Nemotron:
 | `/compact` | Summarize old session messages and keep the recent turns |
 | `/think on\|low\|off` | Enable full reasoning, low-effort reasoning, or no reasoning |
 | `/verbose on\|off` | Show or hide the per-turn stats line (model, input/output tokens, elapsed time, estimated cost) |
-| `/archive [title]` | Rename (optional) and archive the current chat, then start a new one |
-| `/resume` | Browse archived chats — Enter to reopen (full context restored), Ctrl+D to delete |
+| `/resume` | Browse saved conversations — Enter to open, Ctrl+D to delete |
+| `/main` | Return to the permanent main conversation |
+| `/delete` | Remove this conversation from the registry; preserve memory |
 | `/memory [clear\|forget <id>]` | List, clear, or remove auto-accumulated observations about you (see below) |
-| `/clear` | Clear the terminal display |
 | `/quit` | Exit ULTRON |
 
 Press Tab after starting a slash command to accept its completion. `/stop` can
