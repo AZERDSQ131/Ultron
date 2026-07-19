@@ -169,6 +169,21 @@ async function safeEditMessage(chatId: number, messageId: number, text: string):
   }
 }
 
+// With reasoning enabled (see /think), Nemotron's raw content stream can
+// include its <think>...</think> chain-of-thought inline, ahead of the
+// actual reply. The CLI/web don't show it either, but only Telegram was
+// reported actually leaking the literal tags into the user-visible message
+// — strip it defensively here regardless of which interface's model client
+// produced it. Also handles a dangling, never-closed <think> (e.g. the turn
+// was interrupted mid-reasoning) by dropping everything from that point on,
+// since a half-finished chain-of-thought fragment isn't a usable answer
+// either.
+function stripThinking(text: string): string {
+  let stripped = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  stripped = stripped.replace(/<think>[\s\S]*$/i, "");
+  return stripped.trim();
+}
+
 function humanTextFromInput(input: { messages: HumanMessage[] } | Command): string | undefined {
   if (!("messages" in input)) return undefined;
   const text = input.messages
@@ -255,23 +270,25 @@ async function runSingleTurn(
       }
 
       todos.completeAll(ultronChatId);
-      let replyText = finalText.trim() || "(empty reply)";
+      const visibleText = stripThinking(finalText);
+      await safeEditMessage(telegramChatId, placeholder.message_id, visibleText.trim() || "(empty reply)");
+
+      // A separate message, sent after the reply is already on screen —
+      // not appended to it — per explicit request: the stats line is a
+      // distinct piece of information, not part of the answer.
       if (session.verbose) {
         const elapsedSeconds = (Date.now() - turnStarted) / 1000;
         const generatedTokens = outputTokens ?? Math.max(1, Math.round(finalText.length / 4));
-        replyText += `\n\n${formatTurnStats({
-          model: config.nemotronModel,
-          inputTokens: inputTokens ?? 0,
-          outputTokens: generatedTokens,
-          elapsedSeconds,
-        })}`;
+        await send(
+          telegramChatId,
+          formatTurnStats({ model: config.nemotronModel, inputTokens: inputTokens ?? 0, outputTokens: generatedTokens, elapsedSeconds }),
+        );
       }
-      await safeEditMessage(telegramChatId, placeholder.message_id, replyText);
 
       const humanText = humanTextFromInput(input);
-      if (humanText && finalText.trim()) void recordUserModelObservation(ultronChatId, humanText, finalText);
+      if (humanText && visibleText.trim()) void recordUserModelObservation(ultronChatId, humanText, visibleText);
 
-      return { status: "ok", finalText };
+      return { status: "ok", finalText: visibleText };
     });
   } catch (err) {
     if (abortController.signal.aborted) {

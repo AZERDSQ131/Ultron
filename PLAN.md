@@ -117,6 +117,13 @@ interface at a time.
   over; HTML only needs `&`/`<`/`>` escaped, which is mechanical. Falls back to the plain
   unformatted text (still truncated to Telegram's 4096-char limit) if the converted HTML is
   oversized or fails to parse for any reason, rather than losing the message.
+- `stripThinking` (`telegram/index.ts`) removes any `<think>...</think>` chain-of-thought Nemotron's
+  raw content stream includes inline when reasoning is on (`/think on`/`full`) — the CLI/web don't
+  surface it either, but only Telegram was reported actually leaking the literal tags into the
+  user-visible reply. Also drops a dangling, never-closed `<think>` (turn interrupted mid-reasoning)
+  rather than showing a half-finished fragment.
+- The `/verbose` stats line is sent as its own separate message, after the reply — not appended to
+  it — since it's a distinct piece of information, not part of the answer.
 - Session state with no natural persistence slot (`thinkingMode`, `taskMode`, `verbose`) is
   in-memory per ULTRON chat, reset on bot restart — same lifetime as the CLI's process-local
   variables.
