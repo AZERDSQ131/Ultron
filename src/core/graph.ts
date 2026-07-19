@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START, interrupt } from "@langchain/langgraph";
@@ -755,89 +755,13 @@ export async function listChatMessages(graph: ReturnType<typeof buildGraph>, thr
   return out;
 }
 
-function archiveMessageContent(message: BaseMessage): string {
-  return typeof message.content === "string" ? message.content : JSON.stringify(message.content, null, 2);
-}
-
-function archiveTitle(messages: BaseMessage[], requestedTitle?: string): string {
-  const requested = requestedTitle?.replace(/\s+/g, " ").trim();
-  if (requested) return requested;
-  const firstUserMessage = messages.find((message) => message.getType() === "human");
-  const content = firstUserMessage ? archiveMessageContent(firstUserMessage).replace(/\s+/g, " ").trim() : "ULTRON conversation";
-  return content.length > 48 ? `${content.slice(0, 47).trimEnd()}…` : content;
-}
-
-function archiveSlug(title: string): string {
-  return title
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase() || "ultron-conversation";
-}
-
-export async function archiveThread(
-  graph: ReturnType<typeof buildGraph>,
-  threadId: string,
-  requestedTitle?: string,
-): Promise<{ path: string; title: string }> {
-  const state = await graph.getState({ configurable: { thread_id: threadId } });
-  const messages = (state.values.messages ?? []).filter(
-    (message: BaseMessage) => message.getType() === "human" || message.getType() === "ai",
-  );
-  const archiveDir = join(process.cwd(), "archives");
-  mkdirSync(archiveDir, { recursive: true });
-
-  const title = archiveTitle(messages, requestedTitle);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const archivePath = join(archiveDir, `${archiveSlug(title)}-${timestamp}.txt`);
-  const blocks = messages.map((message: BaseMessage) => {
-    const role = message.getType() === "human" ? "USER" : "ULTRON";
-    return `===== ${role} =====\n${archiveMessageContent(message)}`;
-  });
-  const content = [
-    "ULTRON CHAT ARCHIVE",
-    `Title: ${title}`,
-    `Created: ${new Date().toISOString()}`,
-    `Thread: ${threadId}`,
-    `Messages: ${messages.length}`,
-    "",
-    ...blocks,
-    "",
-  ].join("\n");
-
-  writeFileSync(archivePath, content, "utf-8");
-  return { path: archivePath, title };
-}
-
-// Wipes a thread's conversation state in place — same RemoveMessage(
-// REMOVE_ALL_MESSAGES) resumeThread uses before splicing in archived
-// messages, exposed standalone for Telegram's /clear: unlike the CLI/web,
-// where /clear only redraws the terminal (the model's actual memory of the
-// thread is untouched — the user can still see the old scrollback and knows
-// it), a Telegram chat has no visible scrollback reminder that server-side
-// history persists, so a Telegram user typing /clear reasonably means "the
-// model should forget this conversation", not just "redraw my screen".
+// Wipes a thread's conversation state in place — exposed standalone for
+// Telegram's /clear: unlike the CLI/web, where /clear only redraws the
+// terminal (the model's actual memory of the thread is untouched — the user
+// can still see the old scrollback and knows it), a Telegram chat has no
+// visible scrollback reminder that server-side history persists, so a
+// Telegram user typing /clear reasonably means "the model should forget
+// this conversation", not just "redraw my screen".
 export async function clearThreadMessages(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<void> {
   await graph.updateState({ configurable: { thread_id: threadId } }, { messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES })] });
-}
-
-export async function resumeThread(
-  graph: ReturnType<typeof buildGraph>,
-  threadId: string,
-  archivePath: string,
-): Promise<number> {
-  const content = readFileSync(archivePath, "utf-8");
-  const blockPattern = /^===== (USER|ULTRON) =====\n([\s\S]*?)(?=\n===== (?:USER|ULTRON) =====\n|\n*$)/gm;
-  const messages = [...content.matchAll(blockPattern)].map((match) => {
-    const messageContent = match[2].trimEnd();
-    return match[1] === "USER" ? new HumanMessage(messageContent) : new AIMessage(messageContent);
-  });
-  if (messages.length === 0) throw new Error("archive contains no resumable messages");
-
-  await graph.updateState(
-    { configurable: { thread_id: threadId } },
-    { messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), ...messages] },
-  );
-  return messages.length;
 }

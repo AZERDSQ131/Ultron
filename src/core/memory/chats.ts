@@ -39,6 +39,7 @@ export interface Chat {
   agentId: string | null;
   scheduleId: string | null;
   securityMode: SecurityMode;
+  archivedAt: string | null;
 }
 
 interface ChatRow {
@@ -49,6 +50,7 @@ interface ChatRow {
   agent_id?: string | null;
   schedule_id?: string | null;
   security_mode?: string | null;
+  archived_at?: string | null;
 }
 
 function toChat(row: ChatRow): Chat {
@@ -60,6 +62,7 @@ function toChat(row: ChatRow): Chat {
     agentId: row.agent_id ?? null,
     scheduleId: row.schedule_id ?? null,
     securityMode: (row.security_mode as SecurityMode | null) ?? DEFAULT_SECURITY_MODE,
+    archivedAt: row.archived_at ?? null,
   };
 }
 
@@ -86,9 +89,29 @@ export class ChatRegistry {
     try { this.db.exec("ALTER TABLE chats ADD COLUMN agent_id TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN schedule_id TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN security_mode TEXT"); } catch { /* already migrated */ }
+    try { this.db.exec("ALTER TABLE chats ADD COLUMN archived_at TEXT"); } catch { /* already migrated */ }
   }
 
+  // Active chats only — what every sidebar/picker/startup-resume should see.
+  // Archived chats are deliberately excluded here rather than filtered by
+  // each caller, so a chat can't accidentally reappear as "current" (e.g.
+  // the CLI's startup pick of chats.list()[0]) just because archiving forgot
+  // to also handle it.
   list(): Chat[] {
+    const rows = this.db.prepare("SELECT * FROM chats WHERE archived_at IS NULL ORDER BY updated_at DESC").all() as unknown as ChatRow[];
+    return rows.map(toChat);
+  }
+
+  // Archived chats, most recently archived first — backs /resume's picker.
+  listArchived(): Chat[] {
+    const rows = this.db.prepare("SELECT * FROM chats WHERE archived_at IS NOT NULL ORDER BY archived_at DESC").all() as unknown as ChatRow[];
+    return rows.map(toChat);
+  }
+
+  // Every chat regardless of archived state — for bulk cleanup (e.g. an
+  // Agent's chats must all be purged when the Agent is deleted, archived or
+  // not).
+  listAll(): Chat[] {
     const rows = this.db.prepare("SELECT * FROM chats ORDER BY updated_at DESC").all() as unknown as ChatRow[];
     return rows.map(toChat);
   }
@@ -100,7 +123,7 @@ export class ChatRegistry {
 
   create(title: string = DEFAULT_CHAT_TITLE, agentId: string | null = null, scheduleId: string | null = null): Chat {
     const now = new Date().toISOString();
-    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId, scheduleId, securityMode: DEFAULT_SECURITY_MODE };
+    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId, scheduleId, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at, agent_id, schedule_id) VALUES (?, ?, ?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.agentId, chat.scheduleId);
@@ -114,11 +137,30 @@ export class ChatRegistry {
     const existing = this.get(id);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE };
+    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt);
     return chat;
+  }
+
+  // Archiving is purely a metadata flag, not a data export: the chat's full
+  // LangGraph checkpoint state (messages, tool calls, everything) is left
+  // untouched under the same thread_id, so unarchive() below gets it back
+  // exactly as it was — unlike the old txt-file export/import, which only
+  // round-tripped human/ai text and lost tool-call context.
+  archive(id: string, title?: string): Chat | undefined {
+    if (title?.trim()) this.rename(id, title.trim());
+    this.db.prepare("UPDATE chats SET archived_at = ?, updated_at = ? WHERE id = ?").run(new Date().toISOString(), new Date().toISOString(), id);
+    return this.get(id);
+  }
+
+  // Reopens an archived chat as active again — used by /resume's "invoke"
+  // action. The caller is still responsible for switching its own "current
+  // chat" pointer to this id.
+  unarchive(id: string): Chat | undefined {
+    this.db.prepare("UPDATE chats SET archived_at = NULL, updated_at = ? WHERE id = ?").run(new Date().toISOString(), id);
+    return this.get(id);
   }
 
   rename(id: string, title: string): void {
