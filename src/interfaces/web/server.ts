@@ -26,7 +26,7 @@ import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../cor
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
-import { getHealthRegistry, type HealthExportPayload, type HealthMetric } from "../../core/memory/health.js";
+import { getHealthRegistry, pickLatestWithData, type HealthExportPayload, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
 import { detectAnomalies } from "../../core/health/trends.js";
 import { estimateBiologicalAge } from "../../core/health/bioAge.js";
@@ -638,7 +638,9 @@ async function handleHealthSummary(res: ServerResponse): Promise<void> {
     activity: computeActivityScore(day, getBaseline30),
   }));
 
-  const latest = rangeDays[rangeDays.length - 1];
+  const latest = pickLatestWithData(rangeDays)!;
+  const latestRecovery = computeRecoveryScore(latest, getBaseline30);
+  const latestActivity = computeActivityScore(latest, getBaseline30);
   const anomalies = detectAnomalies(latest, getBaseline30);
   const records = health.getRecords();
   const sleepDebt = health.getSleepDebt();
@@ -651,11 +653,12 @@ async function handleHealthSummary(res: ServerResponse): Promise<void> {
           latest.sleepAsleepSec !== null && latest.sleepDurationSec !== null && latest.sleepDurationSec > 0
             ? (latest.sleepAsleepSec / latest.sleepDurationSec) * 100
             : null,
-        activityScore: days[days.length - 1].activity,
+        activityScore: latestActivity,
       })
     : undefined;
 
-  sendJson(res, 200, { hasData: true, from, to, days, records, sleepDebt, anomalies, bioAge, latestRawJson: latest.rawJson });
+  const latestScores = { date: latest.date, recovery: latestRecovery, activity: latestActivity };
+  sendJson(res, 200, { hasData: true, from, to, days, records, sleepDebt, anomalies, bioAge, latestScores, latestRawJson: latest.rawJson });
 }
 
 async function handleEdit(req: IncomingMessage, res: ServerResponse): Promise<void> {

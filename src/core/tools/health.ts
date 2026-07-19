@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { config } from "../../config.js";
-import { getHealthRegistry, type HealthDay, type HealthExportPayload, type HealthMetric } from "../memory/health.js";
+import { getHealthRegistry, pickLatestWithData, type HealthDay, type HealthExportPayload, type HealthMetric } from "../memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../health/scoring.js";
 import { detectAnomalies } from "../health/trends.js";
 import { estimateBiologicalAge } from "../health/bioAge.js";
@@ -82,7 +82,7 @@ export const healthQuery = tool(
     }
 
     if (mode === "scores") {
-      const latest = days[days.length - 1];
+      const latest = pickLatestWithData(days)!;
       const getBaseline30 = (m: HealthMetric) => health.getBaseline(m, 30);
       const recovery = computeRecoveryScore(latest, getBaseline30);
       const activity = computeActivityScore(latest, getBaseline30);
@@ -197,7 +197,7 @@ export const healthReport = tool(
     const days = health.getRange(range.from, range.to);
     if (!days.length) return `No health data recorded between ${range.from} and ${range.to}.`;
 
-    const latest = days[days.length - 1];
+    const latest = pickLatestWithData(days)!;
     const getBaseline30 = (m: HealthMetric) => health.getBaseline(m, 30);
     const recovery = computeRecoveryScore(latest, getBaseline30);
     const activity = computeActivityScore(latest, getBaseline30);

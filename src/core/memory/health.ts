@@ -187,6 +187,21 @@ function localDateFromSessionEnd(end: string, referenceYear: string): string {
   return end;
 }
 
+// A day with only e.g. workoutCount: 0 and nothing else (a same-day
+// "partial" entry an export commonly includes for "today so far") must
+// never be picked as the scoring/anomaly/bio-age reference day just
+// because it has the latest date key — that would silently show a hollow
+// neutral score instead of the most recent day with actual signal. Falls
+// back to the literal last day (even if empty) only if nothing in the
+// range has any real data, so callers always get a date to anchor on.
+export function pickLatestWithData(days: HealthDay[]): HealthDay | undefined {
+  for (let i = days.length - 1; i >= 0; i--) {
+    const day = days[i];
+    if (day.steps !== null || day.restingHR !== null || day.hrvAvg !== null || day.sleepDurationSec !== null) return day;
+  }
+  return days[days.length - 1];
+}
+
 export class HealthRegistry {
   private db: DatabaseSync;
 
@@ -449,7 +464,7 @@ export class HealthRegistry {
       return `- ${day.date}: ${parts.length ? parts.join(", ") : "no data"}`;
     });
 
-    const latest = days[days.length - 1];
+    const latest = pickLatestWithData(days)!;
     const getBaseline30 = (metric: HealthMetric) => this.getBaseline(metric, 30);
     const recovery = computeRecoveryScore(latest, getBaseline30);
     const activity = computeActivityScore(latest, getBaseline30);
@@ -519,9 +534,19 @@ export class HealthRegistry {
     return { birthdate: row?.birthdate ?? null, sleepTargetHours: row?.sleep_target_hours ?? 8 };
   }
 
+  // Partial<HealthProfile> callers (e.g. health_set_profile, which only sets
+  // whichever field the user mentioned) commonly pass an object literal
+  // like { birthdate: undefined, sleepTargetHours: 7.5 } — the key is
+  // PRESENT with value undefined, not omitted, so a naive `{...current,
+  // ...profile}` spread would overwrite an already-set birthdate with
+  // undefined (and node:sqlite rejects binding undefined outright). Only
+  // fields explicitly provided as non-undefined override the current value.
   setProfile(profile: Partial<HealthProfile>): HealthProfile {
     const current = this.getProfile();
-    const merged = { ...current, ...profile };
+    const merged: HealthProfile = {
+      birthdate: profile.birthdate !== undefined ? profile.birthdate : current.birthdate,
+      sleepTargetHours: profile.sleepTargetHours !== undefined ? profile.sleepTargetHours : current.sleepTargetHours,
+    };
     this.db
       .prepare(
         `INSERT INTO health_profile (id, birthdate, sleep_target_hours) VALUES (1, ?, ?)

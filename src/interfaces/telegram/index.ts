@@ -17,7 +17,7 @@ import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
-import { getHealthRegistry, sparkline, type HealthMetric } from "../../core/memory/health.js";
+import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
 import { detectAnomalies } from "../../core/health/trends.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
@@ -739,7 +739,7 @@ bot.command("health", async (ctx) => {
       return `${day.date}: ${parts.length ? parts.join(", ") : "no data"}`;
     })
     .join("\n");
-  const latest = days[days.length - 1];
+  const latest = pickLatestWithData(days)!;
   const getBaseline30 = (m: HealthMetric) => health.getBaseline(m, 30);
   const recovery = computeRecoveryScore(latest, getBaseline30);
   const activity = computeActivityScore(latest, getBaseline30);

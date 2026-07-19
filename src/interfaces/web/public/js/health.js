@@ -118,10 +118,10 @@ async function render() {
 
   const grid = el("div", { class: "health-grid" });
 
-  const latest = data.days[data.days.length - 1];
-  const scoreCard = card("Today", [
-    el("div", { class: "stat-big" }, [document.createTextNode(`${latest.recovery}`)]),
-    el("div", { class: "stat-sub" }, [document.createTextNode(`recovery /100 · activity ${latest.activity}/100`)]),
+  const latest = data.latestScores;
+  const scoreCard = card(`${latest.date} — recovery`, [
+    el("div", { class: "stat-big" }, [document.createTextNode(`${latest.recovery}/100`)]),
+    el("div", { class: "stat-sub" }, [document.createTextNode(`activity ${latest.activity}/100`)]),
   ]);
   if (data.anomalies?.length) {
     scoreCard.append(el("div", { class: "anomaly-line" }, [document.createTextNode(`⚠ ${data.anomalies[0].message}`)]));
