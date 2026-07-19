@@ -27,7 +27,7 @@ import { listHubSkills, installHubSkill, type HubSkill } from "../../core/skills
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const CONTEXT_BAR_WIDTH = 20;
 export const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-export const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
+export const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/stop", "/retry", "/compact", "/archive", "/resume", "/main", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
 
 // A lone plan_propose call gets rendered as a numbered plan, so callers need
 // this shape rather than the fuller LangGraph-native PendingToolCall from
@@ -1042,6 +1042,7 @@ export function printHelp() {
   appendTranscript(
     `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/model")}    search and select an NVIDIA model\n  ${chalk.cyanBright("/status")}   show model, memory and tool status\n  ${chalk.cyanBright("/clear")}    clear the terminal and redraw the banner\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/archive")}  rename (optional), then archive the chat and start a new one\n  ${chalk.cyanBright("/resume")}   browse archived chats — Enter to resume, Ctrl+D to delete\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/export")}   [path|on|off] live-export this chat to a file, updated after every turn\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
+  appendTranscript(`  ${chalk.cyanBright("/main")}     return to the main conversation\n\n`);
 }
 
 // Shared by /status and /task goal (bare or "status") — same one-liner

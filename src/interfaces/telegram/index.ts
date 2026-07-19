@@ -462,6 +462,7 @@ const HELP_TEXT = `local commands
 /retry — remove the previous reply and run the last message again
 /compact — summarize old messages and keep the recent turns
 /archive [title] — rename (optional), archive this conversation and start a new one
+/main — return to the main conversation
 /resume [query] — reopen an archived conversation with its full context; no query lists them with buttons to open or delete
 /think on|low|off — set reasoning mode
 /task none|todo|plan|goal — set task mode (goal: next message becomes the objective)
@@ -550,6 +551,11 @@ bot.command("archive", async (ctx) => {
   links.set(ctx.chat.id, fresh.id);
   restartEventSync(ctx.chat.id, fresh.id);
   await send(ctx.chat.id, `[ultron] archived "${archived?.title ?? title ?? ""}". Started a new chat.`);
+});
+
+bot.command("main", async (ctx) => {
+  const main = chats.activateMain();
+  await resumeInto(ctx.chat.id, main);
 });
 
 bot.command("resume", async (ctx) => {

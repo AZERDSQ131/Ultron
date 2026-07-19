@@ -549,6 +549,10 @@ async function handleResumeChat(res: ServerResponse, chatId: string): Promise<vo
   sendJson(res, 200, { chat: resumed });
 }
 
+async function handleMainChat(res: ServerResponse): Promise<void> {
+  sendJson(res, 200, { chat: chats.activateMain() });
+}
+
 // Lightweight liveness probe — a real (cheap) DB query but no LLM call — so
 // anything that needs to know the process is up and the shared SQLite file
 // is reachable (a future Telegram bot, a supervisor script) doesn't have to
@@ -730,6 +734,10 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/chats") {
     handleCreateChat(req, res).catch((err) => console.error("[ultron-web] create chat failed:", err));
+    return;
+  }
+  if (req.method === "POST" && path === "/api/main") {
+    handleMainChat(res).catch((err) => console.error("[ultron-web] activate main chat failed:", err));
     return;
   }
   if (chatMatch && chatMatch[2] === "/archive" && req.method === "POST") {

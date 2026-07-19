@@ -148,6 +148,15 @@ export class ChatRegistry {
     return chat;
   }
 
+  // The main conversation is a stable return point shared by the CLI and
+  // Telegram. It is never a separate in-memory pointer: the legacy stable
+  // thread id is the canonical chat row, and activating it also unarchives it.
+  activateMain(): Chat {
+    const existing = this.ensure(LEGACY_CHAT_ID, "Main");
+    if (existing.title === DEFAULT_CHAT_TITLE) this.rename(existing.id, "Main");
+    return this.unarchive(existing.id) ?? this.get(existing.id)!;
+  }
+
   // Archiving is purely a metadata flag, not a data export: the chat's full
   // LangGraph checkpoint state (messages, tool calls, everything) is left
   // untouched under the same thread_id, so unarchive() below gets it back

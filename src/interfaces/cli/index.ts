@@ -257,6 +257,14 @@ async function main() {
     appendTranscript(uiDim(`[ultron] resumed "${target.title}".\n\n`));
   };
 
+  const switchToMain = async (): Promise<void> => {
+    const main = chats.activateMain();
+    currentChatId = main.id;
+    setActivePermissionLabel(chats.getSecurityMode(currentChatId));
+    showRestoredMessages(await listChatMessages(graph, currentChatId), config.nemotronModel);
+    appendTranscript(uiDim(`[ultron] switched to main conversation.\n\n`));
+  };
+
   process.on("SIGINT", () => {
     if (stopping) process.exit(0);
     stopping = true;
@@ -605,6 +613,10 @@ async function main() {
           }
           case "/resume": {
             await resumeChat(contextLine, commandArgument);
+            continue;
+          }
+          case "/main": {
+            await switchToMain();
             continue;
           }
           case "/think":

@@ -251,6 +251,17 @@ async function main() {
     appendTranscript(uiDim(`[ultron] resumed "${target.title}".\n\n`));
   };
 
+  const switchToMain = async (): Promise<void> => {
+    const data = await apiPost("/api/main");
+    currentChatId = data.chat.id;
+    currentChatTitle = data.chat.title;
+    await syncEventCursor();
+    setActivePermissionLabel(data.chat.securityMode);
+    const { messages } = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/messages`);
+    showRestoredMessages(messages as ChatMessage[], modelName);
+    appendTranscript(uiDim("[ultron] switched to main conversation.\n\n"));
+  };
+
   process.on("SIGINT", () => {
     if (stopping) process.exit(0);
     stopping = true;
@@ -455,6 +466,9 @@ async function main() {
             continue;
           case "/resume":
             await resumeChat(contextLine, commandArgument);
+            continue;
+          case "/main":
+            await switchToMain();
             continue;
           case "/think":
             appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
