@@ -40,6 +40,7 @@ export interface Chat {
   scheduleId: string | null;
   securityMode: SecurityMode;
   archivedAt: string | null;
+  exportPath: string | null;
 }
 
 interface ChatRow {
@@ -51,6 +52,7 @@ interface ChatRow {
   schedule_id?: string | null;
   security_mode?: string | null;
   archived_at?: string | null;
+  export_path?: string | null;
 }
 
 function toChat(row: ChatRow): Chat {
@@ -63,6 +65,7 @@ function toChat(row: ChatRow): Chat {
     scheduleId: row.schedule_id ?? null,
     securityMode: (row.security_mode as SecurityMode | null) ?? DEFAULT_SECURITY_MODE,
     archivedAt: row.archived_at ?? null,
+    exportPath: row.export_path ?? null,
   };
 }
 
@@ -90,6 +93,7 @@ export class ChatRegistry {
     try { this.db.exec("ALTER TABLE chats ADD COLUMN schedule_id TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN security_mode TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN archived_at TEXT"); } catch { /* already migrated */ }
+    try { this.db.exec("ALTER TABLE chats ADD COLUMN export_path TEXT"); } catch { /* already migrated */ }
   }
 
   // Active chats only — what every sidebar/picker/startup-resume should see.
@@ -123,7 +127,7 @@ export class ChatRegistry {
 
   create(title: string = DEFAULT_CHAT_TITLE, agentId: string | null = null, scheduleId: string | null = null): Chat {
     const now = new Date().toISOString();
-    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId, scheduleId, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null };
+    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId, scheduleId, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at, agent_id, schedule_id) VALUES (?, ?, ?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.agentId, chat.scheduleId);
@@ -137,7 +141,7 @@ export class ChatRegistry {
     const existing = this.get(id);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null };
+    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt);
@@ -177,6 +181,13 @@ export class ChatRegistry {
 
   setSecurityMode(id: string, mode: SecurityMode): void {
     this.db.prepare("UPDATE chats SET security_mode = ? WHERE id = ?").run(mode, id);
+  }
+
+  // Live export target (see src/core/memory/exporter.ts) — writing this
+  // is what turns on the per-turn auto-rewrite hook; clearing it turns
+  // the export off without deleting the file already on disk.
+  setExportPath(id: string, path: string | null): void {
+    this.db.prepare("UPDATE chats SET export_path = ? WHERE id = ?").run(path, id);
   }
 
   touch(id: string): void {

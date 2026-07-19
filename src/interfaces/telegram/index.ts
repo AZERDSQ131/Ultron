@@ -19,6 +19,7 @@ import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
+import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
 import { getTelegramLinkRegistry } from "../../core/memory/telegramLinks.js";
@@ -285,6 +286,9 @@ async function runSingleTurn(
       const humanText = humanTextFromInput(input);
       if (humanText && visibleText.trim()) void recordUserModelObservation(ultronChatId, humanText, visibleText);
 
+      const exportedChat = chats.get(ultronChatId);
+      if (exportedChat) void maybeExportChat(graph, exportedChat);
+
       return { status: "ok", finalText: visibleText };
     });
   } catch (err) {
@@ -407,6 +411,7 @@ const HELP_TEXT = `local commands
 /security bypass|accept_edit|manual — same, set directly
 /verbose on|off — show model/tokens/time/cost after each reply
 /memory [clear|forget <id>] — list, clear, or remove auto-accumulated observations about you
+/export [path|on|off] — live-export this chat to a file, updated after every turn
 /clear — wipe this conversation's memory and delete what ULTRON can of its own recent messages here (Telegram limits bot deletions to ~48h, own messages only)
 /theme — not applicable here (no terminal to theme); accepted for parity, no-op
 /quit — stop the ULTRON Telegram bot process`;
@@ -567,6 +572,31 @@ bot.command("security", async (ctx) => {
   }
   chats.setSecurityMode(ultronChatId, arg);
   await send(ctx.chat.id, `[ultron] tool approval set to ${arg}.`);
+});
+
+bot.command("export", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  const chat = chats.get(ultronChatId);
+  if (!chat) return;
+  const arg = ctx.match?.trim() ?? "";
+  if (!arg) {
+    await send(
+      ctx.chat.id,
+      chat.exportPath
+        ? `[ultron] live export: ${chat.exportPath} (updates after every turn) — /export off to stop.`
+        : "[ultron] no live export active for this chat — /export [path] to start, /export off to stop.",
+    );
+    return;
+  }
+  if (arg.toLowerCase() === "off") {
+    chats.setExportPath(ultronChatId, null);
+    await send(ctx.chat.id, "[ultron] live export stopped (file left as-is).");
+    return;
+  }
+  const path = arg.toLowerCase() === "on" ? defaultExportPath(chat) : resolveExportPath(arg);
+  chats.setExportPath(ultronChatId, path);
+  await maybeExportChat(graph, { ...chat, exportPath: path });
+  await send(ctx.chat.id, `[ultron] live export started: ${path} (updates after every turn).`);
 });
 
 bot.command("permissions", async (ctx) => {

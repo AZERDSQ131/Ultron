@@ -313,6 +313,34 @@ nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
 5. Corriger les écarts documentaires au fur et à mesure de chaque nouveau
    changement de code, conformément à `AGENTS.md`.
 
+## Export en direct d'une conversation
+
+- `src/core/memory/exporter.ts` : un chat peut avoir un fichier d'export
+  actif (`Chat.exportPath`, colonne `export_path` dans `chats`,
+  `ChatRegistry.setExportPath`) — pas un dump ponctuel, un fichier Markdown
+  réécrit intégralement (écriture atomique tmp+rename) après chaque tour
+  réussi. Plusieurs chats peuvent chacun avoir leur propre export actif en
+  parallèle sans se marcher dessus : le chemin par défaut
+  (`defaultExportPath`) inclut le slug du titre et les 8 premiers
+  caractères de l'id du chat, donc deux chats au même titre n'écrasent
+  jamais le même fichier. Racine par défaut : `exports/` à côté du fichier
+  SQLite (`dirname(config.databasePath)`), un chemin explicite peut être
+  relatif à ce dossier ou absolu.
+- Commande `/export [path|on|off]`, identique sur les trois interfaces
+  (CLI local `src/interfaces/cli/index.ts`, CLI distant
+  `src/interfaces/cli/remote.ts` via `GET|POST|DELETE
+  /api/chats/:id/export`, web via les mêmes routes, Telegram
+  `src/interfaces/telegram/index.ts`) : bare affiche l'état, un chemin ou
+  `on` démarre l'export (et écrit immédiatement), `off` l'arrête sans
+  supprimer le fichier déjà écrit.
+- Hook de réécriture après chaque tour : `executeTurn` (CLI local, avant
+  son `return` final), `handleTurn`/`handleApprove` (serveur web, juste
+  après chaque appel à `streamGraphTurn`), `runSingleTurn` (Telegram, avant
+  son `return`) — les trois appellent `maybeExportChat(graph, chat)`, qui
+  ne fait rien si `exportPath` est `null` (donc sûr à appeler
+  inconditionnellement à la fin de chaque tour, y compris en mode goal où
+  ces fonctions sont rappelées en boucle).
+
 ## To-do : persistance par chat et reprise de tâche non liée
 
 La liste to-do (`memory/todos.ts`) est scoppée par `chat_id`, donc elle

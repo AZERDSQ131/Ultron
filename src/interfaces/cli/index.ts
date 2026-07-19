@@ -20,6 +20,7 @@ import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
+import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { buildContinuationPrompt, gatherCodeContext, judgeGoal } from "../../core/goalJudge.js";
@@ -446,6 +447,8 @@ async function main() {
           .trim();
         if (humanText && finalText.trim()) void recordUserModelObservation(chatId, humanText, finalText);
       }
+      const exportedChat = chats.get(chatId);
+      if (exportedChat) void maybeExportChat(graph, exportedChat);
       return { finalText, aborted: false, errored: false };
     } catch (err) {
       if (controller.signal.aborted) {
@@ -705,6 +708,34 @@ async function main() {
             if (command === "/verbose off" || command === "/verbose false") {
               verbose = false;
               appendTranscript(uiDim("[ultron] verbose off.\n\n"));
+              continue;
+            }
+            if (commandName === "/export") {
+              const currentChat = chats.get(currentChatId);
+              if (!currentChat) {
+                appendTranscript(chalk.yellow("[ultron] no active chat.\n\n"));
+                continue;
+              }
+              const arg = commandArgument.trim();
+              if (!arg) {
+                appendTranscript(
+                  uiDim(
+                    currentChat.exportPath
+                      ? `[ultron] live export: ${currentChat.exportPath} (updates after every turn) — /export off to stop.\n\n`
+                      : "[ultron] no live export active for this chat — /export [path] to start, /export off to stop.\n\n",
+                  ),
+                );
+                continue;
+              }
+              if (arg.toLowerCase() === "off") {
+                chats.setExportPath(currentChatId, null);
+                appendTranscript(uiDim("[ultron] live export stopped (file left as-is).\n\n"));
+                continue;
+              }
+              const path = resolveExportPath(arg === "on" ? defaultExportPath(currentChat) : arg);
+              chats.setExportPath(currentChatId, path);
+              await maybeExportChat(graph, { ...currentChat, exportPath: path });
+              appendTranscript(uiDim(`[ultron] live export started: ${path} (updates after every turn).\n\n`));
               continue;
             }
             if (commandName === "/memory") {

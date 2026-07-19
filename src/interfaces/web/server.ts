@@ -22,6 +22,7 @@ import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
+import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
@@ -401,6 +402,8 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   if (!isRetry && (taskMode === "todo" || taskMode === "plan")) todos.clear(chatId);
 
   await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(expandSkillMentions(input))] });
+  const exportedChat = chats.get(chatId);
+  if (exportedChat) void maybeExportChat(graph, exportedChat);
 }
 
 // Resumes a thread paused on toolsNode's interrupt() (see graph.ts) with the
@@ -418,6 +421,34 @@ async function handleApprove(req: IncomingMessage, res: ServerResponse): Promise
   const thinkingMode: ThinkingMode = payload.thinking ?? "full";
   const taskMode: TaskMode = payload.taskMode ?? "none";
   await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, new Command({ resume: payload.decisions }));
+  const exportedChat = chats.get(chatId);
+  if (exportedChat) void maybeExportChat(graph, exportedChat);
+}
+
+async function handleGetExport(res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const chat = chats.get(chatId);
+  sendJson(res, 200, { path: chat?.exportPath ?? null });
+}
+
+async function handleSetExport(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const chat = chats.get(chatId);
+  if (!chat) {
+    sendJson(res, 404, { error: "chat not found" });
+    return;
+  }
+  const payload = await readJson<{ path?: string }>(req);
+  const path = payload?.path?.trim() ? resolveExportPath(payload.path.trim()) : defaultExportPath(chat);
+  chats.setExportPath(chatId, path);
+  await maybeExportChat(graph, { ...chat, exportPath: path });
+  sendJson(res, 200, { path });
+}
+
+async function handleStopExport(res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  chats.setExportPath(chatId, null);
+  sendJson(res, 200, { path: null });
 }
 
 async function handleSetSecurity(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
@@ -671,7 +702,7 @@ async function handleStatus(res: ServerResponse, chatId: string | undefined): Pr
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
-  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/todos|\/archive|\/resume)?$/);
+  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/todos|\/archive|\/resume|\/export)?$/);
 
   if (req.method === "GET" && path === "/api/chats") {
     handleListChats(res).catch((err) => console.error("[ultron-web] list chats failed:", err));
@@ -703,6 +734,18 @@ const server = createServer((req, res) => {
   }
   if (chatMatch && chatMatch[2] === "/todos" && req.method === "DELETE") {
     handleClearTodos(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] clear todos failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/export" && req.method === "GET") {
+    handleGetExport(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] get export failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/export" && req.method === "POST") {
+    handleSetExport(req, res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] set export failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/export" && req.method === "DELETE") {
+    handleStopExport(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] stop export failed:", err));
     return;
   }
   const streamMatch = path.match(/^\/api\/chats\/([^/]+)\/stream$/);

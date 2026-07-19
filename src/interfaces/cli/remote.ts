@@ -489,6 +489,28 @@ async function main() {
             }
             if (command === "/verbose on" || command === "/verbose true") { verbose = true; appendTranscript(uiDim("[ultron] verbose on.\n\n")); continue; }
             if (command === "/verbose off" || command === "/verbose false") { verbose = false; appendTranscript(uiDim("[ultron] verbose off.\n\n")); continue; }
+            if (commandName === "/export") {
+              const arg = commandArgument.trim();
+              if (!arg) {
+                const { path } = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/export`);
+                appendTranscript(
+                  uiDim(
+                    path
+                      ? `[ultron] live export: ${path} (updates after every turn) — /export off to stop.\n\n`
+                      : "[ultron] no live export active for this chat — /export [path] to start, /export off to stop.\n\n",
+                  ),
+                );
+                continue;
+              }
+              if (arg.toLowerCase() === "off") {
+                await apiDelete(`/api/chats/${encodeURIComponent(currentChatId)}/export`);
+                appendTranscript(uiDim("[ultron] live export stopped (file left as-is).\n\n"));
+                continue;
+              }
+              const { path } = await apiPost(`/api/chats/${encodeURIComponent(currentChatId)}/export`, arg === "on" ? {} : { path: arg });
+              appendTranscript(uiDim(`[ultron] live export started: ${path} (updates after every turn).\n\n`));
+              continue;
+            }
             if (commandName === "/memory") {
               appendTranscript(chalk.yellow("[ultron] /memory isn't available from the remote CLI yet (no server endpoint) — use the local CLI on the machine running the graph.\n\n"));
               continue;
