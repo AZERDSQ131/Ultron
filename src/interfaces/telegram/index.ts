@@ -7,6 +7,7 @@ import { config } from "../../config.js";
 import {
   archiveThread,
   buildGraph,
+  clearThreadMessages,
   compactThread,
   estimateContextUsage,
   getPendingApproval,
@@ -15,6 +16,7 @@ import {
   type TaskMode,
   type ToolApprovalDecision,
 } from "../../core/graph.js";
+import { markdownToTelegramHtml } from "./format.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
@@ -103,8 +105,38 @@ function trackSent(telegramChatId: number, messageId: number): void {
   if (ids.length > 300) ids.shift();
   sentMessageIds.set(telegramChatId, ids);
 }
+// Truncated well under Telegram's 4096-char hard cap on the raw markdown
+// before conversion, since **bold**/`code` markers grow a little once
+// turned into <b>/<code> tags — leaves headroom so the converted HTML
+// still fits in the common case instead of needing the plain-text fallback.
+const RAW_TEXT_BUDGET = 3500;
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+
+function prepareOutgoing(text: string): { raw: string; html: string; htmlFits: boolean } {
+  const raw = text.length > RAW_TEXT_BUDGET ? `${text.slice(0, RAW_TEXT_BUDGET)}\n…` : text;
+  const html = markdownToTelegramHtml(raw) || "(empty)";
+  return { raw, html, htmlFits: html.length <= TELEGRAM_MESSAGE_LIMIT };
+}
+
+// ULTRON's replies use Markdown (**bold**, `code`, # headers, ...) — see
+// markdownToTelegramHtml's comment for why this converts to Telegram's HTML
+// parse mode rather than MarkdownV2. If the converted HTML fails to parse
+// for any reason not anticipated here (an edge case in the converter, an
+// oversized result), this falls back to the plain, unformatted raw text
+// rather than losing the message entirely — delivering something plain
+// beats delivering nothing.
 async function send(telegramChatId: number, text: string, extra?: Parameters<typeof bot.api.sendMessage>[2]): Promise<{ message_id: number }> {
-  const msg = await bot.api.sendMessage(telegramChatId, text.slice(0, 4096) || "(empty)", extra);
+  const { raw, html, htmlFits } = prepareOutgoing(text);
+  if (htmlFits) {
+    try {
+      const msg = await bot.api.sendMessage(telegramChatId, html, { parse_mode: "HTML", ...extra });
+      trackSent(telegramChatId, msg.message_id);
+      return msg;
+    } catch (err) {
+      debugLog(`HTML send failed, falling back to plain text chat=${telegramChatId} error=${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  const msg = await bot.api.sendMessage(telegramChatId, raw.slice(0, TELEGRAM_MESSAGE_LIMIT) || "(empty)", extra);
   trackSent(telegramChatId, msg.message_id);
   return msg;
 }
@@ -118,8 +150,19 @@ const activeAborts = new Map<string, AbortController>();
 // final text. "message is not modified" 400s (editing to identical text)
 // are expected and swallowed rather than logged as real errors.
 async function safeEditMessage(chatId: number, messageId: number, text: string): Promise<void> {
+  const { raw, html, htmlFits } = prepareOutgoing(text);
+  if (htmlFits) {
+    try {
+      await bot.api.editMessageText(chatId, messageId, html, { parse_mode: "HTML" });
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("message is not modified")) return;
+      debugLog(`HTML edit failed, falling back to plain text chat=${chatId} error=${message}`);
+    }
+  }
   try {
-    await bot.api.editMessageText(chatId, messageId, text.slice(0, 4096) || "(empty reply)");
+    await bot.api.editMessageText(chatId, messageId, raw.slice(0, TELEGRAM_MESSAGE_LIMIT) || "(empty reply)");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!message.includes("message is not modified")) debugLog(`edit failed chat=${chatId} error=${message}`);
@@ -357,7 +400,7 @@ const HELP_TEXT = `local commands
 /security bypass|accept_edit|manual — same, set directly
 /verbose on|off — show model/tokens/time/cost after each reply
 /memory [clear|forget <id>] — list, clear, or remove auto-accumulated observations about you
-/clear — delete what ULTRON can of its own recent messages here (Telegram limits bot deletions to ~48h, own messages only)
+/clear — wipe this conversation's memory and delete what ULTRON can of its own recent messages here (Telegram limits bot deletions to ~48h, own messages only)
 /theme — not applicable here (no terminal to theme); accepted for parity, no-op
 /quit — stop the ULTRON Telegram bot process`;
 
@@ -647,6 +690,18 @@ bot.command("model", async (ctx) => {
 // older than ~48h — a genuine terminal-style clear isn't possible here, this
 // is the closest real equivalent rather than a silent no-op.
 bot.command("clear", async (ctx) => {
+  // Unlike the CLI/web, where /clear only redraws the terminal (the
+  // scrollback is still visible, so the user can see for themselves that
+  // history persists), Telegram shows no such reminder — a user typing
+  // /clear here reasonably means "forget this conversation", not just
+  // "tidy up my screen". Confirmed by a real report: saying "Salut" after
+  // /clear got a reply that referenced the pre-clear greeting, because only
+  // the visible messages were being touched, not the model's actual memory
+  // of the thread. So /clear now wipes the thread's message state too, on
+  // top of deleting what Telegram lets a bot delete of its own messages.
+  const ultronChatId = currentChatId(ctx.chat.id);
+  await clearThreadMessages(graph, ultronChatId);
+
   const ids = sentMessageIds.get(ctx.chat.id) ?? [];
   sentMessageIds.delete(ctx.chat.id);
   let deleted = 0;
@@ -658,7 +713,10 @@ bot.command("clear", async (ctx) => {
       // Too old (>48h) or already gone — nothing to do.
     }
   }
-  await send(ctx.chat.id, `[ultron] deleted ${deleted}/${ids.length} of my own recent message(s) (Telegram limits bot deletions to ~48h, own messages only).`);
+  await send(
+    ctx.chat.id,
+    `[ultron] conversation memory cleared. Deleted ${deleted}/${ids.length} of my own recent message(s) too (Telegram limits bot deletions to ~48h, own messages only).`,
+  );
 });
 
 bot.command("quit", async (ctx) => {

@@ -804,6 +804,18 @@ export async function archiveThread(
   return { path: archivePath, title };
 }
 
+// Wipes a thread's conversation state in place — same RemoveMessage(
+// REMOVE_ALL_MESSAGES) resumeThread uses before splicing in archived
+// messages, exposed standalone for Telegram's /clear: unlike the CLI/web,
+// where /clear only redraws the terminal (the model's actual memory of the
+// thread is untouched — the user can still see the old scrollback and knows
+// it), a Telegram chat has no visible scrollback reminder that server-side
+// history persists, so a Telegram user typing /clear reasonably means "the
+// model should forget this conversation", not just "redraw my screen".
+export async function clearThreadMessages(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<void> {
+  await graph.updateState({ configurable: { thread_id: threadId } }, { messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES })] });
+}
+
 export async function resumeThread(
   graph: ReturnType<typeof buildGraph>,
   threadId: string,

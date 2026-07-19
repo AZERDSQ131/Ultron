@@ -61,10 +61,18 @@ pending tool-approval interrupt (`accept_edit`/`manual` security mode)
 renders as one inline-keyboard Approve/Deny for the whole batch, not per
 call. Every CLI local command has a working equivalent — see `/help` inside
 the bot for the full list; interactive CLI pickers become inline keyboards,
-`/clear` deletes what Telegram lets a bot delete of its own recent messages
-(own messages only, ~48h window), and `/theme` is an intentional no-op
-(Telegram's own app controls that). Requires `TELEGRAM_BOT_TOKEN` in `.env`
-(see `.env.example`).
+`/clear` wipes this conversation's actual message memory (`clearThreadMessages`
+in `graph.ts`) in addition to deleting what Telegram lets a bot delete of its
+own recent messages (own messages only, ~48h window) — unlike the CLI/web,
+where `/clear` only redraws the terminal and leaves the model's memory of the
+thread untouched, since there the visible scrollback is a constant reminder
+that history persists; Telegram has no such reminder, so the same "just
+redraw" behavior read as a memory bug. `/theme` is an intentional no-op
+(Telegram's own app controls that). Replies are converted from ULTRON's
+Markdown (`**bold**`, `` `code` ``, `# headers`, `~~strikethrough~~`, links)
+to Telegram's HTML parse mode (`src/interfaces/telegram/format.ts`), with a
+plain-text fallback if a reply's formatting somehow fails to parse. Requires
+`TELEGRAM_BOT_TOKEN` in `.env` (see `.env.example`).
 
 Conversations are organized as chats, each with its own id and title,
 listed in the web UI's sidebar (create, rename, delete, switch between

@@ -100,9 +100,23 @@ interface at a time.
   loop, ported as a sequential loop of independent turns — see `runTurn`'s comment on why it must
   not recurse into a still-held per-chat lock, the way `server.ts`'s SSE goal continuation currently
   does), `/permissions`, `/security`, `/verbose`, `/memory`, `/clear`, `/theme`, `/quit`. Interactive
-  CLI pickers (arrow-key selection) become inline keyboards; `/clear` deletes what Telegram lets a
-  bot delete of its own recent messages (own messages only, ~48h window) instead of redrawing a
-  screen; `/theme` is an intentional no-op (Telegram's own app controls that, not ULTRON).
+  CLI pickers (arrow-key selection) become inline keyboards; `/theme` is an intentional no-op
+  (Telegram's own app controls that, not ULTRON).
+- `/clear` wipes the conversation's actual message state (`clearThreadMessages` in `graph.ts`,
+  reusing `resumeThread`'s `RemoveMessage(REMOVE_ALL_MESSAGES)` pattern), on top of deleting what
+  Telegram lets a bot delete of its own recent messages (own messages only, ~48h window). This is
+  deliberately different from the CLI/web, where `/clear` only redraws the terminal and leaves the
+  model's memory of the thread untouched — there the visible scrollback is a constant reminder that
+  history persists, so that's a reasonable reading of "clear"; Telegram shows no such reminder, and
+  a real report confirmed the confusion (saying "Salut" again after `/clear` got a reply that
+  referenced the pre-clear greeting).
+- Replies are converted from ULTRON's Markdown (`**bold**`, `` `code` ``, `# headers`,
+  `~~strikethrough~~`, `[text](url)`) to Telegram's HTML parse mode (`src/interfaces/telegram/format.ts`,
+  `markdownToTelegramHtml`) rather than MarkdownV2 — MarkdownV2 requires escaping a long list of
+  punctuation anywhere it appears outside formatting, exactly what an LLM's free-form prose trips
+  over; HTML only needs `&`/`<`/`>` escaped, which is mechanical. Falls back to the plain
+  unformatted text (still truncated to Telegram's 4096-char limit) if the converted HTML is
+  oversized or fails to parse for any reason, rather than losing the message.
 - Session state with no natural persistence slot (`thinkingMode`, `taskMode`, `verbose`) is
   in-memory per ULTRON chat, reset on bot restart — same lifetime as the CLI's process-local
   variables.
