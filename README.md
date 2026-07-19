@@ -9,20 +9,80 @@ This repository is public from the beginning. It is an evolving experiment,
 not a finished autonomous assistant. The architecture is intentionally small
 enough to inspect, change and understand.
 
+## Architecture
+
+ULTRON's process — the LangGraph loop, every tool, and the SQLite database
+that holds memory and chat history — is meant to run permanently on one
+always-on machine (a home server; the reference deployment is a Jetson Orin
+Nano over Tailscale), not on your everyday laptop or phone. Every other
+device is a client that talks to that one process, so a conversation looks
+the same and shares the same memory no matter which one you're on:
+
+```text
+                         ┌──────────────────────────────┐
+                         │   Home server (always on)     │
+                         │   LangGraph loop · tools ·     │
+                         │   SQLite (chats + memory)      │
+                         │                                │
+                         │  ┌──────────┐   ┌────────────┐ │
+                         │  │ web UI   │   │ Telegram   │ │
+                         │  │ (HTTP)   │   │ bot (long  │ │
+                         │  │          │   │ polling)   │ │
+                         │  └──────────┘   └────────────┘ │
+                         └───────────────┬────────────────┘
+                                         │ Tailscale (HTTP/SSE)
+                    ┌────────────────────┼────────────────────┐
+                    │                    │                    │
+             ┌──────▼──────┐     ┌───────▼──────┐     ┌───────▼──────┐
+             │  Browser     │     │  `ultron` CLI │     │  Telegram    │
+             │  (any device)│     │  (laptop/Mac) │     │  app (phone) │
+             └──────────────┘     └───────────────┘     └──────────────┘
+```
+
+Two ways to run the CLI, both `src/interfaces/cli/`:
+
+- **Local** (`index.ts`, `pnpm dev`) — runs the LangGraph loop in-process.
+  This is what the home server itself runs, or what you'd use for local
+  development. Needs `NVIDIA_API_KEY` and the local database directly.
+- **Remote** (`remote.ts`, `pnpm remote`, or the `ultron` bin once linked) —
+  a thin network client that talks to a running web server over HTTP/SSE
+  instead. This is what a laptop should run: point `ULTRON_SERVER_URL` at
+  the home server and `ultron` behaves identically to the local CLI (same
+  banner, same prompts, same pickers, same streaming) — it just executes
+  the turn over the network instead of in-process, and needs no API key or
+  database of its own. The two share every rendering primitive
+  (`src/interfaces/cli/ui.ts`) specifically so they stay visually and
+  behaviorally identical.
+
+The home server can also reach back out to a Mac over SSH (`host: "mac"` on
+the filesystem/shell tools, and `open_app`/`applescript_run` in
+`src/core/tools/macos.ts`) to run shell commands, read/write files, or drive
+AppleScript-scriptable apps (Notes, Calendar, Reminders, Finder…) there —
+useful when the server itself doesn't run macOS but still needs to act on a
+Mac. See `src/core/tools/remoteHost.ts` and the `MAC_SSH_HOST` variable
+below.
+
 ## Current state
 
 The current version provides a terminal conversation loop with:
 
 - Nemotron through NVIDIA's OpenAI-compatible API;
 - a human-readable `MEMORY.md` for durable facts, preferences and context;
+- a passive user model: a separate LLM call quietly extracts durable
+  preferences/facts/patterns after each turn, without being asked, and feeds
+  them back into the prompt to adjust tone and defaults — never merged into
+  `MEMORY.md` automatically, reviewable and clearable with `/memory`;
 - token streaming, elapsed-time statistics with an exact generated-token count
   (real usage from NVIDIA's endpoint, not an estimate) and an estimated
   context gauge;
 - basic terminal Markdown styling, including `**bold**` text;
 - local slash commands for stopping, retrying, compacting and tuning reasoning;
-- resumable text archives through `/archive` and `/resume`;
-- thirteen tools for shell commands, files, HTTP/web requests, processes,
-  schedules and the current date/time;
+- `/archive` and `/resume`: archiving flips a metadata flag on a chat (its
+  full LangGraph checkpoint state is left untouched), so resuming reopens it
+  with everything intact — tool calls included, not a lossy text
+  reconstruction;
+- over twenty tools for shell commands, files, HTTP/web requests, processes,
+  schedules, macOS automation and the current date/time;
 - declared tool scopes (`read`, `write`, `destructive`) for architectural clarity;
 - retry handling for transient API errors and malformed plain-text tool calls;
 - clean Ctrl+C interruption, including during an in-flight model request.
@@ -41,8 +101,34 @@ SQLite database (`ultron-state.sqlite3`) — a message sent from one interface
 shows up in the other, and `/compact`, `/retry` and `/archive` act on the
 same history no matter which interface issued them. `GET /api/health` is a
 liveness probe (process uptime, model, whether the shared SQLite file is
-reachable) — useful for a future Telegram process or a supervisor script to
-check before assuming ULTRON is up.
+reachable) — useful for the Telegram process or a supervisor script to check
+before assuming ULTRON is up.
+
+A Telegram bot (`pnpm telegram`, grammY, long polling) is a third entry
+point: same `buildGraph()`, same shared SQLite file, so a Telegram chat has
+the same memory, tools and personality as the CLI and the web UI. Which
+ULTRON chat a Telegram chat currently points at is a movable pointer
+(`/archive` and `/resume` both repoint it), not a fixed mapping —
+every chat it touches is a normal row in `ChatRegistry`, visible from the
+web sidebar too. There's no true token-by-token streaming (Telegram
+rate-limits message edits); a single placeholder message per turn is
+updated when the active tool changes and once more with the final text. A
+pending tool-approval interrupt (`accept_edit`/`manual` security mode)
+renders as one inline-keyboard Approve/Deny for the whole batch, not per
+call. Every CLI local command has a working equivalent — see `/help` inside
+the bot for the full list; interactive CLI pickers become inline keyboards,
+`/clear` wipes this conversation's actual message memory (`clearThreadMessages`
+in `graph.ts`) in addition to deleting what Telegram lets a bot delete of its
+own recent messages (own messages only, ~48h window) — unlike the CLI/web,
+where `/clear` only redraws the terminal and leaves the model's memory of the
+thread untouched, since there the visible scrollback is a constant reminder
+that history persists; Telegram has no such reminder, so the same "just
+redraw" behavior read as a memory bug. `/theme` is an intentional no-op
+(Telegram's own app controls that). Replies are converted from ULTRON's
+Markdown (`**bold**`, `` `code` ``, `# headers`, `~~strikethrough~~`, links)
+to Telegram's HTML parse mode (`src/interfaces/telegram/format.ts`), with a
+plain-text fallback if a reply's formatting somehow fails to parse. Requires
+`TELEGRAM_BOT_TOKEN` in `.env` (see `.env.example`).
 
 Conversations are organized as chats, each with its own id and title,
 listed in the web UI's sidebar (create, rename, delete, switch between
@@ -67,9 +153,8 @@ The web UI also has:
 - a small set of global keyboard shortcuts (new chat, search, settings,
   toggle sidebar…) — the full list is in the Shortcuts tab of that panel.
 
-Telegram is the next interface planned. Mail and calendar integrations are
-still pending because they require OAuth. The separate Codex-style coding app
-is explicitly deferred.
+Mail and calendar integrations are still pending because they require OAuth.
+The separate Codex-style coding app is explicitly deferred.
 
 ## Design principles
 
@@ -107,23 +192,39 @@ Available configuration:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `NVIDIA_API_KEY` | required | NVIDIA API authentication |
-| `NEMOTRON_MODEL` | `z-ai/glm-5.2` | Model identifier |
+| `NEMOTRON_MODEL` | `deepseek-ai/deepseek-v4-flash` | Model identifier |
 | `NEMOTRON_BASE_URL` | `https://integrate.api.nvidia.com/v1` | OpenAI-compatible endpoint |
 | `CONTEXT_WINDOW_TOKENS` | `262144` | CLI context-gauge reference |
 | `WEB_PORT` | `4173` | Local web interface port |
 | `DATABASE_PATH` | `ultron-state.sqlite3` | Shared checkpoint database (CLI + web) |
 | `WEB_SEARCH_PROVIDER` | `auto` | `auto`, `tavily` or `duckduckgo` |
 | `TAVILY_API_KEY` | empty | Optional Tavily API key; required when the provider is `tavily` |
+| `TELEGRAM_BOT_TOKEN` | empty | Required only to run the Telegram interface |
+| `ULTRON_SERVER_URL` | empty | Required only by the remote CLI (`pnpm remote` / the `ultron` bin) — address of the ULTRON web server to connect to |
+| `MAC_SSH_HOST` | `mac` | SSH alias (from `~/.ssh/config`, on whichever machine ULTRON's process runs on) used by tools called with `host: "mac"`, and by `open_app`/`applescript_run` whenever ULTRON isn't itself running on macOS |
 
 ## Run and verify
 
 ```bash
-pnpm dev          # run the terminal interface directly from TypeScript
+pnpm dev          # run the terminal interface directly from TypeScript (local — runs the graph in-process)
+pnpm remote       # run the terminal interface as a network client (needs ULTRON_SERVER_URL, nothing else)
 pnpm web          # run the local web interface (http://localhost:4173 by default)
+pnpm telegram     # run the Telegram bot (long polling)
 pnpm typecheck    # strict TypeScript check
 pnpm build        # compile to dist/, including the web frontend assets
-pnpm start        # run the compiled terminal interface
+pnpm start        # run the compiled local terminal interface
+pnpm start:remote # run the compiled remote terminal interface
 pnpm start:web    # run the compiled web interface
+pnpm start:telegram # run the compiled Telegram bot
+```
+
+To get a plain `ultron` command that always connects to a remote server
+(what you'd want on a laptop, per the Architecture section above), after
+`pnpm build`, symlink the compiled remote client onto your `PATH`, e.g.:
+
+```bash
+ln -sf "$(pwd)/dist/interfaces/cli/remote.js" ~/.local/bin/ultron
+export ULTRON_SERVER_URL=http://<home-server-tailscale-ip>:4173
 ```
 
 There are currently no automated tests or lint script. The first tests should
@@ -143,32 +244,37 @@ The terminal handles these commands without sending them to Nemotron:
 | `/retry` | Remove the previous assistant turn and run the last user message again |
 | `/compact` | Summarize old session messages and keep the recent turns |
 | `/think on\|low\|off` | Enable full reasoning, low-effort reasoning, or no reasoning |
-| `/verbose on\|off` | Show or hide elapsed time and exact generated token count |
-| `/archive [title]` | Save the current session as a readable text file under `archives/`; without a title, use the first user message |
-| `/resume <archive-path>` | Restore a previously archived session into the current thread |
+| `/verbose on\|off` | Show or hide the per-turn stats line (model, input/output tokens, elapsed time, estimated cost) |
+| `/archive [title]` | Rename (optional) and archive the current chat, then start a new one |
+| `/resume` | Browse archived chats — Enter to reopen (full context restored), Ctrl+D to delete |
+| `/memory [clear\|forget <id>]` | List, clear, or remove auto-accumulated observations about you (see below) |
 | `/clear` | Clear the terminal display |
 | `/quit` | Exit ULTRON |
 
 Press Tab after starting a slash command to accept its completion. `/stop` can
 also be typed while Nemotron is generating; Ctrl+C remains available as the
-immediate interrupt. Archive files are local and ignored by Git.
+immediate interrupt.
 
-`/compact`, `/retry`, `/archive` and `/resume <path>` are also available from
-the web interface, typed the same way into its message box — see
-[Additional entry point — local web interface](PLAN.md) in PLAN.md.
+`/compact`, `/retry`, `/archive` and `/resume` are also available from
+the web interface (with its own rename/browse panels) and from Telegram —
+see [PLAN.md](PLAN.md) for interface-specific details.
 
 ## Repository map
 
 ```text
 src/core/                            shared engine — knows nothing about any interface
-  graph.ts                           LangGraph loop, tool routing, archive/resume
+  graph.ts                           LangGraph loop, tool routing
   llm/nemotron.ts                    NVIDIA/Nemotron client
   memory/checkpointer.ts             SQLite checkpoint saver shared by every interface
-  memory/chats.ts                    chat registry (list/create/rename/delete) shared by every interface
+  memory/chats.ts                    chat registry — list/create/rename/archive/resume/delete, shared by every interface
   tools/                             shell, filesystem, web and process tools
     search.ts                        DuckDuckGo/Tavily provider abstraction
+    remoteHost.ts                    runs a tool's command locally or on the Mac over SSH (host: "mac")
+    macos.ts                         open_app/applescript_run — local on macOS, remote over SSH otherwise
 src/interfaces/                      presentation layers — import from core, never the reverse
-  cli/index.ts                       terminal interface and streaming
+  cli/index.ts                       local terminal interface — runs the graph in-process
+  cli/remote.ts                      remote terminal interface — HTTP/SSE client for a ULTRON web server
+  cli/ui.ts                          rendering/state shared by index.ts and remote.ts (banner, pickers, streaming display)
   cli/markdown.ts                    terminal markdown rendering
   web/server.ts                      local web interface (HTTP + SSE streaming)
   web/public/                        web frontend (vanilla HTML/CSS + native ES modules, no framework)
@@ -184,6 +290,7 @@ src/interfaces/                      presentation layers — import from core, n
     js/api.js                        fetch wrappers for every backend route
     js/store.js                      shared app state
     js/markdown.js                   the same lightweight Markdown renderer as the CLI
+  telegram/index.ts                  Telegram bot (grammY, long polling)
 src/config.ts                        shared configuration (env vars, paths)
 MEMORY.md                            durable human-readable memory loaded each turn
 AGENT.md                             operational rules injected into the prompt
@@ -194,7 +301,7 @@ PLAN.md                              project roadmap and scope
 ## Roadmap
 
 1. ~~Terminal loop and classic file memory~~ — done.
-2. Telegram interface with grammY.
+2. ~~Telegram interface with grammY~~ — done.
 3. Mail and calendar tools with OAuth.
 4. ~~Background scheduled tasks once the core loop is trusted~~ — web foundation started: Agents, Agent-owned chats, persisted five-field cron schedules and scheduled execution chats are available in the web interface. Schedules are created conversationally through ULTRON's `schedule_task` tool.
 5. Separate Codex-style vibe-coding application — deferred.

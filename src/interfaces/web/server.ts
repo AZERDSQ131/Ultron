@@ -5,7 +5,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import {
-  archiveThread,
   buildGraph,
   compactThread,
   estimateContextUsage,
@@ -13,14 +12,17 @@ import {
   listChatMessages,
   prepareEdit,
   prepareRetry,
-  resumeThread,
   searchMessages,
   type TaskMode,
   type ToolApprovalDecision,
 } from "../../core/graph.js";
 import { config } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import { formatTurnStats } from "../../core/llm/usage.js";
+import { recordUserModelObservation } from "../../core/userModelExtractor.js";
+import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
+import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
@@ -229,6 +231,7 @@ async function streamGraphTurn(
 
       let generatedChars = 0;
       let outputTokens: number | undefined;
+      let inputTokens: number | undefined;
       const pendingToolCalls = new Map<string | number, { name: string; args: string }>();
 
       for await (const [chunk] of stream) {
@@ -266,8 +269,10 @@ async function streamGraphTurn(
           continue;
         }
 
-        const usage = (chunk as unknown as { usage_metadata?: { output_tokens?: number } }).usage_metadata;
+        const usage = (chunk as unknown as { usage_metadata?: { input_tokens?: number; output_tokens?: number } })
+          .usage_metadata;
         if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
+        if (usage?.input_tokens !== undefined) inputTokens = usage.input_tokens;
 
         if (typeof chunk.content !== "string" || !chunk.content) continue;
         generatedChars += chunk.content.length;
@@ -289,7 +294,31 @@ async function streamGraphTurn(
         // was interrupted before that chunk arrived.
         const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
         const contextTokens = await estimateContextUsage(graph, chatId);
-        sseWrite(res, "done", { elapsedSeconds, generatedTokens, contextTokens, maxTokens: config.contextWindowTokens });
+        const stats = formatTurnStats({
+          model: config.nemotronModel,
+          inputTokens: inputTokens ?? 0,
+          outputTokens: generatedTokens,
+          elapsedSeconds,
+        });
+        sseWrite(res, "done", {
+          elapsedSeconds,
+          generatedTokens,
+          inputTokens: inputTokens ?? 0,
+          stats,
+          contextTokens,
+          maxTokens: config.contextWindowTokens,
+        });
+
+        // Passive memory extraction (see userModelExtractor.ts) — never
+        // awaited, never blocks the SSE response; only for an actual new
+        // user message, not an approval-decision Command resume.
+        if ("messages" in input) {
+          const humanText = input.messages
+            .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+            .join("\n")
+            .trim();
+          if (humanText && finalText.trim()) void recordUserModelObservation(chatId, humanText, finalText);
+        }
 
         if (taskMode === "goal") {
           const goal = goals.get(chatId);
@@ -373,6 +402,8 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   if (!isRetry && (taskMode === "todo" || taskMode === "plan")) todos.clear(chatId);
 
   await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(expandSkillMentions(input))] });
+  const exportedChat = chats.get(chatId);
+  if (exportedChat) void maybeExportChat(graph, exportedChat);
 }
 
 // Resumes a thread paused on toolsNode's interrupt() (see graph.ts) with the
@@ -390,6 +421,34 @@ async function handleApprove(req: IncomingMessage, res: ServerResponse): Promise
   const thinkingMode: ThinkingMode = payload.thinking ?? "full";
   const taskMode: TaskMode = payload.taskMode ?? "none";
   await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, new Command({ resume: payload.decisions }));
+  const exportedChat = chats.get(chatId);
+  if (exportedChat) void maybeExportChat(graph, exportedChat);
+}
+
+async function handleGetExport(res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const chat = chats.get(chatId);
+  sendJson(res, 200, { path: chat?.exportPath ?? null });
+}
+
+async function handleSetExport(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const chat = chats.get(chatId);
+  if (!chat) {
+    sendJson(res, 404, { error: "chat not found" });
+    return;
+  }
+  const payload = await readJson<{ path?: string }>(req);
+  const path = payload?.path?.trim() ? resolveExportPath(payload.path.trim()) : defaultExportPath(chat);
+  chats.setExportPath(chatId, path);
+  await maybeExportChat(graph, { ...chat, exportPath: path });
+  sendJson(res, 200, { path });
+}
+
+async function handleStopExport(res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  chats.setExportPath(chatId, null);
+  sendJson(res, 200, { path: null });
 }
 
 async function handleSetSecurity(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
@@ -458,28 +517,25 @@ async function handleCompact(req: IncomingMessage, res: ServerResponse): Promise
   sendJson(res, 200, result);
 }
 
-async function handleArchive(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ chatId?: string; title?: string }>(req);
-  if (!payload || !requireChat(res, payload.chatId)) return;
-  const chatId = payload.chatId as string;
-  if (payload.title?.trim()) chats.rename(chatId, payload.title.trim());
-  const archive = await archiveThread(graph, chatId, chats.get(chatId)?.title);
-  sendJson(res, 200, archive);
+async function handleListArchivedChats(res: ServerResponse): Promise<void> {
+  sendJson(res, 200, { chats: chats.listArchived() });
 }
 
-async function handleResume(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ chatId?: string; path?: string }>(req);
-  if (!payload || !requireChat(res, payload.chatId)) return;
-  if (!payload.path) {
-    sendJson(res, 400, { error: "archive path is required" });
-    return;
-  }
-  try {
-    const count = await resumeThread(graph, payload.chatId as string, payload.path);
-    sendJson(res, 200, { count });
-  } catch (err) {
-    sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
-  }
+// Archiving is a metadata flag (see ChatRegistry.archive), not a data
+// export: the chat's LangGraph checkpoint state is untouched, so resuming
+// it later gets full context back, not a lossy text reconstruction.
+async function handleArchiveChat(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const payload = await readJson<{ title?: string }>(req);
+  const archived = chats.archive(chatId, payload?.title);
+  const fresh = chats.create();
+  sendJson(res, 200, { archived, fresh });
+}
+
+async function handleResumeChat(res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const resumed = chats.unarchive(chatId);
+  sendJson(res, 200, { chat: resumed });
 }
 
 // Lightweight liveness probe — a real (cheap) DB query but no LLM call — so
@@ -600,7 +656,7 @@ async function handleCreateAgent(req: IncomingMessage, res: ServerResponse): Pro
 }
 async function handleDeleteAgent(res: ServerResponse, id: string): Promise<void> {
   if (!agents.getAgent(id)) { sendJson(res, 404, { error: "unknown agent" }); return; }
-  for (const chat of chats.list().filter((candidate) => candidate.agentId === id)) chats.delete(chat.id);
+  for (const chat of chats.listAll().filter((candidate) => candidate.agentId === id)) chats.delete(chat.id);
   agents.deleteAgent(id);
   sendJson(res, 200, { deleted: true });
 }
@@ -646,14 +702,26 @@ async function handleStatus(res: ServerResponse, chatId: string | undefined): Pr
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
-  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/todos)?$/);
+  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/todos|\/archive|\/resume|\/export)?$/);
 
   if (req.method === "GET" && path === "/api/chats") {
     handleListChats(res).catch((err) => console.error("[ultron-web] list chats failed:", err));
     return;
   }
+  if (req.method === "GET" && path === "/api/chats/archived") {
+    handleListArchivedChats(res).catch((err) => console.error("[ultron-web] list archived chats failed:", err));
+    return;
+  }
   if (req.method === "POST" && path === "/api/chats") {
     handleCreateChat(req, res).catch((err) => console.error("[ultron-web] create chat failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/archive" && req.method === "POST") {
+    handleArchiveChat(req, res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] archive chat failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/resume" && req.method === "POST") {
+    handleResumeChat(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] resume chat failed:", err));
     return;
   }
   if (chatMatch && chatMatch[2] === "/messages" && req.method === "GET") {
@@ -666,6 +734,18 @@ const server = createServer((req, res) => {
   }
   if (chatMatch && chatMatch[2] === "/todos" && req.method === "DELETE") {
     handleClearTodos(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] clear todos failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/export" && req.method === "GET") {
+    handleGetExport(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] get export failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/export" && req.method === "POST") {
+    handleSetExport(req, res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] set export failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/export" && req.method === "DELETE") {
+    handleStopExport(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] stop export failed:", err));
     return;
   }
   const streamMatch = path.match(/^\/api\/chats\/([^/]+)\/stream$/);
@@ -710,14 +790,6 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/compact") {
     handleCompact(req, res).catch((err) => console.error("[ultron-web] compact handler failed:", err));
-    return;
-  }
-  if (req.method === "POST" && path === "/api/archive") {
-    handleArchive(req, res).catch((err) => console.error("[ultron-web] archive handler failed:", err));
-    return;
-  }
-  if (req.method === "POST" && path === "/api/resume") {
-    handleResume(req, res).catch((err) => console.error("[ultron-web] resume handler failed:", err));
     return;
   }
   if (req.method === "POST" && path === "/api/edit") {

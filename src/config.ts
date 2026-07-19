@@ -17,6 +17,10 @@ export const config = {
   nvidiaApiKey: required("NVIDIA_API_KEY"),
   nemotronModel: process.env.NEMOTRON_MODEL ?? "deepseek-ai/deepseek-v4-flash",
   nemotronBaseUrl: process.env.NEMOTRON_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
+  // Only required to run the Telegram interface (src/interfaces/telegram) —
+  // not validated with required() since every other entry point (CLI, web,
+  // scheduled tasks) must keep working without it.
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   webSearchProvider: process.env.WEB_SEARCH_PROVIDER ?? "auto",
   tavilyApiKey: process.env.TAVILY_API_KEY,
   // Reference point for the context gauge in the CLI: 262,144 tokens
@@ -36,6 +40,13 @@ export const config = {
   // burning tokens forever on a goal that never resolves.
   goalMaxTurns: Number(process.env.GOAL_MAX_TURNS ?? 20),
   webPort: Number(process.env.WEB_PORT ?? 4173),
+  // Per-turn cost shown in the stats line (CLI /verbose and web's verbose
+  // toggle). NVIDIA NIM doesn't expose per-model public pricing the way
+  // Anthropic/OpenAI do, so this is a configurable estimate rather than a
+  // billed figure — override per model via env if the served model's real
+  // rate is known.
+  pricePerMillionInputTokens: Number(process.env.NEMOTRON_PRICE_IN_PER_M ?? 0.2),
+  pricePerMillionOutputTokens: Number(process.env.NEMOTRON_PRICE_OUT_PER_M ?? 0.6),
   // Shared checkpoint database: the CLI and the web interface each open
   // their own connection to this same file, which is how they end up
   // seeing the same thread and memory instead of two disconnected sessions.

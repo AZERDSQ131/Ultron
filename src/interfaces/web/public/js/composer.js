@@ -13,6 +13,7 @@ import {
   truncateFromLastUserTurn,
   updateTurnActions,
 } from "./thread.js";
+import { openArchiveDialog, openResumePanel } from "./archivePanel.js";
 import { loadStatus, updateContextGauge } from "./statusBar.js";
 import { loadChats, selectChat } from "./chatList.js";
 import { refreshTodos } from "./todos.js";
@@ -75,8 +76,8 @@ export const COMMANDS = [
   { name: "/stop", desc: "stop the active generation" },
   { name: "/retry", desc: "remove the last reply and regenerate it" },
   { name: "/compact", desc: "summarize old messages, keep recent context" },
-  { name: "/archive", desc: "save this session to a text file" },
-  { name: "/resume", desc: "restore a previously archived session" },
+  { name: "/archive", desc: "rename (optional) and archive this chat, start a new one" },
+  { name: "/resume", desc: "browse archived chats — reopen or delete one" },
   { name: "/think", desc: "set reasoning: on, low or off" },
   { name: "/task", desc: "set task mode: none, todo, plan or goal" },
   { name: "/verbose", desc: "toggle timing and token metrics" },
@@ -492,7 +493,7 @@ export async function streamTurn(body) {
           finishAssistant();
           updateContextGauge(data.contextTokens, data.maxTokens);
           if (state.verbose) {
-            addMetaLine(`⏱ ${data.elapsedSeconds.toFixed(1)}s   ${data.generatedTokens.toLocaleString()} tokens`);
+            addMetaLine(data.stats);
           }
         } else if (eventName === "goal") {
           addSystemNote(`[ultron] goal ${data.status}${data.reason ? ` — ${data.reason}` : ""}`);
@@ -644,7 +645,7 @@ async function runCommand(raw) {
   if (command === "/help") {
     addSystemNote(
       "[ultron] commands: /status · /context · /stop · /retry · /compact · " +
-        "/archive [title] · /resume <path> · /think on|low|off · /verbose on|off · /clear · /quit",
+        "/archive · /resume · /think on|low|off · /verbose on|off · /clear · /quit",
     );
     return;
   }
@@ -760,27 +761,12 @@ async function runCommand(raw) {
   }
 
   if (command === "/archive") {
-    const data = await api.archive(state.activeChatId, arg || undefined);
-    addSystemNote(
-      data.path
-        ? `[ultron] chat "${data.title}" archived to ${data.path}`
-        : `[ultron] ${data.error ?? "archive failed"}`,
-    );
+    openArchiveDialog();
     return;
   }
 
   if (command === "/resume") {
-    if (!arg) {
-      addSystemNote("[ultron] usage: /resume <archive-path>", true);
-      return;
-    }
-    const res = await api.resume(state.activeChatId, arg);
-    const data = await res.json();
-    if (res.ok) await selectChat(state.activeChatId);
-    addSystemNote(
-      res.ok ? `[ultron] resumed ${data.count} messages from ${arg}` : `[ultron] ${data.error ?? "resume failed"}`,
-      !res.ok,
-    );
+    await openResumePanel();
     return;
   }
 

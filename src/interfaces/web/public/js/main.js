@@ -7,6 +7,7 @@ import { initShortcuts } from "./shortcuts.js";
 import { state } from "./store.js";
 import { initAutomation } from "./automation.js";
 import { initTodos } from "./todos.js";
+import { initArchivePanel } from "./archivePanel.js";
 
 initThread({ onEditLast: editLast, onRegenerateLast: regenerateLast });
 initChatList({ onAfterSelect: focusInput });
@@ -16,6 +17,7 @@ initPalette();
 initShortcuts();
 initAutomation();
 initTodos();
+initArchivePanel();
 
 (async () => {
   await loadChats();

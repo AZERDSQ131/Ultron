@@ -44,18 +44,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chatId }),
     }).then(json),
-  archive: (chatId, title) =>
-    fetch("/api/archive", {
+  listArchivedChats: () => fetch("/api/chats/archived").then(json),
+  archiveChat: (chatId, title) =>
+    fetch(`/api/chats/${encodeURIComponent(chatId)}/archive`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId, title }),
+      body: JSON.stringify(title ? { title } : {}),
     }).then(json),
-  resume: (chatId, path) =>
-    fetch("/api/resume", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId, path }),
-    }),
+  resumeChat: (chatId) => fetch(`/api/chats/${encodeURIComponent(chatId)}/resume`, { method: "POST" }).then(json),
   edit: (chatId) =>
     fetch("/api/edit", {
       method: "POST",

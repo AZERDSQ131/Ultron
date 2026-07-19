@@ -79,11 +79,54 @@ interface at a time.
   `chats.ts`) is registered into the chat table on startup via `chats.ensure(...)`, so upgrading
   doesn't orphan whatever history already existed.
 
-## Phase 2 — Telegram interface
+## Phase 2 — Telegram interface (done)
 
-- Replace/complement the terminal with a Telegram bot (grammY)
-- Same LangGraph core and `MEMORY.md` — Telegram is just a new entry point, not a rewrite
-- Streaming responses via Telegram's Bot API message editing
+- `src/interfaces/telegram/index.ts` (grammY, long polling — `pnpm telegram` / `start:telegram`), a
+  third entry point next to the CLI and web UI: same `buildGraph()`, same shared SQLite file, so a
+  Telegram conversation has the same memory, tools and personality as the other two.
+- Which ULTRON chat a Telegram chat points at is a movable pointer (`TelegramLinkRegistry`,
+  `src/core/memory/telegramLinks.ts`), not a fixed derivation — `/archive` and `/resume` both
+  repoint it, mirroring the CLI's "current chat per session" model despite Telegram having no
+  sidebar of its own. Every chat it touches is a normal row in `ChatRegistry`, visible from the web
+  sidebar too.
+- No true token-by-token streaming: Telegram rate-limits `editMessageText`, so a single placeholder
+  message is sent per turn, updated only when the active tool's name changes (a coarse "what's it
+  doing" indicator) and once more with the final text.
+- Tool-approval interrupts (`accept_edit`/`manual` security mode) render as one inline-keyboard
+  Approve/Deny covering the whole pending batch — not per-call like the CLI's y/n prompt or the
+  web's approval block, since Telegram's UI doesn't lend itself to that level of granularity.
+- Full CLI command parity: `/help`, `/model`, `/status`, `/context`, `/stop`, `/retry`, `/compact`,
+  `/archive`, `/resume`, `/think`, `/task` (including `goal` mode's judge-then-continue
+  loop, ported as a sequential loop of independent turns — see `runTurn`'s comment on why it must
+  not recurse into a still-held per-chat lock, the way `server.ts`'s SSE goal continuation currently
+  does), `/permissions`, `/security`, `/verbose`, `/memory`, `/clear`, `/theme`, `/quit`. Interactive
+  CLI pickers (arrow-key selection) become inline keyboards; `/theme` is an intentional no-op
+  (Telegram's own app controls that, not ULTRON).
+- `/clear` wipes the conversation's actual message state (`clearThreadMessages` in `graph.ts`, a
+  `RemoveMessage(REMOVE_ALL_MESSAGES)` update), on top of deleting what
+  Telegram lets a bot delete of its own recent messages (own messages only, ~48h window). This is
+  deliberately different from the CLI/web, where `/clear` only redraws the terminal and leaves the
+  model's memory of the thread untouched — there the visible scrollback is a constant reminder that
+  history persists, so that's a reasonable reading of "clear"; Telegram shows no such reminder, and
+  a real report confirmed the confusion (saying "Salut" again after `/clear` got a reply that
+  referenced the pre-clear greeting).
+- Replies are converted from ULTRON's Markdown (`**bold**`, `` `code` ``, `# headers`,
+  `~~strikethrough~~`, `[text](url)`) to Telegram's HTML parse mode (`src/interfaces/telegram/format.ts`,
+  `markdownToTelegramHtml`) rather than MarkdownV2 — MarkdownV2 requires escaping a long list of
+  punctuation anywhere it appears outside formatting, exactly what an LLM's free-form prose trips
+  over; HTML only needs `&`/`<`/`>` escaped, which is mechanical. Falls back to the plain
+  unformatted text (still truncated to Telegram's 4096-char limit) if the converted HTML is
+  oversized or fails to parse for any reason, rather than losing the message.
+- `stripThinking` (`telegram/index.ts`) removes any `<think>...</think>` chain-of-thought Nemotron's
+  raw content stream includes inline when reasoning is on (`/think on`/`full`) — the CLI/web don't
+  surface it either, but only Telegram was reported actually leaking the literal tags into the
+  user-visible reply. Also drops a dangling, never-closed `<think>` (turn interrupted mid-reasoning)
+  rather than showing a half-finished fragment.
+- The `/verbose` stats line is sent as its own separate message, after the reply — not appended to
+  it — since it's a distinct piece of information, not part of the answer.
+- Session state with no natural persistence slot (`thinkingMode`, `taskMode`, `verbose`) is
+  in-memory per ULTRON chat, reset on bot restart — same lifetime as the CLI's process-local
+  variables.
 
 ## Phase 3 — Tools (in progress)
 
@@ -96,6 +139,16 @@ interface at a time.
 - Web search uses a provider abstraction in `src/core/tools/search.ts`: Tavily is selected automatically when `TAVILY_API_KEY` is present, while DuckDuckGo remains the no-key fallback. `fetch_url` validates HTTP(S) URLs, rejects oversized responses and reports non-2xx status clearly.
 - Still to come: mail, calendar (both need OAuth setup — bigger lift than the filesystem/shell tools)
 - Background scheduled tasks (cron-style) once the core loop is trusted
+
+## Jetson deployment + Mac access (in progress)
+
+Target architecture (see `docs/agent-ia-personnel.md`'s follow-up discussion, not yet written back into that file): ULTRON's process — web server, Telegram bot, database — lives permanently on a Jetson Orin Nano, reachable over Tailscale; the Mac is a client plus a remote-controllable target, not where the graph runs.
+
+- Jetson: repo cloned at `~/ultron` (not the earlier `~/t9-backup/ULTRON`, which was a manual duplicate, not Syncthing-managed, and has been deleted), built, `.env` in place. Two systemd user units are prepared but **not enabled** — `~/.config/systemd/user/ultron-web.service` and `ultron-telegram.service` (the latter still needs `TELEGRAM_BOT_TOKEN` added to `.env` before it can run). Verified manually: the web server answers on both `127.0.0.1:4173` and the Jetson's Tailscale IP.
+- `src/interfaces/cli/remote.ts` (new, see Phase "CLI" note below) is the piece that makes `ultron` on the Mac a thin client instead of a local process — this is what the Mac-side `ultron` command should invoke, pointed at the Jetson's Tailscale IP via `ULTRON_SERVER_URL`.
+- `src/core/tools/remoteHost.ts` + the `host: "jetson" | "mac"` param on the fs/shell tools + `macos.ts`'s platform-branching (see below) is what lets ULTRON act on the Mac's filesystem/apps once it's running on the Jetson instead of on the Mac itself.
+- **Blocked on the user**: Tailscale SSH is enabled on this tailnet and intercepts the Jetson→Mac SSH connection with an interactive per-session browser check (`https://login.tailscale.com/a/...`) — plain key auth (already set up: a fresh `ultron-jetson-to-mac` ed25519 key on the Jetson, its pubkey in the Mac's `~/.ssh/authorized_keys`, a `Host mac` alias in the Jetson's `~/.ssh/config`) can't complete that check non-interactively. Until the user either approves that check once from a browser or adjusts the tailnet's SSH policy/ACL, the `host: "mac"` tool path only works from wherever a session can pass that check — verified instead against a local loopback SSH target (`MAC_SSH_HOST=localhost` on the Mac itself) to prove the tool logic is correct.
+- Not yet done: enabling the two systemd services (deliberately left for the user — see "prepare without activating"), `TELEGRAM_BOT_TOKEN` in the Jetson's `.env`, resolving the Tailscale SSH check above.
 
 ## Phase 4 — Vibe-coding app (deferred, not started)
 

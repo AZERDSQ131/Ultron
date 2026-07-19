@@ -148,6 +148,31 @@
     </form>
   </div>
 
+  <!-- /archive: rename (optional), then archive the current chat and start
+       a fresh one — archiving is a metadata flag on the chat row (see
+       ChatRegistry.archive), the checkpointed conversation itself is
+       untouched, so /resume later gets it back with full context. -->
+  <div id="archive-dialog" class="overlay" hidden>
+    <form id="archive-form" class="automation-dialog" role="dialog">
+      <h2>Archive chat</h2>
+      <label>Title<input id="archive-title" /></label>
+      <div class="dialog-actions"><button type="button" id="archive-cancel">Cancel</button><button type="submit">Archive</button></div>
+    </form>
+  </div>
+
+  <!-- /resume: browse archived chats — reopen one with its full context
+       intact, or delete one outright. -->
+  <div id="resume-overlay" class="overlay" hidden>
+    <div id="resume-panel" class="palette" role="dialog" aria-modal="true" aria-label="Archived chats">
+      <div class="palette-input-row">
+        <span class="palette-icon">⌕</span>
+        <input id="resume-input" type="text" placeholder="Search archived chats…" autocomplete="off" />
+        <span class="kbd-hint">esc</span>
+      </div>
+      <div id="resume-results" class="palette-results"></div>
+    </div>
+  </div>
+
   <!-- Command palette: Cmd/Ctrl+K — unifies chat switching, message search
        and slash commands behind one keyboard-first entry point. -->
   <div id="palette-overlay" class="overlay" hidden>

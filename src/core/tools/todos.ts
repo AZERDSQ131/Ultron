@@ -53,7 +53,7 @@ export const todoWrite = tool(
 
 export const todoUpdate = tool(
   async (
-    { index, status, content }: { index: number; status?: "pending" | "in_progress" | "completed"; content?: string },
+    { index, status, content }: { index: number; status?: "pending" | "in_progress" | "completed" | null; content?: string | null },
     runConfig?: RunnableConfig,
   ) => {
     const threadId = runConfig?.configurable?.thread_id;
@@ -77,8 +77,16 @@ export const todoUpdate = tool(
       "plan; reach for `todo_write` only when the plan's shape itself needs to change.",
     schema: z.object({
       index: z.number().int().positive().describe("1-based position of the item to update, e.g. 2 for the second item."),
-      status: z.enum(["pending", "in_progress", "completed"]).optional().describe("New status for this item, if it changed."),
-      content: z.string().optional().describe("New wording for this item, if it needs to change."),
+      // .nullable() alongside .optional() on both fields: OpenAI's
+      // structured-outputs mode (strict function-calling schemas) rejects an
+      // optional-without-nullable field — omitting this was silently valid
+      // for now but printed a raw SDK deprecation warning straight to
+      // stdout/stderr on every tool-schema build, bypassing disableConsoleEcho
+      // (see logger.ts) since it comes from inside @langchain/openai's Zod
+      // conversion, not from ULTRON's own log() call sites — and corrupted
+      // the CLI's redrawn UI mid-turn.
+      status: z.enum(["pending", "in_progress", "completed"]).nullable().optional().describe("New status for this item, if it changed."),
+      content: z.string().nullable().optional().describe("New wording for this item, if it needs to change."),
     }),
   },
 );

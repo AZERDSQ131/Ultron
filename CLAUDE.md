@@ -14,7 +14,7 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 - **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
 - **Memory**: local SQLite checkpoint database (`ultron-state.sqlite3`), custom `SqliteSaver` in `src/core/memory/checkpointer.ts` implementing LangGraph's `BaseCheckpointSaver` directly on Node's built-in `node:sqlite` (no `@langchain/langgraph-checkpoint-postgres`/`pg`, no `@langchain/langgraph-checkpoint-sqlite` — neither package's published versions match this project's `@langchain/core` ^0.3 / `langgraph` ^0.2 pin, and `node:sqlite` needs zero extra dependencies since Node 24 is already required).
 - **Chats**: conversations are no longer a single hardcoded thread. `src/core/memory/chats.ts` (`ChatRegistry`) tracks every chat (id, title, timestamps) in the same database file; a chat's `id` doubles as its LangGraph `thread_id`. The web UI's sidebar lists/creates/renames/deletes chats. The CLI keeps one "current chat" per process, resuming whichever chat was most recently active on either interface at startup; `/archive` finalizes the current chat and starts a fresh one rather than exiting. The legacy hardcoded thread id (`ultron-main`, exported as `LEGACY_CHAT_ID`) is migrated into the registry on first run via `chats.ensure(...)` so pre-existing history isn't orphaned.
-- **Interface**: terminal (v0.1) and a local web UI (`src/interfaces/web/`) — both point at the same SQLite file and thread, so they share memory and slash commands (`/compact`, `/retry`, `/archive`, `/resume`, `/chat`). Telegram is next (grammY planned). `/chat` (CLI, `src/interfaces/cli/index.ts`) opens any chat by search/id — including a `spawn_agent` sub-agent's own execution chat — mirroring what the web sidebar already let you do; bare `/chat` opens a picker (same UX as `/resume`), `/chat <text>` switches directly.
+- **Interface**: terminal (v0.1), a local web UI (`src/interfaces/web/`), and a Telegram bot (`src/interfaces/telegram/`, grammY, long polling — `pnpm telegram`/`start:telegram`) — all three point at the same SQLite file, so they share memory, tools and personality. Which ULTRON chat a Telegram chat points at is a movable pointer (`TelegramLinkRegistry`, `src/core/memory/telegramLinks.ts`), not a fixed derivation — `/archive` and `/resume` (all three interfaces) can repoint it; every chat it touches is a normal row in `ChatRegistry`, visible in the web sidebar too. Telegram's `/clear` deliberately also wipes the thread's actual message state (`clearThreadMessages` in `graph.ts`), unlike the CLI/web's terminal-only `/clear` — Telegram has no visible scrollback reminding the user that history persists, so "just redraw" reads as a memory bug there (confirmed by a real report). Replies are converted from Markdown to Telegram's HTML parse mode (`src/interfaces/telegram/format.ts`). Archiving is a metadata flag on the `chats` row (`ChatRegistry.archive`/`unarchive`/`listArchived`, `src/core/memory/chats.ts`), not a data export — the chat's LangGraph checkpoint is untouched either way, so `/resume` reopens it with full context (tool calls included), not a lossy text reconstruction. `/chat` (a general "switch to any chat" command) was removed on explicit request in favor of `/archive`+`/resume` as the only session-switching surface across all three interfaces; `/resume`'s picker also deletes an archived chat outright (CLI: Ctrl+D in the picker; Telegram: a 🗑 button with a Yes/No confirm step; web: a delete button in the `#resume-overlay` panel).
 - **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [AGENT.md](AGENT.md). Do not let it default to English regardless of input language.
 - **System prompt split**: [SOUL.md](SOUL.md) is personality only (voice, tone, examples). [AGENT.md](AGENT.md) is everything else — tool-use protocol, language matching, other operational rules. Don't fold one into the other; `src/core/graph.ts` concatenates both at startup.
 - **Security intentionally minimal**: the user explicitly asked for **no Docker, no hardened secret management, full bypass of manual permissions/confirmations**. This is NOT an oversight — do not reintroduce sandboxing or confirmation gates without an explicit request.
@@ -22,11 +22,14 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 - **Stop**: Ctrl+C must interrupt the loop at any time, including mid LLM call (AbortController).
 - **No sub-agents for coding this project**: the user explicitly asked not to use the Agent/sub-agent tool to develop ULTRON. Work directly.
 - **Docs stay current**: update PLAN.md / README.md / CLAUDE.md whenever a change makes them stale (new tool, new phase started, a decision changes) — don't let them drift from the actual code state.
+- **Deployment target**: ULTRON's process (web server + Telegram bot + database) is meant to live permanently on a Jetson Orin Nano, reachable over Tailscale — not on the Mac. See PLAN.md's "Jetson deployment + Mac access" for current status (repo deployed at `~/ultron` on the Jetson, systemd units prepared but not enabled, Mac SSH access blocked on a one-time Tailscale SSH check only the user can complete).
+- **Remote CLI**: `src/interfaces/cli/remote.ts` (`pnpm remote` / `start:remote` / the `ultron` bin) is a *separate* entry point from the local CLI (`src/interfaces/cli/index.ts`) — it never imports `config.js`/`graph.js` as values (only `import type`, erased at compile time), talks to a ULTRON web server purely over HTTP/SSE (`ULTRON_SERVER_URL`), and is what should run on the Mac. Both entry points share every terminal-rendering primitive via `src/interfaces/cli/ui.ts` (banner, raw-mode input loop, pickers, tool-approval prompt, context bar, skill-mention autocomplete) — verified byte-for-byte identical output for the same script (pseudo-tty test) — so they're genuinely the same interface with two different data sources, not two implementations that happen to look similar. `ui.ts` itself must stay backend-agnostic: never import `config.js`/`graph.js`/`chats.js`/etc. as values, only as `import type`, and parameterize anything that would otherwise read them directly (e.g. `printBanner(modelName)`, `showRestoredMessages(messages, modelName)`) — that's what lets a machine running only `remote.ts` need nothing but `ULTRON_SERVER_URL`.
+- **Mac access from tools**: `run_shell_command`/`read_file`/`write_file`/`edit_file`/`list_directory`/`search_files` take an optional `host: "jetson" | "mac"` (default `jetson` — the machine ULTRON's own process runs on, not literally required to be a Jetson). `host: "mac"` routes through `src/core/tools/remoteHost.ts`'s `runOnHost`, which shells out via `ssh $MAC_SSH_HOST` (default alias `mac`, must already exist with key auth in that machine's `~/.ssh/config`). `open_app`/`applescript_run` (`macos.ts`) don't take a `host` param — they branch on `process.platform` instead, since they only ever mean "do this on a Mac" regardless of where ULTRON's process happens to run.
 
 ## Known roadmap (do not build ahead of a request)
 
 1. Loop + memory (current stage, done)
-2. Telegram interface
+2. Telegram interface (done — `src/interfaces/telegram/`)
 3. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity. In progress: shell + filesystem tools done (`src/core/tools/`), mail/calendar still pending (need OAuth).
 4. Separate "Codex-style" app for vibe coding, with a main conversation orchestrating background sub-agents to manage projects. Do not start this without an explicit request — it was deliberately deferred during initial design.
 
@@ -49,10 +52,11 @@ TypeScript (Node 24+) / pnpm / LangGraph.js / SQLite (`node:sqlite`, no external
 ULTRON est un agent IA personnel développé directement par l'utilisateur pour
 conserver la maîtrise de la boucle d'exécution, des outils et de la mémoire.
 La version actuelle fournit plusieurs conversations persistantes, accessibles
-depuis deux interfaces qui partagent le même état : le terminal
-(`src/interfaces/cli/index.ts`) et une interface web locale (`src/interfaces/web/`). Telegram,
-les intégrations mail/calendrier et l'application de vibe-coding sont prévues
-mais ne sont pas implémentées.
+depuis trois interfaces qui partagent le même état : le terminal
+(`src/interfaces/cli/index.ts`), une interface web locale (`src/interfaces/web/`)
+et un bot Telegram (`src/interfaces/telegram/`). Les intégrations
+mail/calendrier et l'application de vibe-coding sont prévues mais ne sont pas
+implémentées.
 
 ## Stack technique
 
@@ -89,7 +93,13 @@ mais ne sont pas implémentées.
   caractères/16 lignes affichés, le modèle garde le contenu complet) pour
   qu'un gros résultat n'inonde plus le terminal. Réutilisé à la fois par
   le flux live et par `showRestoredMessages` (relecture d'un chat) pour
-  un rendu identique.
+  un rendu identique. La ligne de stats `/verbose` (`formatTurnStats`,
+  `src/core/llm/usage.ts`, partagée avec `server.ts`) affiche désormais
+  `model | X in | Y out | Zs | $coût` (ex. `deepseek-v4-flash | 7,688 in |
+  303 out | 10s | $0.14`) au lieu du seul temps écoulé/tokens de sortie ;
+  le coût est une estimation configurable (`NEMOTRON_PRICE_IN_PER_M`/
+  `NEMOTRON_PRICE_OUT_PER_M`, `.env.example`), pas un tarif réel de
+  NVIDIA NIM qui n'en publie pas.
 - `src/interfaces/web/server.ts` + `src/interfaces/web/public/` : interface web locale (HTTP + SSE),
   sidebar de gestion des chats (créer, renommer, supprimer, changer de chat) ;
   frontend HTML/CSS + modules ES natifs (`public/js/*.js`), sans framework ni bundler.
@@ -99,8 +109,15 @@ mais ne sont pas implémentées.
   `prepareRetry` côté backend peuvent défaire), blocs d'appel d'outil badgés par scope, et un
   panneau réglages/raccourcis coulissant avec bascule clair/sombre/système manuelle.
 - `src/core/graph.ts` : prompt système, graphe agent/outils, routage,
-  nettoyage de l'historique, retries des erreurs transitoires ou faux appels,
-  et archive/reprise de conversation (`archiveThread` / `resumeThread`).
+  nettoyage de l'historique, retries des erreurs transitoires ou faux appels.
+  Archive/reprise de conversation vit désormais dans `ChatRegistry`
+  (`archive`/`unarchive`/`listArchived`, `src/core/memory/chats.ts`) — un
+  simple flag `archived_at` sur la ligne du chat, pas un export texte : le
+  checkpoint LangGraph du thread n'est jamais touché, donc `/resume`
+  rouvre la conversation avec tout son contexte (y compris les appels
+  d'outils), contrairement à l'ancien mécanisme `archiveThread`/
+  `resumeThread` qui écrivait un fichier `.txt` (perdait tout sauf le texte
+  humain/IA) et a été supprimé.
 - `src/core/llm/nemotron.ts` : construction du client ChatOpenAI configuré pour NVIDIA.
 - `src/core/memory/checkpointer.ts` : `SqliteSaver` (implémente `BaseCheckpointSaver`
   de LangGraph sur `node:sqlite`) — c'est ce fichier qui permet au CLI et au
@@ -284,8 +301,10 @@ nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
 
 1. Ajouter des tests unitaires ciblés sans changer la posture de sécurité
    choisie.
-2. Préparer la phase Telegram avec grammY en réutilisant `buildGraph` et le
-   même `thread_id`, sans démarrer la phase vibe-coding.
+2. Le bot Telegram a maintenant la parité complète avec les commandes CLI (voir PLAN.md,
+   phase 2) ; améliorations possibles plus tard : vrai streaming incrémental (actuellement un
+   seul message replié par tour), approbation d'outil par appel plutôt que par lot. Ne pas
+   démarrer la phase vibe-coding.
 3. Concevoir les intégrations mail/calendrier et leur OAuth avant d'ajouter
    leurs outils.
 4. Définir le modèle persistant et le cycle de vie des tâches planifiées avant
@@ -293,6 +312,34 @@ nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
    prévention des chevauchements et rattachement à un chat dédié.
 5. Corriger les écarts documentaires au fur et à mesure de chaque nouveau
    changement de code, conformément à `AGENTS.md`.
+
+## Export en direct d'une conversation
+
+- `src/core/memory/exporter.ts` : un chat peut avoir un fichier d'export
+  actif (`Chat.exportPath`, colonne `export_path` dans `chats`,
+  `ChatRegistry.setExportPath`) — pas un dump ponctuel, un fichier Markdown
+  réécrit intégralement (écriture atomique tmp+rename) après chaque tour
+  réussi. Plusieurs chats peuvent chacun avoir leur propre export actif en
+  parallèle sans se marcher dessus : le chemin par défaut
+  (`defaultExportPath`) inclut le slug du titre et les 8 premiers
+  caractères de l'id du chat, donc deux chats au même titre n'écrasent
+  jamais le même fichier. Racine par défaut : `exports/` à côté du fichier
+  SQLite (`dirname(config.databasePath)`), un chemin explicite peut être
+  relatif à ce dossier ou absolu.
+- Commande `/export [path|on|off]`, identique sur les trois interfaces
+  (CLI local `src/interfaces/cli/index.ts`, CLI distant
+  `src/interfaces/cli/remote.ts` via `GET|POST|DELETE
+  /api/chats/:id/export`, web via les mêmes routes, Telegram
+  `src/interfaces/telegram/index.ts`) : bare affiche l'état, un chemin ou
+  `on` démarre l'export (et écrit immédiatement), `off` l'arrête sans
+  supprimer le fichier déjà écrit.
+- Hook de réécriture après chaque tour : `executeTurn` (CLI local, avant
+  son `return` final), `handleTurn`/`handleApprove` (serveur web, juste
+  après chaque appel à `streamGraphTurn`), `runSingleTurn` (Telegram, avant
+  son `return`) — les trois appellent `maybeExportChat(graph, chat)`, qui
+  ne fait rien si `exportPath` est `null` (donc sûr à appeler
+  inconditionnellement à la fin de chaque tour, y compris en mode goal où
+  ces fonctions sont rappelées en boucle).
 
 ## To-do : persistance par chat et reprise de tâche non liée
 
@@ -312,3 +359,44 @@ nouvelle — reproduit et corrigé sur deux fronts :
   `AGENT.md` disent maintenant explicitement de repartir d'un `todo_write`/
   `plan_propose` neuf (pas `todo_update`) si la demande courante n'est pas
   la continuation de ce que la liste existante suivait.
+
+## Modèle utilisateur passif (parité Hermes Agent)
+
+Ajouté pour combler un écart identifié face à Hermes Agent (voir
+`docs/agent-ia-personnel.md`, section 2) : une mémoire qui apprend en
+continu, sans qu'on le lui demande, plutôt qu'uniquement sur déclaration
+explicite de l'utilisateur (`MEMORY.md`, `memory_write`).
+
+- `src/core/memory/userModel.ts` (`UserModelRegistry`) : table SQLite
+  `user_model_observations`, globale (pas scoppée par chat, comme
+  `MEMORY.md`) — chaque ligne est une observation courte
+  (`preference`/`fact`/`pattern`) avec sa source (`chat_id` d'origine) et sa
+  date. Volontairement **séparée** de `MEMORY.md` : ce fichier reste la
+  mémoire éditée et validée à la main par l'utilisateur, jamais réécrite
+  automatiquement — voir l'historique du projet (incident OpenClaw,
+  suppression de mails malgré l'instruction d'attendre) qui est la raison
+  d'être de tout ULTRON ; reproduire la même perte de contrôle côté mémoire
+  aurait été absurde.
+- `src/core/userModelExtractor.ts` : après chaque tour réussi (CLI
+  `executeTurn`, web `streamGraphTurn`), un appel LLM séparé et bon marché
+  (`createNemotronModel("low")`, même schéma que `judgeGoal` dans
+  `goalJudge.ts`) lit uniquement le dernier échange (message utilisateur +
+  réponse d'ULTRON, pas tout l'historique) et répond soit `{"observation":
+  null}`, soit une observation courte. Jamais attendu par le flux principal
+  (`void recordUserModelObservation(...)`) : une extraction ratée est
+  silencieuse, jamais bloquante ni remontée à l'utilisateur.
+- `graph.ts` : `buildSystemPrompt` injecte un nouveau bloc `<user_model>`
+  (même mécanisme que `<daily_memory>`), entre `<memory>` et
+  `<daily_memory>`, résumant les observations accumulées (plafonné à 40
+  pour ne pas faire grossir le prompt sans limite). Absent du prompt d'un
+  sous-agent (`buildAgentSystemPrompt`), pour la même raison que
+  `MEMORY.md` en est déjà exclu.
+- `/memory` (CLI uniquement, `src/interfaces/cli/index.ts`) : liste les
+  observations accumulées (`/memory`), les efface toutes (`/memory clear`)
+  ou une seule par id (`/memory forget <id>`) — la surface de revue/purge
+  explicitement promise avant l'implémentation, pas de fusion automatique
+  vers `MEMORY.md`.
+- Pas encore fait : promotion explicite d'une observation vers `MEMORY.md`
+  (l'utilisateur ou ULTRON, sur demande, édite `MEMORY.md` à la main via les
+  outils fichiers existants — aucun outil dédié pour l'instant), et aucune
+  passe de consolidation/dédoublonnage des observations dans le temps.
