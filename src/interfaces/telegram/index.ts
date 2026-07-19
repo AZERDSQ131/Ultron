@@ -384,7 +384,19 @@ async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
   await send(telegramChatId, `[ultron] resumed "${chat.title}".`);
   const messages = await listChatMessages(graph, chat.id);
   const recent = messages.filter((m) => m.role === "ai").slice(-RESUME_PREVIEW_MESSAGES);
-  for (const message of recent) await send(telegramChatId, message.content);
+  // Each past reply is itself broken into one Telegram message per
+  // paragraph rather than sent as a single wall of text — a long reply
+  // read back as one block is exactly what looked wrong to the user here,
+  // even though each historical turn was already its own send() call.
+  for (const message of recent) {
+    const paragraphs = message.content
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    for (const paragraph of paragraphs.length ? paragraphs : [message.content]) {
+      await send(telegramChatId, paragraph);
+    }
+  }
 }
 
 // Short-lived cache so inline-keyboard callback data can stay a small index
