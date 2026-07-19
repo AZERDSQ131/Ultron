@@ -19,7 +19,7 @@ import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
+import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -159,11 +159,9 @@ async function main() {
   // existed) so its history shows up in the registry instead of being
   // orphaned — same migration the web server runs on its own startup.
   chats.ensure(LEGACY_CHAT_ID);
-  // Resume whichever chat was most recently active, from either interface —
-  // not always the legacy thread, since /archive or the web UI may have
-  // moved on to a newer one since the CLI last ran.
-  let currentChatId = chats.getFocus()?.id ?? chats.list()[0].id;
-  chats.setFocus(currentChatId);
+  // CLI focus is deliberately independent from Telegram focus.
+  let currentChatId = chats.getFocus(CLI_CHAT_SCOPE)?.id ?? chats.activateMain(CLI_CHAT_SCOPE).id;
+  chats.setFocus(currentChatId, CLI_CHAT_SCOPE);
   setActivePermissionLabel(chats.getSecurityMode(currentChatId));
 
   let abortController: AbortController | undefined;
@@ -219,13 +217,13 @@ async function main() {
 
   const deleteCurrentChat = async (): Promise<void> => {
     const current = chats.get(currentChatId);
-    const main = chats.getMain();
+    const main = chats.getMain(CLI_CHAT_SCOPE);
     if (!current || current.id === main.id) {
       appendTranscript(chalk.yellow("[ultron] the main conversation cannot be deleted.\n\n"));
       return;
     }
-    chats.delete(current.id);
-    const next = chats.activateMain();
+    chats.delete(current.id, CLI_CHAT_SCOPE);
+    const next = chats.activateMain(CLI_CHAT_SCOPE);
     currentChatId = next.id;
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
     setTranscript("");
@@ -236,16 +234,16 @@ async function main() {
   const resumeChat = async (contextLine: string, commandArgument: string): Promise<void> => {
     let target: Chat | undefined;
     if (!commandArgument) {
-      target = await pickArchivedChat(contextLine, chats);
+      target = await pickArchivedChat(contextLine, { listArchived: () => chats.listResumable(CLI_CHAT_SCOPE), delete: (id) => chats.delete(id, CLI_CHAT_SCOPE) });
     } else {
       const query = commandArgument.toLowerCase();
-      target = chats.listArchived().find((chat) => chat.id === commandArgument || chat.title.toLowerCase().includes(query));
+      target = chats.listResumable(CLI_CHAT_SCOPE).find((chat) => chat.id === commandArgument || chat.title.toLowerCase().includes(query));
     }
     if (!target) {
       appendTranscript(chalk.yellow("[ultron] no archived chat selected.\n\n"));
       return;
     }
-    chats.setFocus(target.id);
+    chats.setFocus(target.id, CLI_CHAT_SCOPE);
     currentChatId = target.id;
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
     showRestoredMessages(await listChatMessages(graph, currentChatId), config.nemotronModel);
@@ -253,7 +251,7 @@ async function main() {
   };
 
   const switchToMain = async (): Promise<void> => {
-    const main = chats.activateMain();
+    const main = chats.activateMain(CLI_CHAT_SCOPE);
     currentChatId = main.id;
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
     showRestoredMessages(await listChatMessages(graph, currentChatId), config.nemotronModel);
@@ -776,7 +774,7 @@ async function main() {
       }
 
       if (command !== "/retry") chats.maybeAutoTitle(currentChatId, input);
-      chats.setFocus(currentChatId);
+      chats.setFocus(currentChatId, CLI_CHAT_SCOPE);
       chats.touch(currentChatId);
 
       // The selector describes the current request, not the whole chat.

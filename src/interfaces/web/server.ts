@@ -21,7 +21,7 @@ import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
-import { getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
+import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -154,7 +154,7 @@ async function handleRenameChat(req: IncomingMessage, res: ServerResponse, chatI
 
 async function handleDeleteChat(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
-  if (chats.getMain().id === chatId) {
+  if (chats.getMain(CLI_CHAT_SCOPE).id === chatId) {
     sendJson(res, 400, { error: "the main conversation cannot be deleted" });
     return;
   }
@@ -398,7 +398,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     sendJson(res, 400, { error: "message text is required" });
     return;
   } else {
-    chats.setFocus(chatId);
+    chats.setFocus(chatId, CLI_CHAT_SCOPE);
     chatEvents.append(chatId, "human", payload.source === "telegram" ? "telegram" : "cli", input);
     chats.maybeAutoTitle(chatId, input);
     if (taskMode === "goal") goals.set(chatId, input, config.goalMaxTurns);
@@ -529,7 +529,7 @@ async function handleCompact(req: IncomingMessage, res: ServerResponse): Promise
 }
 
 async function handleListArchivedChats(res: ServerResponse): Promise<void> {
-  sendJson(res, 200, { chats: chats.listArchived() });
+  sendJson(res, 200, { chats: chats.listResumable(CLI_CHAT_SCOPE) });
 }
 
 async function handleChatEvents(res: ServerResponse, chatId: string, after: number): Promise<void> {
@@ -550,16 +550,16 @@ async function handleArchiveChat(req: IncomingMessage, res: ServerResponse, chat
 async function handleResumeChat(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   const resumed = chats.unarchive(chatId);
-  chats.setFocus(chatId);
+  chats.setFocus(chatId, CLI_CHAT_SCOPE);
   sendJson(res, 200, { chat: resumed });
 }
 
 async function handleMainChat(res: ServerResponse): Promise<void> {
-  sendJson(res, 200, { chat: chats.activateMain() });
+  sendJson(res, 200, { chat: chats.activateMain(CLI_CHAT_SCOPE) });
 }
 
 async function handleChatFocus(res: ServerResponse): Promise<void> {
-  sendJson(res, 200, { chat: chats.getFocus() ?? chats.activateMain() });
+  sendJson(res, 200, { chat: chats.getFocus(CLI_CHAT_SCOPE) ?? chats.activateMain(CLI_CHAT_SCOPE) });
 }
 
 // Lightweight liveness probe — a real (cheap) DB query but no LLM call — so

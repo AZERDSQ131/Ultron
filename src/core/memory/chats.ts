@@ -29,6 +29,7 @@ const DEFAULT_SECURITY_MODE: SecurityMode = "bypass";
 // entry point calls chats.ensure(LEGACY_CHAT_ID, ...) at startup so
 // pre-existing history registers as a real chat instead of being orphaned.
 export const LEGACY_CHAT_ID = "ultron-main";
+export const CLI_CHAT_SCOPE = "cli";
 
 export interface Chat {
   id: string;
@@ -101,6 +102,18 @@ export class ChatRegistry {
       )
     `);
     try { this.db.exec("ALTER TABLE chat_focus ADD COLUMN main_chat_id TEXT"); } catch { /* already migrated */ }
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_focus_scoped (
+        scope TEXT PRIMARY KEY,
+        chat_id TEXT NOT NULL,
+        main_chat_id TEXT
+      )
+    `);
+    const legacyFocus = this.db.prepare("SELECT chat_id, main_chat_id FROM chat_focus WHERE id = 1").get() as { chat_id?: string; main_chat_id?: string | null } | undefined;
+    if (legacyFocus) {
+      this.db.prepare("INSERT INTO chat_focus_scoped (scope, chat_id, main_chat_id) VALUES ('cli', ?, ?) ON CONFLICT(scope) DO NOTHING")
+        .run(legacyFocus.chat_id ?? LEGACY_CHAT_ID, legacyFocus.main_chat_id ?? legacyFocus.chat_id ?? LEGACY_CHAT_ID);
+    }
   }
 
   // Every registered conversation. The archived_at column is retained only
@@ -113,9 +126,28 @@ export class ChatRegistry {
 
   // Compatibility name for older callers. /resume now browses every
   // non-main conversation, regardless of the legacy archived_at flag.
-  listArchived(): Chat[] {
-    const mainId = this.getMain().id;
+  listArchived(scope: string = CLI_CHAT_SCOPE): Chat[] {
+    const mainId = this.getMain(scope).id;
     return this.list().filter((chat) => chat.id !== mainId);
+  }
+
+  listResumable(scope: string = CLI_CHAT_SCOPE): Chat[] {
+    return this.listArchived(scope).map((chat) => ({
+      ...chat,
+      title: `${this.getOrigin(chat.id)} - ${chat.title}`,
+    }));
+  }
+
+  private getOrigin(id: string): "CLI" | "Tel" {
+    try {
+      const event = this.db.prepare("SELECT source FROM chat_events WHERE chat_id = ? ORDER BY id ASC LIMIT 1").get(id) as { source?: string } | undefined;
+      if (event?.source === "telegram") return "Tel";
+      if (event?.source === "cli") return "CLI";
+      const link = this.db.prepare("SELECT 1 FROM telegram_links WHERE ultron_chat_id = ? LIMIT 1").get(id);
+      return link ? "Tel" : "CLI";
+    } catch {
+      return "CLI";
+    }
   }
 
   // Every chat regardless of archived state — for bulk cleanup (e.g. an
@@ -157,43 +189,44 @@ export class ChatRegistry {
   // The main conversation is a shared return point for the CLI and Telegram.
   // Its chat id may rotate when the main conversation is archived; the
   // main_chat_id pointer keeps /main separate from archived history.
-  activateMain(): Chat {
-    const main = this.getMain();
+  activateMain(scope: string = CLI_CHAT_SCOPE): Chat {
+    const main = this.getMain(scope);
     if (main.title === DEFAULT_CHAT_TITLE) this.rename(main.id, "Main");
     const activeMain = this.get(main.id)!;
-    this.setFocus(activeMain.id);
+    this.setFocus(activeMain.id, scope);
     return activeMain;
   }
 
-  getMain(): Chat {
-    const row = this.db.prepare("SELECT main_chat_id FROM chat_focus WHERE id = 1").get() as { main_chat_id?: string | null } | undefined;
+  getMain(scope: string = CLI_CHAT_SCOPE): Chat {
+    const row = this.db.prepare("SELECT main_chat_id FROM chat_focus_scoped WHERE scope = ?").get(scope) as { main_chat_id?: string | null } | undefined;
     const configured = row?.main_chat_id ? this.get(row.main_chat_id) : undefined;
     if (configured) return configured;
-    const legacy = this.ensure(LEGACY_CHAT_ID, "Main");
-    this.setMain(legacy.id);
-    return legacy;
+    const main = scope === CLI_CHAT_SCOPE ? this.ensure(LEGACY_CHAT_ID, "Main") : this.create("Main");
+    this.setMain(main.id, scope);
+    this.setFocus(main.id, scope);
+    return main;
   }
 
-  setMain(id: string): Chat | undefined {
+  setMain(id: string, scope: string = CLI_CHAT_SCOPE): Chat | undefined {
     const chat = this.get(id);
     if (!chat) return undefined;
     this.db
-      .prepare("INSERT INTO chat_focus (id, chat_id, main_chat_id) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET main_chat_id = excluded.main_chat_id")
-      .run(this.getFocus()?.id ?? id, id);
+      .prepare("INSERT INTO chat_focus_scoped (scope, chat_id, main_chat_id) VALUES (?, ?, ?) ON CONFLICT(scope) DO UPDATE SET main_chat_id = excluded.main_chat_id")
+      .run(scope, this.getFocus(scope)?.id ?? id, id);
     return chat;
   }
 
-  getFocus(): Chat | undefined {
-    const row = this.db.prepare("SELECT chat_id FROM chat_focus WHERE id = 1").get() as { chat_id: string } | undefined;
+  getFocus(scope: string = CLI_CHAT_SCOPE): Chat | undefined {
+    const row = this.db.prepare("SELECT chat_id FROM chat_focus_scoped WHERE scope = ?").get(scope) as { chat_id: string } | undefined;
     return row ? this.get(row.chat_id) : undefined;
   }
 
-  setFocus(id: string): Chat | undefined {
+  setFocus(id: string, scope: string = CLI_CHAT_SCOPE): Chat | undefined {
     const chat = this.get(id);
     if (!chat) return undefined;
     this.db
-      .prepare("INSERT INTO chat_focus (id, chat_id) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET chat_id = excluded.chat_id")
-      .run(id);
+      .prepare("INSERT INTO chat_focus_scoped (scope, chat_id, main_chat_id) VALUES (?, ?, NULL) ON CONFLICT(scope) DO UPDATE SET chat_id = excluded.chat_id")
+      .run(scope, id);
     return chat;
   }
 
@@ -264,10 +297,10 @@ export class ChatRegistry {
   // Delete the conversation from the registry only. Its LangGraph checkpoint
   // is intentionally preserved, so this command removes it from /resume and
   // the sidebars without destroying the underlying memory.
-  delete(id: string): boolean {
-    if (this.getMain().id === id) return false;
+  delete(id: string, scope: string = CLI_CHAT_SCOPE): boolean {
+    if (this.getMain(scope).id === id) return false;
     const deleted = this.db.prepare("DELETE FROM chats WHERE id = ?").run(id);
-    if (this.getFocus()?.id === id) this.activateMain();
+    if (this.getFocus(scope)?.id === id) this.activateMain(scope);
     return Number(deleted.changes ?? 0) > 0;
   }
 }

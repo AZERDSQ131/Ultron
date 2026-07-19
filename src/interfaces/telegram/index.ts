@@ -17,7 +17,7 @@ import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
-import { DEFAULT_CHAT_TITLE, getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
+import { getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
@@ -66,19 +66,13 @@ chats.ensure(LEGACY_CHAT_ID);
 // this file derived the id that way with no indirection), otherwise start
 // a brand-new chat.
 function currentChatId(telegramChatId: number): string {
+  const scope = `telegram:${telegramChatId}`;
   const linked = links.get(telegramChatId);
-  const focused = chats.getFocus();
-  if (focused && chats.get(focused.id) && focused.id !== linked) {
-    links.set(telegramChatId, focused.id);
-    restartEventSync(telegramChatId, focused.id);
-    return focused.id;
-  }
   if (linked && chats.get(linked)) {
     startEventSync(telegramChatId, linked);
     return linked;
   }
-  const legacyDerived = `telegram-${telegramChatId}`;
-  const chat = chats.get(legacyDerived) ?? chats.create(DEFAULT_CHAT_TITLE);
+  const chat = chats.activateMain(scope);
   links.set(telegramChatId, chat.id);
   startEventSync(telegramChatId, chat.id);
   return chat.id;
@@ -96,14 +90,6 @@ function startEventSync(telegramChatId: number, chatId: string): void {
     if (links.get(telegramChatId) !== chatId) {
       clearInterval(timer);
       eventSyncTimers.delete(telegramChatId);
-      return;
-    }
-    const focused = chats.getFocus();
-    if (focused && focused.id !== chatId) {
-      links.set(telegramChatId, focused.id);
-      clearInterval(timer);
-      eventSyncTimers.delete(telegramChatId);
-      startEventSync(telegramChatId, focused.id);
       return;
     }
     eventSyncBusy.add(telegramChatId);
@@ -439,7 +425,7 @@ const RESUME_PREVIEW_MESSAGES = 3;
 // to fall back on — without a preview here, "resumed" told the user
 // nothing about what they were actually resuming.
 async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
-  chats.setFocus(chat.id);
+  chats.setFocus(chat.id, `telegram:${telegramChatId}`);
   links.set(telegramChatId, chat.id);
   restartEventSync(telegramChatId, chat.id);
   await send(telegramChatId, `[ultron] resumed "${chat.title}".`);
@@ -550,13 +536,13 @@ bot.command("compact", async (ctx) => {
 });
 
 bot.command("main", async (ctx) => {
-  const main = chats.activateMain();
+  const main = chats.activateMain(`telegram:${ctx.chat.id}`);
   await resumeInto(ctx.chat.id, main);
 });
 
 bot.command("resume", async (ctx) => {
   const query = ctx.match?.trim();
-  const conversations = chats.listArchived();
+  const conversations = chats.listResumable(`telegram:${ctx.chat.id}`);
   if (!conversations.length) {
     await send(ctx.chat.id, "[ultron] no saved conversations.");
     return;
@@ -584,13 +570,13 @@ bot.command("resume", async (ctx) => {
 bot.command("delete", async (ctx) => {
   const ultronChatId = currentChatId(ctx.chat.id);
   const current = chats.get(ultronChatId);
-  const main = chats.getMain();
+  const main = chats.getMain(`telegram:${ctx.chat.id}`);
   if (!current || current.id === main.id) {
     await send(ctx.chat.id, "[ultron] the main conversation cannot be deleted.");
     return;
   }
-  chats.delete(current.id);
-  const next = chats.activateMain();
+  chats.delete(current.id, `telegram:${ctx.chat.id}`);
+  const next = chats.activateMain(`telegram:${ctx.chat.id}`);
   links.set(ctx.chat.id, next.id);
   restartEventSync(ctx.chat.id, next.id);
   await send(ctx.chat.id, `[ultron] deleted "${current.title}". Memory preserved. Returned to main.`);
@@ -875,7 +861,7 @@ bot.on("message:text", async (ctx) => {
 
   const ultronChatId = currentChatId(ctx.chat.id);
   const session = getSession(ultronChatId);
-  chats.setFocus(ultronChatId);
+  chats.setFocus(ultronChatId, `telegram:${ctx.chat.id}`);
   chatEvents.append(ultronChatId, "human", "telegram", text);
   chats.maybeAutoTitle(ultronChatId, text);
   chats.touch(ultronChatId);
