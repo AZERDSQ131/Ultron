@@ -42,6 +42,12 @@ const LOCAL_COMMANDS = ["/help", "/model", "/status", "/clear", "/context", "/st
 
 let cancelActiveInput: (() => void) | undefined;
 let transcript = "";
+// The most recently written tool-call block (input summary + result) that
+// hasn't collapsed yet — tracked as a [start, end) range in `transcript` so
+// it can be spliced down to a one-line `[toolName]` the moment anything
+// follows it (more text, another tool call, or the next turn's message).
+// Only the very last tool block on screen stays expanded.
+let danglingToolBlock: { start: number; end: number; label: string } | null = null;
 let bannerTranscript = "";
 let generationInput = "";
 let generationCursor = 0;
@@ -969,16 +975,28 @@ function pickPermission(contextLine: string, current: SecurityMode): Promise<Sec
 async function showRestoredMessages(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<void> {
   const messages = await listChatMessages(graph, threadId);
   transcript = "";
+  danglingToolBlock = null;
   printBanner();
-  for (const message of messages) {
+  // Same collapse rule as the live stream: only the very last tool block in
+  // the whole history is still "the latest thing on screen" and stays
+  // expanded — every earlier one is followed by something, so it renders
+  // collapsed straight away instead of expanding then re-collapsing.
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
     if (message.role === "human") {
       appendTranscript(`${INPUT_PROMPT}${message.content}\n`);
     } else if (message.role === "ai") {
       appendTranscript(`${chalk.redBright.bold("ultron")} ${uiDim("›")} ${message.content}\n\n`);
     } else if (message.role === "tool_call") {
-      appendTranscript(uiDim(`[${message.content}]\n`));
+      const isLastBlock = i + 1 === messages.length - 1;
+      if (isLastBlock) appendTranscript(uiDim(`[${message.content}]\n`));
     } else {
-      appendTranscript(`${formatToolResult(message.name ?? "tool", message.content)}\n\n`);
+      const isLastBlock = i === messages.length - 1;
+      appendTranscript(
+        isLastBlock
+          ? `${formatToolResult(message.name ?? "tool", message.content)}\n\n`
+          : `${collapsedToolLine(message.name ?? "tool")}\n\n`,
+      );
     }
   }
 }
@@ -1087,6 +1105,17 @@ function styleFetchResult(content: string): string {
   return body ? `${styledHead}\n\n${capForDisplay(body)}` : styledHead;
 }
 
+function collapsedToolLine(name: string): string {
+  return uiDim(`[${name}]`);
+}
+
+function collapseDanglingToolBlock(): void {
+  if (!danglingToolBlock) return;
+  const { start, end, label } = danglingToolBlock;
+  transcript = transcript.slice(0, start) + `${collapsedToolLine(label)}\n\n` + transcript.slice(end);
+  danglingToolBlock = null;
+}
+
 function formatToolResult(name: string, content: string): string {
   if (name === "web_search") return `${chalk.cyanBright.bold("[search]")}\n${styleSearchResults(capForDisplay(content))}`;
   if (name === "fetch_url" || name === "http_request") return `${chalk.blueBright.bold("[fetch]")}\n${styleFetchResult(content)}`;
@@ -1151,9 +1180,21 @@ function printBanner() {
 
 function refreshBanner() {
   if (!bannerTranscript || !transcript.startsWith(bannerTranscript)) return;
-  const history = transcript.slice(bannerTranscript.length);
+  const oldBannerLength = bannerTranscript.length;
+  const history = transcript.slice(oldBannerLength);
   transcript = "";
   printBanner();
+  // The banner's length can change with terminal width — shift any tracked
+  // tool-block offsets by the same delta so a resize mid-turn can't corrupt
+  // the range collapseDanglingToolBlock() later splices.
+  const delta = bannerTranscript.length - oldBannerLength;
+  if (danglingToolBlock && delta !== 0) {
+    danglingToolBlock = {
+      ...danglingToolBlock,
+      start: danglingToolBlock.start + delta,
+      end: danglingToolBlock.end + delta,
+    };
+  }
   transcript += history;
 }
 
@@ -1389,6 +1430,10 @@ async function main() {
     turnInput: { messages: HumanMessage[] } | Command,
     contextLine: string,
   ): Promise<{ finalText: string; aborted: boolean; errored: boolean }> {
+    // A new turn means a new message followed whatever was last on screen —
+    // collapse a tool block left dangling expanded at the end of the
+    // previous turn.
+    collapseDanglingToolBlock();
     abortController = new AbortController();
     const controller = abortController;
     const turnStarted = Date.now();
@@ -1436,7 +1481,11 @@ async function main() {
                 writeLive("\n", contextLine);
                 inToolCall = false;
               }
+              // A result belongs to the tool call that's now finishing, not
+              // to whatever finished before it — collapse that older one now.
+              collapseDanglingToolBlock();
               const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
+              const blockStart = transcript.length;
               const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
               if (pending) {
                 writeLive(uiDim(`[${summarizeToolCall(pending.name, pending.args)}]\n`), contextLine);
@@ -1444,6 +1493,7 @@ async function main() {
                 if (key !== undefined) pendingToolCalls.delete(key);
               }
               writeLive(`${formatToolResult(toolName, String(chunk.content))}\n\n`, contextLine);
+              danglingToolBlock = { start: blockStart, end: transcript.length, label: toolName };
               continue;
             }
 
@@ -1468,6 +1518,9 @@ async function main() {
                     writeLive("\n\n", contextLine);
                     wrotePrefix = false;
                   }
+                  // Another tool call is starting — the previous one is no
+                  // longer the latest thing on screen.
+                  collapseDanglingToolBlock();
                 }
                 if (tc.args) generatedChars += tc.args.length;
               }
@@ -1487,6 +1540,9 @@ async function main() {
               inToolCall = false;
             }
             if (!wrotePrefix) {
+              // Real answer text is starting — the last tool call is no
+              // longer the latest thing on screen.
+              collapseDanglingToolBlock();
               writeLive(`${chalk.redBright.bold("ultron")} ${uiDim("›")} `, contextLine);
               wrotePrefix = true;
             }
@@ -1656,6 +1712,7 @@ async function main() {
             continue;
           case "/clear":
             transcript = "";
+            danglingToolBlock = null;
             printBanner();
             continue;
           case "/context": {
