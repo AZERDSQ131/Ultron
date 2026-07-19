@@ -1,15 +1,57 @@
 #!/usr/bin/env node
-// Thin network client: talks to a ULTRON web server (src/interfaces/web/server.ts)
+// Network client: talks to a ULTRON web server (src/interfaces/web/server.ts)
 // over HTTP/SSE instead of running buildGraph() in-process — the "ultron"
 // command meant to run on the Mac while the actual graph/tools/memory live
-// on the Jetson. Deliberately does NOT import ../../config.js or
-// ../../core/graph.js: those pull in NVIDIA_API_KEY/DATABASE_PATH validation
-// that has no reason to exist on a machine that never touches the model or
-// the database directly. The only required input is the server's URL.
+// on the Jetson. Shares every rendering primitive with the local CLI
+// (./ui.ts) so the two look and behave identically; only how a turn
+// actually gets executed differs. Deliberately does NOT import ../../config.js
+// or ../../core/graph.js as values (only as `import type` inside ui.ts,
+// which is erased at compile time): those pull in NVIDIA_API_KEY/
+// DATABASE_PATH validation that has no reason to exist on a machine that
+// never touches the model or the database directly. The only required
+// input is the server's URL.
 import "dotenv/config";
-import * as readline from "node:readline/promises";
-import { stdin, stdout } from "node:process";
+import { stdout } from "node:process";
 import chalk from "chalk";
+import type { ChatMessage, TaskMode } from "../../core/graph.js";
+import type { Chat, SecurityMode } from "../../core/memory/chats.js";
+import type { Goal } from "../../core/memory/goals.js";
+import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import { MarkdownStreamRenderer } from "./markdown.js";
+import {
+  appendTranscript,
+  armStopCommand,
+  cancelActiveInput,
+  collapseDanglingToolBlock,
+  expandSkillMentions,
+  flushRender,
+  formatToolResult,
+  initResizeHandler,
+  isLightTerminal,
+  markDanglingToolBlock,
+  pickArchivedChat,
+  pickModel,
+  pickPermission,
+  printBanner,
+  printHelp,
+  printStatus,
+  promptToolApproval,
+  readInput,
+  renderContextBar,
+  renderScreen,
+  setActiveModeLabel,
+  setActivePermissionLabel,
+  setDanglingToolBlock,
+  setGenerationInput,
+  setTerminalTheme,
+  setTranscript,
+  showRestoredMessages,
+  transcript,
+  uiDim,
+  writeLive,
+  type NvidiaModelInfo,
+  type PendingToolCall,
+} from "./ui.js";
 
 const SERVER_URL = (process.env.ULTRON_SERVER_URL ?? "").replace(/\/+$/, "");
 if (!SERVER_URL) {
@@ -20,30 +62,11 @@ if (!SERVER_URL) {
   process.exit(1);
 }
 
-type ThinkingMode = "full" | "low" | "off";
-type TaskMode = "none" | "todo" | "plan" | "goal";
-type SecurityMode = "bypass" | "accept_edit" | "manual";
-
-interface Chat {
-  id: string;
-  title: string;
-  updatedAt: string;
-  securityMode: SecurityMode;
-}
-
-interface PendingToolCall {
-  id: string;
-  name: string;
-  args: unknown;
-}
-
-const dim = (text: string) => chalk.dim(text);
-const rl = readline.createInterface({ input: stdin, output: stdout });
-
 async function apiGet(path: string): Promise<any> {
   const res = await fetch(`${SERVER_URL}${path}`);
-  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
-  return res.json();
+  const data = (await res.json().catch(() => ({}))) as any;
+  if (!res.ok) throw new Error(data.error ?? `${path} → HTTP ${res.status}`);
+  return data;
 }
 
 async function apiPost(path: string, body?: unknown): Promise<any> {
@@ -68,307 +91,425 @@ async function apiPatch(path: string, body: unknown): Promise<any> {
   return data;
 }
 
-let currentChatId = "";
-let currentChatTitle = "";
-let currentSecurityMode: SecurityMode = "bypass";
-let thinkingMode: ThinkingMode = "full";
-let taskMode: TaskMode = "none";
-let verbose = false;
-let generating = false;
-let activeAbort: AbortController | undefined;
-
-async function pickCurrentChat(): Promise<void> {
-  const { chats } = await apiGet("/api/chats");
-  const chat: Chat | undefined = chats[0];
-  if (chat) {
-    currentChatId = chat.id;
-    currentChatTitle = chat.title;
-    currentSecurityMode = chat.securityMode;
-  } else {
-    const created = await apiPost("/api/chats");
-    currentChatId = created.chat.id;
-    currentChatTitle = created.chat.title;
-    currentSecurityMode = created.chat.securityMode;
-  }
+async function apiDelete(path: string): Promise<void> {
+  await fetch(`${SERVER_URL}${path}`, { method: "DELETE" });
 }
 
-function parseSseEvents(buffer: string): { events: string[]; rest: string } {
-  const events = buffer.split("\n\n");
-  const rest = events.pop() ?? "";
-  return { events, rest };
-}
+// Satisfies ui.ts's ArchivedChatSource — the remote equivalent of passing
+// ChatRegistry directly in the local CLI.
+const archivedChatSource = {
+  listArchived: async (): Promise<Chat[]> => (await apiGet("/api/chats/archived")).chats,
+  delete: async (id: string): Promise<void> => { await apiDelete(`/api/chats/${encodeURIComponent(id)}`); },
+};
 
-// Consumes one SSE response to completion, recursing into /api/approve when
-// the stream ends on "approval_required" instead of a terminal event — same
-// pattern as the web UI's streamTurn (composer.js), so both clients agree on
-// how a turn that pauses mid-way for tool approval keeps rendering as one
-// uninterrupted reply.
-async function pump(res: Response): Promise<void> {
-  if (!res.body) return;
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let wroteAnyText = false;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const { events, rest } = parseSseEvents(buffer);
-    buffer = rest;
-
-    for (const raw of events) {
-      const lines = raw.split("\n");
-      const eventLine = lines.find((l) => l.startsWith("event: "));
-      const dataLine = lines.find((l) => l.startsWith("data: "));
-      if (!eventLine || !dataLine) continue;
-      const eventName = eventLine.slice("event: ".length);
-      const data = JSON.parse(dataLine.slice("data: ".length));
-
-      if (eventName === "text") {
-        stdout.write(data.delta);
-        wroteAnyText = true;
-      } else if (eventName === "tool_call") {
-        if (wroteAnyText) stdout.write("\n");
-        wroteAnyText = false;
-        stdout.write(dim(`[tool] ${data.name}: ${data.summary}\n`));
-      } else if (eventName === "tool_result") {
-        const text = String(data.content ?? "");
-        stdout.write(dim(`  → ${text.length > 300 ? `${text.slice(0, 300)}…` : text}\n`));
-      } else if (eventName === "approval_required") {
-        if (wroteAnyText) stdout.write("\n");
-        wroteAnyText = false;
-        const calls: PendingToolCall[] = data.calls;
-        console.log(chalk.yellow(`\n[ultron] approval needed for ${calls.length} tool call(s):`));
-        for (const call of calls) console.log(`  · ${call.name} ${dim(JSON.stringify(call.args))}`);
-        const answer = (await rl.question(`${chalk.magentaBright.bold("approve all?")} ${dim("(y/N)")} › `)).trim().toLowerCase();
-        const approve = answer === "y" || answer === "yes";
-        const decisions: Record<string, boolean> = {};
-        for (const call of calls) decisions[call.id] = approve;
-        await pump(
-          await fetch(`${SERVER_URL}/api/approve`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chatId: currentChatId, thinking: thinkingMode, taskMode, decisions }),
-            signal: activeAbort?.signal,
-          }),
-        );
-      } else if (eventName === "done") {
-        if (wroteAnyText) stdout.write("\n");
-        if (verbose) console.log(dim(data.stats));
-      } else if (eventName === "goal") {
-        console.log(dim(`[ultron] goal ${data.status}${data.reason ? ` — ${data.reason}` : ""}`));
-      } else if (eventName === "aborted") {
-        if (wroteAnyText) stdout.write("\n");
-        console.log(dim("[ultron] generation stopped."));
-      } else if (eventName === "error") {
-        if (wroteAnyText) stdout.write("\n");
-        console.log(chalk.red(`[ultron] error: ${data.message}`));
-      }
-    }
-  }
-}
-
-async function sendTurn(body: { text?: string; retry?: boolean }): Promise<void> {
-  generating = true;
-  activeAbort = new AbortController();
-  try {
-    const res = await fetch(`${SERVER_URL}/api/turn`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId: currentChatId, thinking: thinkingMode, taskMode, ...body }),
-      signal: activeAbort.signal,
-    });
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({ error: "request failed" }))) as { error?: string };
-      console.log(chalk.red(`[ultron] ${err.error ?? "request failed"}`));
-      return;
-    }
-    await pump(res);
-  } catch (err) {
-    if (!(err instanceof Error && err.name === "AbortError")) {
-      console.log(chalk.red(`[ultron] connection error: ${err instanceof Error ? err.message : String(err)}`));
-    }
-  } finally {
-    generating = false;
-    activeAbort = undefined;
-  }
-}
-
-const HELP_TEXT = `local commands
-/help                 show this help
-/status               show model, memory and tool status
-/context              show current context usage
-/stop                 stop the active generation
-/retry                remove the previous reply and run the last message again
-/compact              summarize and compact session history
-/archive [title]      rename (optional), archive this chat, start a new one
-/resume               list archived chats — number to reopen, "d<n>" to delete
-/think on|low|off     set reasoning mode
-/task none|todo|plan|goal   set task mode
-/security bypass|accept_edit|manual   set tool approval
-/verbose on|off       toggle timing and token metrics
-/clear                clear the terminal (local only, history is untouched)
-/quit                 exit`;
-
-async function handleCommand(input: string): Promise<void> {
-  const [command, ...rest] = input.trim().split(/\s+/);
-  const arg = rest.join(" ");
-
-  if (command === "/help") { console.log(HELP_TEXT); return; }
-
-  if (command === "/status") {
-    const data = await apiGet(`/api/status?chatId=${encodeURIComponent(currentChatId)}`);
-    console.log(
-      `model: ${data.model}\nchat: ${currentChatTitle}\ntools: ${data.toolCount} available\n` +
-        `think: ${thinkingMode}\ntask: ${taskMode}\nverbose: ${verbose ? "on" : "off"}`,
-    );
-    return;
-  }
-
-  if (command === "/context") {
-    const data = await apiGet(`/api/status?chatId=${encodeURIComponent(currentChatId)}`);
-    const pct = Math.round((data.contextTokens / data.maxTokens) * 100);
-    console.log(`context: ${data.contextTokens.toLocaleString()} / ${data.maxTokens.toLocaleString()} tokens (${pct}%)`);
-    return;
-  }
-
-  if (command === "/stop") {
-    if (!generating) { console.log(dim("[ultron] nothing running.")); return; }
-    activeAbort?.abort();
-    await apiPost("/api/stop", { chatId: currentChatId }).catch(() => {});
-    return;
-  }
-
-  if (command === "/retry") { await sendTurn({ retry: true }); return; }
-
-  if (command === "/compact") {
-    const data = await apiPost("/api/compact", { chatId: currentChatId });
-    console.log(
-      dim(
-        data.compacted
-          ? `[ultron] compacted ${data.before} messages into ${data.after} context messages.`
-          : "[ultron] not enough history to compact yet.",
-      ),
-    );
-    return;
-  }
-
-  if (command === "/archive") {
-    let title = arg.trim();
-    if (!title) title = (await rl.question(`${chalk.magentaBright.bold("title")} › `)).trim();
-    const data = await apiPost(`/api/chats/${encodeURIComponent(currentChatId)}/archive`, title ? { title } : {});
-    console.log(chalk.greenBright(`Chat Archived "${data.archived?.title ?? title}"`));
-    currentChatId = data.fresh.id;
-    currentChatTitle = data.fresh.title;
-    currentSecurityMode = data.fresh.securityMode;
-    return;
-  }
-
-  if (command === "/resume") {
-    const { chats } = await apiGet("/api/chats/archived");
-    if (!chats.length) { console.log(dim("[ultron] no archived chats.")); return; }
-    chats.forEach((c: Chat, i: number) => console.log(`  ${i + 1}. ${c.title}`));
-    const answer = (await rl.question(`${chalk.magentaBright.bold("resume")} ${dim("(number, or d<n> to delete)")} › `)).trim();
-    const del = /^d(\d+)$/i.exec(answer);
-    if (del) {
-      const target = chats[Number(del[1]) - 1];
-      if (!target) { console.log(chalk.yellow("[ultron] no such entry.")); return; }
-      await fetch(`${SERVER_URL}/api/chats/${encodeURIComponent(target.id)}`, { method: "DELETE" });
-      console.log(dim(`[ultron] deleted "${target.title}".`));
-      return;
-    }
-    const target = chats[Number(answer) - 1];
-    if (!target) { console.log(chalk.yellow("[ultron] no such entry.")); return; }
-    await apiPost(`/api/chats/${encodeURIComponent(target.id)}/resume`);
-    currentChatId = target.id;
-    currentChatTitle = target.title;
-    currentSecurityMode = target.securityMode;
-    console.log(dim(`[ultron] resumed "${target.title}".`));
-    return;
-  }
-
-  if (command === "/think") {
-    const mode = arg.toLowerCase();
-    if (!mode) { console.log(dim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).`)); return; }
-    if (mode === "on" || mode === "full") thinkingMode = "full";
-    else if (mode === "low") thinkingMode = "low";
-    else if (mode === "off") thinkingMode = "off";
-    else { console.log(chalk.yellow("[ultron] use /think on, /think low or /think off.")); return; }
-    console.log(dim(`[ultron] reasoning mode set to ${thinkingMode}.`));
-    return;
-  }
-
-  if (command === "/task") {
-    const mode = arg.toLowerCase();
-    if (!mode) { console.log(dim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal).`)); return; }
-    if (mode !== "none" && mode !== "todo" && mode !== "plan" && mode !== "goal") {
-      console.log(chalk.yellow("[ultron] use /task none, /task todo, /task plan or /task goal."));
-      return;
-    }
-    taskMode = mode;
-    console.log(dim(`[ultron] task mode set to ${taskMode}.`));
-    return;
-  }
-
-  if (command === "/security") {
-    const mode = arg.toLowerCase();
-    if (!mode) {
-      console.log(dim(`[ultron] tool approval: ${currentSecurityMode} (use /security bypass|accept_edit|manual).`));
-      return;
-    }
-    if (mode !== "bypass" && mode !== "accept_edit" && mode !== "manual") {
-      console.log(chalk.yellow("[ultron] use /security bypass, /security accept_edit or /security manual."));
-      return;
-    }
-    await apiPatch(`/api/chats/${encodeURIComponent(currentChatId)}/security`, { mode });
-    currentSecurityMode = mode;
-    console.log(dim(`[ultron] tool approval set to ${mode}.`));
-    return;
-  }
-
-  if (command === "/verbose") {
-    const mode = arg.toLowerCase();
-    if (mode === "on" || mode === "true") verbose = true;
-    else if (mode === "off" || mode === "false") verbose = false;
-    else { console.log(dim(`[ultron] verbose is ${verbose ? "on" : "off"} (use /verbose on|off).`)); return; }
-    console.log(dim(`[ultron] verbose ${verbose ? "on" : "off"}.`));
-    return;
-  }
-
-  if (command === "/clear") { console.clear(); return; }
-
-  if (command === "/quit") { rl.close(); process.exit(0); }
-
-  console.log(chalk.yellow(`[ultron] unknown command: ${command} — try /help`));
-}
-
-async function main(): Promise<void> {
+async function main() {
   try {
     await apiGet("/api/health");
   } catch {
     console.error(chalk.red(`Could not reach ULTRON at ${SERVER_URL} — is the server running there?`));
     process.exit(1);
   }
-  await pickCurrentChat();
-  console.log(chalk.cyanBright.bold("ULTRON") + dim(` — connected to ${SERVER_URL} · chat "${currentChatTitle}"`));
-  console.log(dim("Type your message, or /help for commands.\n"));
 
-  rl.on("SIGINT", () => {
-    if (generating) { activeAbort?.abort(); apiPost("/api/stop", { chatId: currentChatId }).catch(() => {}); return; }
-    rl.close();
-    process.exit(0);
+  let currentChatId: string;
+  let currentChatTitle: string;
+  {
+    const { chats } = await apiGet("/api/chats");
+    const chat: Chat | undefined = chats[0];
+    if (chat) {
+      currentChatId = chat.id;
+      currentChatTitle = chat.title;
+    } else {
+      const created = await apiPost("/api/chats");
+      currentChatId = created.chat.id;
+      currentChatTitle = created.chat.title;
+    }
+  }
+
+  let modelName = "";
+  let toolCount = 0;
+  const refreshStatus = async (): Promise<{ contextTokens: number; maxTokens: number; goal: Goal | null }> => {
+    const data = await apiGet(`/api/status?chatId=${encodeURIComponent(currentChatId)}`);
+    modelName = data.model;
+    toolCount = data.toolCount;
+    return data;
+  };
+  await refreshStatus();
+  setActivePermissionLabel((await apiGet("/api/chats")).chats.find((c: Chat) => c.id === currentChatId)?.securityMode ?? "bypass");
+
+  printBanner(modelName);
+  initResizeHandler(() => modelName);
+
+  let abortController: AbortController | undefined;
+  let stopping = false;
+  let thinkingMode: ThinkingMode = "full";
+  let taskMode: TaskMode = "none";
+  let verbose = false;
+
+  const changeModel = async (contextLine: string): Promise<void> => {
+    appendTranscript(uiDim("[ultron] loading NVIDIA models…\n"));
+    renderScreen("", 0, contextLine);
+    flushRender();
+    try {
+      const data = await apiGet("/api/models");
+      const models: NvidiaModelInfo[] = data.models;
+      if (models.length === 0) {
+        appendTranscript(chalk.yellow("[ultron] NVIDIA returned no models.\n\n"));
+        return;
+      }
+      const selected = await pickModel(contextLine, models, data.current);
+      if (!selected) return;
+      if (selected.id === data.current) return;
+      await apiPatch("/api/model", { model: selected.id });
+      await refreshStatus();
+      const contextLabel = selected.contextWindowTokens
+        ? ` · context ${selected.contextWindowTokens.toLocaleString()} tokens`
+        : " · context fallback in use";
+      appendTranscript(uiDim(`[ultron] model set to ${selected.id}${contextLabel}.\n\n`));
+    } catch (error) {
+      appendTranscript(chalk.red(`[ultron] could not list NVIDIA models: ${error instanceof Error ? error.message : String(error)}\n\n`));
+    }
+  };
+
+  const archiveCurrentChat = async (contextLine: string, requestedTitle?: string): Promise<void> => {
+    let title = requestedTitle?.trim();
+    if (!title) {
+      title = (
+        await readInput(contextLine, currentChatTitle === "New chat" ? "" : currentChatTitle, `${chalk.magentaBright.bold("title")} ${uiDim("›")} `, false)
+      ).trim();
+    }
+    const data = await apiPost(`/api/chats/${encodeURIComponent(currentChatId)}/archive`, title ? { title } : {});
+    currentChatId = data.fresh.id;
+    currentChatTitle = data.fresh.title;
+    setActivePermissionLabel(data.fresh.securityMode);
+    appendTranscript(`${chalk.greenBright(`Chat Archived "${data.archived?.title ?? title ?? ""}"`)}\n\n`);
+  };
+
+  const resumeChat = async (contextLine: string, commandArgument: string): Promise<void> => {
+    let target: Chat | undefined;
+    if (!commandArgument) {
+      target = await pickArchivedChat(contextLine, archivedChatSource);
+    } else {
+      const query = commandArgument.toLowerCase();
+      const archived: Chat[] = await archivedChatSource.listArchived();
+      target = archived.find((chat) => chat.id === commandArgument || chat.title.toLowerCase().includes(query));
+    }
+    if (!target) {
+      appendTranscript(chalk.yellow("[ultron] no archived chat selected.\n\n"));
+      return;
+    }
+    await apiPost(`/api/chats/${encodeURIComponent(target.id)}/resume`);
+    currentChatId = target.id;
+    currentChatTitle = target.title;
+    setActivePermissionLabel(target.securityMode);
+    const { messages } = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/messages`);
+    showRestoredMessages(messages as ChatMessage[], modelName);
+    appendTranscript(uiDim(`[ultron] resumed "${target.title}".\n\n`));
+  };
+
+  process.on("SIGINT", () => {
+    if (stopping) process.exit(0);
+    stopping = true;
+    appendTranscript(uiDim("\n[ultron] stopping...\n"));
+    abortController?.abort();
+    apiPost("/api/stop", { chatId: currentChatId }).catch(() => {});
+    cancelActiveInput?.();
   });
 
-  while (true) {
-    const input = (await rl.question(`${chalk.cyanBright.bold("you")} ${dim("›")} `)).trim();
-    if (!input) continue;
-    if (input.startsWith("/")) {
-      await handleCommand(input).catch((err) => console.log(chalk.red(`[ultron] ${err instanceof Error ? err.message : String(err)}`)));
-      continue;
+  // Consumes one SSE response to completion, recursing into /api/approve
+  // when the stream ends on "approval_required" — same pattern as the web
+  // UI's streamTurn (composer.js) and the local CLI's approval loop around
+  // graph.stream(), just driven by pre-summarized server events instead of
+  // raw LangGraph message chunks. The server also self-drives /task goal's
+  // continuation loop inside this same SSE response (see server.ts's
+  // streamGraphTurn), so "goal" events just need rendering here, not a
+  // separate client-side judge/replay loop like the local CLI's
+  // driveGoalLoop.
+  async function pump(res: Response, contextLine: string): Promise<{ finalText: string; aborted: boolean; errored: boolean }> {
+    let finalText = "";
+    let aborted = false;
+    let errored = false;
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({ error: "request failed" }))) as { error?: string };
+      appendTranscript(chalk.red(`[ultron] ${err.error ?? "request failed"}\n\n`));
+      renderScreen("", 0, contextLine);
+      return { finalText, aborted, errored: true };
     }
-    await sendTurn({ text: input });
+    if (!res.body) return { finalText, aborted, errored };
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let wrotePrefix = false;
+    const markdown = new MarkdownStreamRenderer();
+    // Tool calls arrive as a separate "tool_call" event before their
+    // matching "tool_result" — queued by name (FIFO) to mirror the local
+    // CLI's pendingToolCalls bookkeeping, so a result writes its call's
+    // summary immediately before the formatted result, then marks the
+    // block dangling exactly like a local turn does.
+    const pendingSummaries: string[] = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+
+      for (const raw of events) {
+        const lines = raw.split("\n");
+        const eventLine = lines.find((l) => l.startsWith("event: "));
+        const dataLine = lines.find((l) => l.startsWith("data: "));
+        if (!eventLine || !dataLine) continue;
+        const eventName = eventLine.slice("event: ".length);
+        const data = JSON.parse(dataLine.slice("data: ".length));
+
+        if (eventName === "text") {
+          if (!wrotePrefix) {
+            collapseDanglingToolBlock();
+            writeLive(`${chalk.redBright.bold("ultron")} ${uiDim("›")} `, contextLine);
+            wrotePrefix = true;
+          }
+          writeLive(markdown.push(data.delta), contextLine);
+          finalText += data.delta;
+        } else if (eventName === "tool_call") {
+          if (wrotePrefix) {
+            writeLive("\n\n", contextLine);
+            wrotePrefix = false;
+          }
+          collapseDanglingToolBlock();
+          pendingSummaries.push(data.summary);
+        } else if (eventName === "tool_result") {
+          collapseDanglingToolBlock();
+          const blockStart = transcript.length;
+          const summary = pendingSummaries.shift();
+          if (summary) writeLive(uiDim(`[${summary}]\n`), contextLine);
+          writeLive(`${formatToolResult(data.name, data.content)}\n\n`, contextLine);
+          markDanglingToolBlock(blockStart, data.name);
+        } else if (eventName === "approval_required") {
+          if (wrotePrefix) {
+            writeLive("\n", contextLine);
+            wrotePrefix = false;
+          }
+          const decisions = await promptToolApproval(contextLine, data.calls as PendingToolCall[]);
+          const next = await fetch(`${SERVER_URL}/api/approve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chatId: currentChatId, thinking: thinkingMode, taskMode, decisions }),
+            signal: abortController?.signal,
+          });
+          const nested = await pump(next, contextLine);
+          finalText += nested.finalText;
+          if (nested.aborted) aborted = true;
+          if (nested.errored) errored = true;
+        } else if (eventName === "done") {
+          appendTranscript(markdown.flush());
+          appendTranscript("\n\n");
+          if (verbose) appendTranscript(uiDim(`  ${data.stats}\n\n`));
+          renderScreen("", 0, contextLine);
+        } else if (eventName === "goal") {
+          appendTranscript(uiDim(`[ultron] goal ${data.status}${data.reason ? ` — ${data.reason}` : ""}\n\n`));
+          renderScreen("", 0, contextLine);
+        } else if (eventName === "aborted") {
+          appendTranscript(uiDim("[ultron] generation stopped.\n\n"));
+          renderScreen("", 0, contextLine);
+          aborted = true;
+        } else if (eventName === "error") {
+          appendTranscript(chalk.red(`[ultron] error: ${data.message}\n\n`));
+          renderScreen("", 0, contextLine);
+          errored = true;
+        }
+      }
+    }
+    return { finalText, aborted, errored };
+  }
+
+  async function executeTurn(contextLine: string, body: { text?: string; retry?: boolean }): Promise<{ finalText: string; aborted: boolean; errored: boolean }> {
+    collapseDanglingToolBlock();
+    abortController = new AbortController();
+    const controller = abortController;
+    setGenerationInput("", 0);
+    const disarmStopCommand = armStopCommand(controller, contextLine);
+    try {
+      const res = await fetch(`${SERVER_URL}/api/turn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: currentChatId, thinking: thinkingMode, taskMode, ...body }),
+        signal: controller.signal,
+      });
+      // Passive memory extraction (userModelExtractor.ts) already runs
+      // server-side inside handleTurn for every real user message — nothing
+      // to replicate here, unlike the local CLI which calls it directly.
+      return await pump(res, contextLine);
+    } catch (err) {
+      if (controller.signal.aborted) {
+        appendTranscript(uiDim("[ultron] generation stopped.\n\n"));
+        renderScreen("", 0, contextLine);
+        return { finalText: "", aborted: true, errored: false };
+      }
+      appendTranscript(chalk.red(`[ultron] connection error: ${err instanceof Error ? err.message : String(err)}\n\n`));
+      renderScreen("", 0, contextLine);
+      return { finalText: "", aborted: false, errored: true };
+    } finally {
+      disarmStopCommand();
+    }
+  }
+
+  try {
+    while (!stopping) {
+      const status = await refreshStatus();
+      const contextLine = renderContextBar(status.contextTokens, status.maxTokens);
+      let input = await readInput(contextLine);
+      if (stopping) break;
+      if (!input.trim()) continue;
+
+      const rawInput = input.trim();
+      const commandName = rawInput.split(/\s+/, 1)[0].toLowerCase();
+      const command = rawInput.toLowerCase();
+      const commandArgument = rawInput.slice(commandName.length).trim();
+      let isRetry = false;
+
+      if (command.startsWith("/")) {
+        switch (command) {
+          case "/help":
+            printHelp();
+            continue;
+          case "/model":
+            await changeModel(contextLine);
+            continue;
+          case "/status": {
+            const chat = (await apiGet("/api/chats")).chats.find((c: Chat) => c.id === currentChatId);
+            printStatus(modelName, toolCount, thinkingMode, taskMode, verbose, currentChatId, chat?.securityMode ?? "bypass", status.goal ?? undefined);
+            continue;
+          }
+          case "/clear":
+            setTranscript("");
+            setDanglingToolBlock(null);
+            printBanner(modelName);
+            continue;
+          case "/context":
+            appendTranscript(`${renderContextBar(status.contextTokens, status.maxTokens)}\n\n`);
+            continue;
+          case "/stop":
+            appendTranscript(uiDim("[ultron] no active generation to stop.\n\n"));
+            continue;
+          case "/retry":
+            isRetry = true;
+            break;
+          case "/compact": {
+            const result = await apiPost("/api/compact", { chatId: currentChatId });
+            appendTranscript(
+              result.compacted
+                ? uiDim(`[ultron] compacted ${result.before} messages into ${result.after} context messages.\n\n`)
+                : uiDim("[ultron] not enough history to compact yet.\n\n"),
+            );
+            continue;
+          }
+          case "/archive":
+            await archiveCurrentChat(contextLine, commandArgument);
+            continue;
+          case "/resume":
+            await resumeChat(contextLine, commandArgument);
+            continue;
+          case "/think":
+            appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
+            continue;
+          case "/task":
+            appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal).\n\n`));
+            continue;
+          case "/security": {
+            const chat = (await apiGet("/api/chats")).chats.find((c: Chat) => c.id === currentChatId);
+            appendTranscript(uiDim(`[ultron] tool approval: ${chat?.securityMode ?? "bypass"} (use /security bypass|accept_edit|manual).\n\n`));
+            continue;
+          }
+          case "/permissions": {
+            const chat = (await apiGet("/api/chats")).chats.find((c: Chat) => c.id === currentChatId);
+            const selectedPermission = await pickPermission(contextLine, chat?.securityMode ?? "bypass");
+            if (!selectedPermission) {
+              appendTranscript(uiDim("[ultron] permissions unchanged.\n\n"));
+              continue;
+            }
+            await apiPatch(`/api/chats/${encodeURIComponent(currentChatId)}/security`, { mode: selectedPermission });
+            setActivePermissionLabel(selectedPermission);
+            appendTranscript(uiDim(`[ultron] permission mode set to ${selectedPermission}.\n\n`));
+            continue;
+          }
+          case "/verbose":
+            appendTranscript(uiDim(`[ultron] verbose is ${verbose ? "on" : "off"} (use /verbose on|off).\n\n`));
+            continue;
+          case "/quit":
+            stopping = true;
+            continue;
+          default:
+            if (commandName === "/archive") { await archiveCurrentChat(contextLine, commandArgument); continue; }
+            if (commandName === "/resume") { await resumeChat(contextLine, commandArgument); continue; }
+            if (command.startsWith("/think ")) {
+              const mode = command.slice("/think ".length).trim();
+              if (mode === "on" || mode === "full") thinkingMode = "full";
+              else if (mode === "low") thinkingMode = "low";
+              else if (mode === "off") thinkingMode = "off";
+              else { appendTranscript(chalk.yellow("[ultron] use /think on, /think low or /think off.\n\n")); continue; }
+              appendTranscript(uiDim(`[ultron] reasoning mode set to ${thinkingMode}.\n\n`));
+              continue;
+            }
+            if (command.startsWith("/task ")) {
+              const mode = command.slice("/task ".length).trim();
+              if (mode !== "none" && mode !== "todo" && mode !== "plan" && mode !== "goal") {
+                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo, /task plan or /task goal.\n\n"));
+                continue;
+              }
+              taskMode = mode as TaskMode;
+              setActiveModeLabel(mode === "todo" ? "To-Do" : mode === "plan" ? "Plan" : mode === "goal" ? "Goal" : "None");
+              appendTranscript(uiDim(`[ultron] task mode set to ${taskMode}.\n\n`));
+              continue;
+            }
+            if (command.startsWith("/security ")) {
+              const mode = command.slice("/security ".length).trim();
+              if (mode !== "bypass" && mode !== "accept_edit" && mode !== "manual") {
+                appendTranscript(chalk.yellow("[ultron] use /security bypass, /security accept_edit or /security manual.\n\n"));
+                continue;
+              }
+              await apiPatch(`/api/chats/${encodeURIComponent(currentChatId)}/security`, { mode });
+              setActivePermissionLabel(mode as SecurityMode);
+              appendTranscript(uiDim(`[ultron] tool approval set to ${mode}.\n\n`));
+              continue;
+            }
+            if (command === "/theme") {
+              appendTranscript(uiDim(`[ultron] terminal theme: (${isLightTerminal() ? "light" : "dark"} palette).\n\n`));
+              continue;
+            }
+            if (command.startsWith("/theme ")) {
+              const theme = command.slice("/theme ".length).trim();
+              if (theme !== "auto" && theme !== "light" && theme !== "dark") {
+                appendTranscript(chalk.yellow("[ultron] use /theme auto, /theme light or /theme dark.\n\n"));
+                continue;
+              }
+              setTerminalTheme(theme);
+              appendTranscript(uiDim(`[ultron] terminal theme set to ${theme} (${isLightTerminal() ? "light" : "dark"} palette).\n\n`));
+              continue;
+            }
+            if (command === "/verbose on" || command === "/verbose true") { verbose = true; appendTranscript(uiDim("[ultron] verbose on.\n\n")); continue; }
+            if (command === "/verbose off" || command === "/verbose false") { verbose = false; appendTranscript(uiDim("[ultron] verbose off.\n\n")); continue; }
+            if (commandName === "/memory") {
+              appendTranscript(chalk.yellow("[ultron] /memory isn't available from the remote CLI yet (no server endpoint) — use the local CLI on the machine running the graph.\n\n"));
+              continue;
+            }
+            appendTranscript(chalk.yellow(`[ultron] unknown command: ${input.trim()} — try /help\n\n`));
+            continue;
+        }
+      }
+
+      const turnInput = isRetry ? { retry: true } : { text: expandSkillMentions(input) };
+      await executeTurn(contextLine, turnInput);
+    }
+  } finally {
+    cancelActiveInput?.();
+    appendTranscript(uiDim("[ultron] stopped.\n"));
+    stdout.write(uiDim("[ultron] stopped.\n"));
+    process.exit(0);
   }
 }
 
-main();
+main().catch((err) => {
+  console.error(chalk.red("[ultron] fatal error:"), err);
+  process.exit(1);
+});
