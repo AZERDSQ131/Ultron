@@ -166,6 +166,29 @@ async function main() {
   chats.setFocus(currentChatId, CLI_CHAT_SCOPE);
   setActivePermissionLabel(chats.getSecurityMode(currentChatId));
 
+  // The local CLI shares the database with Telegram directly. Keep listening
+  // to Telegram-originated events so /resume is live, not just a one-time
+  // history restore.
+  let eventCursor = chatEvents.latestId(currentChatId);
+  let eventPollBusy = false;
+  const pollTelegramEvents = async (): Promise<void> => {
+    if (eventPollBusy) return;
+    eventPollBusy = true;
+    try {
+      const events = chatEvents.listAfter(currentChatId, eventCursor);
+      for (const event of events) {
+        eventCursor = event.id;
+        if (event.source !== "telegram") continue;
+        const speaker = event.kind === "human" ? chalk.yellow("telegram") : chalk.redBright.bold("ultron");
+        appendTranscript(`${speaker} ${uiDim("›")} ${event.content}\n\n`);
+      }
+      if (events.length) renderScreen("", 0, "");
+    } finally {
+      eventPollBusy = false;
+    }
+  };
+  const eventPollTimer = setInterval(() => { void pollTelegramEvents(); }, 750);
+
   let abortController: AbortController | undefined;
   let stopping = false;
   let thinkingMode: ThinkingMode = "full";
@@ -227,6 +250,7 @@ async function main() {
     chats.delete(current.id, CLI_CHAT_SCOPE);
     const next = chats.activateMain(CLI_CHAT_SCOPE);
     currentChatId = next.id;
+    eventCursor = chatEvents.latestId(currentChatId);
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
     setTranscript("");
     printBanner(config.nemotronModel);
@@ -247,6 +271,7 @@ async function main() {
     }
     chats.setFocus(target.id, CLI_CHAT_SCOPE);
     currentChatId = target.id;
+    eventCursor = chatEvents.latestId(currentChatId);
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
     showRestoredMessages(await listChatMessages(graph, currentChatId), config.nemotronModel);
     appendTranscript(uiDim(`[ultron] resumed "${target.title}".\n\n`));
@@ -255,6 +280,7 @@ async function main() {
   const switchToMain = async (): Promise<void> => {
     const main = chats.activateMain(CLI_CHAT_SCOPE);
     currentChatId = main.id;
+    eventCursor = chatEvents.latestId(currentChatId);
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
     showRestoredMessages(await listChatMessages(graph, currentChatId), config.nemotronModel);
     appendTranscript(uiDim(`[ultron] switched to main conversation.\n\n`));
@@ -266,6 +292,7 @@ async function main() {
     appendTranscript(uiDim("\n[ultron] stopping...\n"));
     abortController?.abort();
     cancelActiveInput?.();
+    clearInterval(eventPollTimer);
   });
 
   // One full turn: send turnInput, stream the reply, and loop through any
@@ -812,6 +839,7 @@ async function main() {
     }
   } finally {
     cancelActiveInput?.();
+    clearInterval(eventPollTimer);
     appendTranscript(uiDim("[ultron] stopped.\n"));
     stdout.write(uiDim("[ultron] stopped.\n"));
     process.exit(0);
