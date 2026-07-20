@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { state } from "./store.js";
-import { addTurn, addToolBlock, addSystemNote, clearThread, updateTurnActions } from "./thread.js";
+import { addTurn, beginToolGroup, addSystemNote, clearThread, updateTurnActions } from "./thread.js";
 import { loadStatus } from "./statusBar.js";
 import { attachToRunningChat, setGenerating, syncSecurityMode } from "./composer.js";
 import { closeHealthView } from "./healthView.js";
@@ -228,22 +228,29 @@ export async function selectChat(id) {
   try {
     const data = await api.chatMessages(id);
     // tool_call/tool_result entries (see listChatMessages in graph.ts)
-    // render as the same collapsible blocks a live turn uses (addToolBlock,
-    // composer.js's streamTurn) — a chat replay that skipped them would
-    // look empty for a chat that mostly ran tools, e.g. a spawned agent.
+    // render as the same grouped, collapsible "tool calls" block a live
+    // turn uses (beginToolGroup, composer.js's streamTurn) — a chat replay
+    // that skipped them would look empty for a chat that mostly ran tools,
+    // e.g. a spawned agent. live: false since replayed messages carry no
+    // reliable timing to show a "worked for Xs" duration.
     let openToolBlock = null;
+    let toolGroup = null;
+    let currentAssistantBody = null;
     for (const message of data.messages) {
-      if (message.role === "human" || message.role === "ai") {
-        const body = addTurn(message.role === "human" ? "user" : "assistant");
-        if (message.role === "human") {
-          body.textContent = message.content;
-        } else {
-          body.dataset.raw = message.content;
-          body.innerHTML = renderMarkdown(message.content);
-        }
+      if (message.role === "human") {
+        addTurn("user").textContent = message.content;
         openToolBlock = null;
+        toolGroup = null;
+        currentAssistantBody = null;
+      } else if (message.role === "ai") {
+        const body = addTurn("assistant");
+        body.dataset.raw = message.content;
+        body.innerHTML = renderMarkdown(message.content);
+        openToolBlock = null;
+        currentAssistantBody = body;
       } else if (message.role === "tool_call") {
-        openToolBlock = addToolBlock(message.name, message.content);
+        if (!toolGroup) toolGroup = beginToolGroup(currentAssistantBody, { live: false });
+        openToolBlock = toolGroup.addCall(message.name, message.content);
         openToolBlock.dataset.name = message.name;
       } else if (message.role === "tool_result") {
         const match = openToolBlock && openToolBlock.dataset.name === message.name ? openToolBlock : null;

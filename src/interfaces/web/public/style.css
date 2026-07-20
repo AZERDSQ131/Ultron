@@ -934,6 +934,46 @@ main#thread[hidden] {
    meaning (destructive borrows accent deliberately: ULTRON's whole
    point is that these tools act directly on the host).
    ============================================================ */
+/* Collapses every tool_call/tool_result in a turn into one "Worked for
+   Xm Ys" block above the assistant's text (see beginToolGroup, thread.js)
+   instead of each tool appearing as its own block below/interleaved with
+   the growing reply. Closed by default — .tool-block rows only render
+   once expanded. */
+.tool-group {
+  margin: 4px 0 4px 14px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.tool-group summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-dimmer);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tool-group summary::-webkit-details-marker {
+  display: none;
+}
+.tool-group summary::before {
+  content: "▸";
+  font-size: var(--fs-2xs);
+}
+.tool-group[open] summary::before {
+  content: "▾";
+}
+.tool-group summary:hover {
+  background: var(--line-soft);
+}
+.tool-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
 .tool-block {
   font-family: var(--mono);
   font-size: var(--fs-sm);
@@ -942,7 +982,6 @@ main#thread[hidden] {
   border-left-width: 3px;
   border-radius: var(--radius-sm);
   padding: 8px 12px;
-  margin-left: 14px;
   background: var(--line-soft);
 }
 

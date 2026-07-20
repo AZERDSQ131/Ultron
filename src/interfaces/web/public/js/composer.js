@@ -5,10 +5,10 @@ import {
   addApprovalBlock,
   addMetaLine,
   addSystemNote,
-  addToolBlock,
+  beginToolGroup,
   addTurn,
   clearThread,
-  scrollToEnd,
+  scrollToEndIfNear,
   truncateAfterLastUserTurn,
   truncateFromLastUserTurn,
   updateTurnActions,
@@ -434,10 +434,16 @@ export async function streamTurn(body) {
   let assistantBody = null;
   let assistantText = "";
   let cursorEl = null;
+  let toolGroup = null;
 
   const finishAssistant = () => {
     if (cursorEl) cursorEl.remove();
     cursorEl = null;
+  };
+  const finishTurn = () => {
+    finishAssistant();
+    toolGroup?.finish();
+    toolGroup = null;
   };
 
   // Consumes one SSE response to completion. Recurses into a fresh
@@ -483,10 +489,11 @@ export async function streamTurn(body) {
           assistantBody.dataset.raw = assistantText;
           assistantBody.innerHTML = renderMarkdown(assistantText);
           if (cursorEl) assistantBody.appendChild(cursorEl);
-          scrollToEnd();
+          scrollToEndIfNear();
         } else if (eventName === "tool_call") {
           finishAssistant();
-          const pre = addToolBlock(data.name, data.summary);
+          if (!toolGroup) toolGroup = beginToolGroup(assistantBody);
+          const pre = toolGroup.addCall(data.name, data.summary);
           pre.dataset.name = data.name;
         } else if (eventName === "tool_result") {
           const blocks = [...document.querySelectorAll(".tool-block pre")];
@@ -504,7 +511,7 @@ export async function streamTurn(body) {
             }),
           );
         } else if (eventName === "done") {
-          finishAssistant();
+          finishTurn();
           updateContextGauge(data.contextTokens, data.maxTokens);
           if (state.verbose) {
             addMetaLine(data.stats);
@@ -513,10 +520,10 @@ export async function streamTurn(body) {
           addSystemNote(`[ultron] goal ${data.status}${data.reason ? ` — ${data.reason}` : ""}`);
           loadStatus();
         } else if (eventName === "aborted") {
-          finishAssistant();
+          finishTurn();
           addSystemNote("[ultron] generation stopped.");
         } else if (eventName === "error") {
-          finishAssistant();
+          finishTurn();
           addSystemNote(`[ultron] error: ${data.message}`, true);
         }
       }
@@ -534,7 +541,7 @@ export async function streamTurn(body) {
   } catch (err) {
     addSystemNote(`[ultron] connection error: ${err.message}`, true);
   } finally {
-    finishAssistant();
+    finishTurn();
     setGenerating(false);
     // Refreshes the sidebar so an auto-derived title (first message of a
     // "New chat") and the recency ordering pick up this turn.
@@ -553,9 +560,15 @@ export async function attachToRunningChat(chatId) {
   let assistantBody = null;
   let assistantText = "";
   let cursorEl = null;
+  let toolGroup = null;
   const finishAssistant = () => {
     if (cursorEl) cursorEl.remove();
     cursorEl = null;
+  };
+  const finishTurn = () => {
+    finishAssistant();
+    toolGroup?.finish();
+    toolGroup = null;
   };
   // If the user switches to a different chat before this stream ends,
   // stop rendering into it — the DOM it was writing to may belong to
@@ -602,10 +615,11 @@ export async function attachToRunningChat(chatId) {
           assistantBody.dataset.raw = assistantText;
           assistantBody.innerHTML = renderMarkdown(assistantText);
           if (cursorEl) assistantBody.appendChild(cursorEl);
-          scrollToEnd();
+          scrollToEndIfNear();
         } else if (eventName === "tool_call") {
           finishAssistant();
-          const pre = addToolBlock(data.name, data.summary);
+          if (!toolGroup) toolGroup = beginToolGroup(assistantBody);
+          const pre = toolGroup.addCall(data.name, data.summary);
           pre.dataset.name = data.name;
         } else if (eventName === "tool_result") {
           const blocks = [...document.querySelectorAll(".tool-block pre")];
@@ -613,20 +627,20 @@ export async function attachToRunningChat(chatId) {
           if (match) match.textContent = data.content;
           if (TODO_TOOL_NAMES.has(data.name)) refreshTodos();
         } else if (eventName === "aborted") {
-          finishAssistant();
+          finishTurn();
           addSystemNote("[ultron] generation stopped.");
         } else if (eventName === "error") {
-          finishAssistant();
+          finishTurn();
           addSystemNote(`[ultron] error: ${data.message}`, true);
         } else if (eventName === "done") {
-          finishAssistant();
+          finishTurn();
         }
       }
     }
   } catch (err) {
     if (stillViewing()) addSystemNote(`[ultron] connection error: ${err.message}`, true);
   } finally {
-    finishAssistant();
+    finishTurn();
     if (stillViewing()) setGenerating(false);
     loadChats();
   }

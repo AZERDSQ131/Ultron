@@ -13,6 +13,19 @@ export function scrollToEnd() {
   thread.scrollTop = thread.scrollHeight;
 }
 
+function isNearBottom() {
+  return thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
+}
+
+// Used for the high-frequency updates during streaming (a text delta, a
+// tool block appearing) — forcing scrollToEnd on every single one of those
+// pins the view at the bottom for the whole generation, so scrolling up to
+// re-read something mid-stream gets yanked straight back down. Only
+// follows the tail if the user was already near it.
+export function scrollToEndIfNear() {
+  if (isNearBottom()) scrollToEnd();
+}
+
 export function clearThread() {
   thread.innerHTML = "";
 }
@@ -226,7 +239,64 @@ export function addApprovalBlock(calls) {
   });
 }
 
-export function addToolBlock(name, summary) {
+// Every tool_call/tool_result in a turn collapses into one "Worked for
+// Xm Ys" block above the assistant's text instead of each tool appearing
+// as its own block interleaved with (and visually below) the growing
+// reply — previously every new tool block pushed the page further down
+// and dragged the auto-scroll along with it, "pinning" the view at
+// whatever tool happened to be running instead of the text being written.
+//
+// live: true starts a ticking real-time counter (streamTurn/
+// attachToRunningChat, composer.js) frozen by finish(); live: false (a
+// finished chat's history replay, chatList.js) just counts tool calls,
+// since replayed messages carry no reliable timing to reconstruct.
+export function beginToolGroup(anchorBody, { live = true } = {}) {
+  const details = document.createElement("details");
+  details.className = "tool-group";
+  const summary = document.createElement("summary");
+  const body = document.createElement("div");
+  body.className = "tool-group-body";
+  details.append(summary, body);
+
+  // If the assistant's text turn already exists (a tool call happened
+  // after some prose had already started streaming), the group still
+  // belongs visually above it — move it there instead of leaving it at
+  // the current (lower) end of the thread.
+  const anchorTurn = anchorBody?.closest(".turn");
+  if (anchorTurn) thread.insertBefore(details, anchorTurn);
+  else thread.appendChild(details);
+  scrollToEndIfNear();
+
+  let count = 0;
+  let interval;
+  const setLabel = (text) => { summary.textContent = text; };
+
+  if (live) {
+    const startedAt = Date.now();
+    const tick = () => {
+      const seconds = Math.round((Date.now() - startedAt) / 1000);
+      setLabel(`Worked for ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`}`);
+    };
+    tick();
+    interval = setInterval(tick, 1000);
+  } else {
+    setLabel("Tool calls");
+  }
+
+  return {
+    body,
+    addCall(name, toolSummary) {
+      count += 1;
+      if (!live) setLabel(`Tool calls (${count})`);
+      return addToolBlockTo(body, name, toolSummary);
+    },
+    finish() {
+      if (interval) clearInterval(interval);
+    },
+  };
+}
+
+function addToolBlockTo(container, name, summary) {
   const scope = state.toolScopes[name] ?? "read";
   const details = document.createElement("details");
   details.className = `tool-block scope-${scope}`;
@@ -239,7 +309,7 @@ export function addToolBlock(name, summary) {
   const pre = document.createElement("pre");
   pre.textContent = "…";
   details.append(s, pre);
-  thread.appendChild(details);
-  scrollToEnd();
+  container.appendChild(details);
+  scrollToEndIfNear();
   return pre;
 }
