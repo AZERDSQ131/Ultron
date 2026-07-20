@@ -274,18 +274,23 @@ async function main() {
     }
     chats.setFocus(target.id, CLI_CHAT_SCOPE);
     currentChatId = target.id;
-    eventCursor = chatEvents.latestId(currentChatId);
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
-    showRestoredMessages(await listChatMessages(graph, currentChatId), config.nemotronModel);
+    const messages = await listChatMessages(graph, currentChatId);
+    // Set the cursor after the checkpoint has been read but before drawing
+    // synchronously. This prevents an event arriving during the async
+    // history load from being displayed and then wiped by showRestoredMessages.
+    eventCursor = chatEvents.latestId(currentChatId);
+    showRestoredMessages(messages, config.nemotronModel);
     appendTranscript(uiDim(`[ultron] resumed "${target.title}".\n\n`));
   };
 
   const switchToMain = async (): Promise<void> => {
     const main = chats.activateMain(CLI_CHAT_SCOPE);
     currentChatId = main.id;
-    eventCursor = chatEvents.latestId(currentChatId);
     setActivePermissionLabel(chats.getSecurityMode(currentChatId));
-    showRestoredMessages(await listChatMessages(graph, currentChatId), config.nemotronModel);
+    const messages = await listChatMessages(graph, currentChatId);
+    eventCursor = chatEvents.latestId(currentChatId);
+    showRestoredMessages(messages, config.nemotronModel);
     appendTranscript(uiDim(`[ultron] switched to main conversation.\n\n`));
   };
 
