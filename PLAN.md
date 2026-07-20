@@ -48,6 +48,25 @@ We are currently building **#1 only**. #2 is deliberately deferred — noted her
   `/api/turn` with `retry: true`, `/api/archive`, `/api/resume`) and recognized as slash commands
   by the web frontend, so commands behave the same regardless of which interface issues them
 - `pnpm web` (dev) / `pnpm start:web` (compiled) — port via `WEB_PORT`, default `4173`
+- Second redesign (2026-07-20), ChatGPT-pattern-inspired: message column capped ~768px and
+  centered, full-width message blocks with a subtle background tint on user turns instead of
+  bubbles, and the sidebar now groups **every** chat chronologically (Today/Yesterday/Previous
+  7 days/month buckets) — including `spawn_agent` and scheduled-task runs, previously filtered
+  out of the main list entirely (a chat with both `agentId` and `scheduleId` set was reachable
+  from neither the Agents panel nor the Schedules list). A small badge (🤖 agent, ⏰ scheduled
+  run) distinguishes chat type instead of splitting them into separate surfaces;
+  `automation.js` is now pure agent/schedule CRUD, not a second place to browse conversations.
+  The health dashboard (see "Health module" below) was folded into the app shell as a view
+  (`public/js/healthView.js`, swapped in for `#thread`/footer) instead of a standalone
+  `health.html` page unreachable from the main UI. The composer's command palette now covers
+  every CLI command (previously `/model`, `/security`, `/permissions`, `/theme`, `/memory`,
+  `/health`, `/export`, `/main`, `/delete` weren't in the client's command list even though the
+  backend capability existed) — added `GET|DELETE /api/memory` + `DELETE /api/memory/:id` for
+  web parity with the CLI's `/memory` (passive `UserModelRegistry` observations). A persistent
+  goal-mode status widget (`goalWidget.js`) in the header now reflects `/api/status`'s `Goal`
+  object continuously instead of only showing ephemeral system notes during a live stream. The
+  composer's three required controls (model picker, task-mode button, tool-approval/security
+  button) are unchanged.
 
 Chosen over a single always-on server process that the CLI would connect to as a client: that
 would force the server to always be running first and would centralize a single point of failure.
