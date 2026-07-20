@@ -50,26 +50,59 @@ function scoreLineChart(days) {
 }
 
 function sleepBarChart(days) {
+  return metricBarChart(days, (d) => (d.sleepDurationSec === null ? null : d.sleepDurationSec / 3600), "var(--link)", 8);
+}
+
+// Generic bar chart over `days` for any metric extracted by `valueOf`
+// (returns null to skip a day) — sleep/steps/active-energy charts all
+// share this instead of three near-identical copies.
+function metricBarChart(days, valueOf, color, minMax = 1) {
   const width = 600;
   const height = 120;
-  const maxHours = Math.max(8, ...days.map((d) => (d.sleepDurationSec ?? 0) / 3600));
+  const values = days.map(valueOf).filter((v) => v !== null && v !== undefined);
+  const maxValue = Math.max(minMax, ...values);
   const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
   const barWidth = width / days.length;
   days.forEach((d, i) => {
-    if (d.sleepDurationSec === null) return;
-    const hours = d.sleepDurationSec / 3600;
-    const barHeight = (hours / maxHours) * height;
+    const value = valueOf(d);
+    if (value === null || value === undefined) return;
+    const barHeight = (value / maxValue) * height;
     svg.append(
       svgEl("rect", {
         x: i * barWidth + barWidth * 0.15,
         y: height - barHeight,
         width: barWidth * 0.7,
         height: barHeight,
-        fill: "var(--link)",
+        fill: color,
         rx: 2,
       }),
     );
   });
+  return svg;
+}
+
+// Generic multi-series line chart — used for heart rate (resting vs
+// walking) and HRV, alongside the existing recovery/activity chart.
+function metricLineChart(days, series) {
+  const width = 600;
+  const height = 120;
+  const allValues = series.flatMap(({ valueOf }) => days.map(valueOf).filter((v) => v !== null && v !== undefined));
+  if (!allValues.length) return svgEl("svg", { viewBox: `0 0 ${width} ${height}` });
+  const min = Math.min(...allValues);
+  const max = Math.max(...allValues);
+  const range = max - min || 1;
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
+  const step = width / Math.max(1, days.length - 1);
+  for (const { valueOf, color } of series) {
+    const coords = days
+      .map((d, i) => {
+        const v = valueOf(d);
+        return v === null || v === undefined ? null : `${i * step},${height - ((v - min) / range) * height}`;
+      })
+      .filter((p) => p !== null)
+      .join(" ");
+    svg.append(svgEl("polyline", { points: coords, fill: "none", stroke: color, "stroke-width": "2" }));
+  }
   return svg;
 }
 
@@ -154,6 +187,32 @@ async function render() {
     ]),
   );
 
+  const todayDay = data.days.find((d) => d.date === latest.date);
+  if (todayDay) {
+    const stat = (label, value, unit = "") =>
+      value === null || value === undefined
+        ? undefined
+        : el("li", {}, [document.createTextNode(`${label}: `), el("strong", {}, [document.createTextNode(`${value}${unit}`)])]);
+    const statsList = el(
+      "ul",
+      { class: "records-list" },
+      [
+        stat("Steps", todayDay.steps),
+        stat("Distance", todayDay.distanceKm?.toFixed(2), " km"),
+        stat("Active energy", todayDay.activeEnergyKcal?.toFixed(0), " kcal"),
+        stat("Exercise", todayDay.exerciseMinutes, " min"),
+        stat("Flights climbed", todayDay.flightsClimbed),
+        stat("Workouts", todayDay.workoutCount),
+        stat("Resting HR", todayDay.restingHR, " bpm"),
+        stat("Walking HR", todayDay.walkingHR, " bpm"),
+        stat("HRV", todayDay.hrvAvg?.toFixed(1), " ms"),
+        stat("Respiratory rate", todayDay.respiratoryRateAvg?.toFixed(1), " brpm"),
+        stat("Sleep", todayDay.sleepAsleepSec !== null && todayDay.sleepAsleepSec !== undefined ? (todayDay.sleepAsleepSec / 3600).toFixed(1) : undefined, "h asleep"),
+      ].filter((n) => n !== undefined),
+    );
+    grid.append(card(`${todayDay.date} — today's metrics`, [statsList]));
+  }
+
   const recordsList = el("ul", { class: "records-list" });
   if (data.records.bestSleepNight) {
     recordsList.append(
@@ -170,6 +229,23 @@ async function render() {
 
   grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Recovery (green) / Activity (red) — 30 days")]), scoreLineChart(data.days)]));
   grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Sleep duration — 30 days")]), sleepBarChart(data.days)]));
+  grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Steps — 30 days")]), metricBarChart(data.days, (d) => d.steps, "var(--accent)")]));
+  grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Active energy (kcal) — 30 days")]), metricBarChart(data.days, (d) => d.activeEnergyKcal, "var(--warn)")]));
+  grid.append(
+    el("div", { class: "card chart-card" }, [
+      el("h2", {}, [document.createTextNode("Heart rate — resting (green) / walking (red) — 30 days")]),
+      metricLineChart(data.days, [
+        { valueOf: (d) => d.restingHR, color: "var(--good)" },
+        { valueOf: (d) => d.walkingHR, color: "var(--accent)" },
+      ]),
+    ]),
+  );
+  grid.append(
+    el("div", { class: "card chart-card" }, [
+      el("h2", {}, [document.createTextNode("HRV (ms) — 30 days")]),
+      metricLineChart(data.days, [{ valueOf: (d) => d.hrvAvg, color: "var(--link)" }]),
+    ]),
+  );
 
   const stageTimeline = sleepStageTimeline(data.latestRawJson);
   if (stageTimeline) {
