@@ -49,6 +49,7 @@ function logError(prefix: string, err: unknown): void {
 // parent thread the same way a success would be.
 async function runSpawnedAgent(opts: {
   parentThreadId: string;
+  ownerId: string;
   ownerName: string;
   executionChatId: string;
   task: string;
@@ -144,6 +145,11 @@ async function runSpawnedAgent(opts: {
   } finally {
     if (!aborted) run.emit({ type: "done" });
     run.end();
+    // Starts an ephemeral agent's 1h cleanup countdown from here, not from
+    // creation — see AgentRegistry.markAgentRunEnded/
+    // listExpiredEphemeralAgentIds. A no-op update for a non-ephemeral
+    // (permanent) agent; harmless, just an unused column for those.
+    agentsRegistry.markAgentRunEnded(opts.ownerId);
   }
 
   try {
@@ -183,8 +189,13 @@ export const spawnAgent = tool(
       if (!trimmedName) return "error: name is required";
       let owner = agentsRegistry.listAgents().find((a) => a.name.toLowerCase() === trimmedName.toLowerCase());
       if (!owner) {
-        owner = agentsRegistry.createAgent(trimmedName, "", instructions?.trim() ?? "");
-        log("ultron", `spawn_agent created new Agent "${owner.name}" (${owner.id})`);
+        // Auto-created agents are ephemeral (see AgentRegistry) — a
+        // one-off delegation ULTRON made up for this task, not a persona
+        // the user deliberately set up via the "New agent" dialog. If a
+        // permanent agent with this exact name already exists, the branch
+        // below reuses it as-is instead.
+        owner = agentsRegistry.createAgent(trimmedName, "", instructions?.trim() ?? "", true);
+        log("ultron", `spawn_agent created new ephemeral Agent "${owner.name}" (${owner.id})`);
       } else if (instructions?.trim()) {
         owner = agentsRegistry.updateAgent(owner.id, { instructions: instructions.trim() }) ?? owner;
       }
@@ -205,6 +216,7 @@ export const spawnAgent = tool(
       // its doc comment.
       void runSpawnedAgent({
         parentThreadId,
+        ownerId: owner.id,
         ownerName: owner.name,
         executionChatId: execution.id,
         task,

@@ -40,12 +40,27 @@ function timeAgo(iso) {
   return `${Math.round(hours / 24)}d`;
 }
 
+// Ephemeral agents (spawn_agent auto-created, yellow dot) get purged ~1h
+// after their last run ends (see AgentRegistry.listExpiredEphemeralAgentIds
+// / server.ts's periodic sweep) — this is purely a display of that same
+// deadline, recomputed on every render, not a separate ticking timer.
+const EPHEMERAL_RETENTION_MS = 60 * 60 * 1000;
+
+function agentDotTitle(a) {
+  if (!a.ephemeral) return "";
+  if (!a.lastRunEndedAt) return "Ephemeral — expires 1h after its current run finishes";
+  const remainingMs = new Date(a.lastRunEndedAt).getTime() + EPHEMERAL_RETENTION_MS - Date.now();
+  if (remainingMs <= 0) return "Ephemeral — expiring now";
+  const minutes = Math.max(1, Math.round(remainingMs / 60000));
+  return `Ephemeral — expires in ${minutes < 60 ? `${minutes}m` : `${Math.round(minutes / 60)}h`}`;
+}
+
 function render() {
   agentList.innerHTML = agents.length ? agents.map((a) => {
     const agentChats = state.chatsCache.filter((chat) => chat.agentId === a.id).sort((x, y) => new Date(y.updatedAt) - new Date(x.updatedAt));
     const chatCount = agentChats.length;
     const expanded = expandedAgents.has(a.id);
-    const header = `<div class="automation-item agent-item${chatCount ? " clickable" : ""}" data-agent-id="${a.id}"><span class="agent-toggle">${chatCount ? (expanded ? "▾" : "▸") : ""}</span><span class="agent-dot"></span><span class="agent-name" title="${a.description}">${a.name}</span><span class="agent-count dim">${chatCount} chat${chatCount === 1 ? "" : "s"}</span><span class="agent-actions"><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">+</button><button class="agent-delete-btn" data-agent-id="${a.id}" title="Delete ${a.name}" aria-label="Delete ${a.name}">🗑</button></span></div>`;
+    const header = `<div class="automation-item agent-item${chatCount ? " clickable" : ""}" data-agent-id="${a.id}"><span class="agent-toggle">${chatCount ? (expanded ? "▾" : "▸") : ""}</span><span class="agent-dot${a.ephemeral ? " ephemeral" : ""}" title="${agentDotTitle(a)}"></span><span class="agent-name" title="${a.description}">${a.name}</span><span class="agent-count dim">${chatCount} chat${chatCount === 1 ? "" : "s"}</span><span class="agent-actions"><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">+</button><button class="agent-delete-btn" data-agent-id="${a.id}" title="Delete ${a.name}" aria-label="Delete ${a.name}">🗑</button></span></div>`;
     const sublist = expanded
       ? `<div class="agent-chat-sublist">${agentChats
           .map(

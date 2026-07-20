@@ -1,12 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
-export interface Agent { id: string; name: string; description: string; instructions: string; createdAt: string; updatedAt: string; }
+// ephemeral marks an Agent spawn_agent auto-created for a one-off
+// delegated task (as opposed to one the user deliberately set up via the
+// "New agent" dialog) — see cleanupExpiredEphemeralAgents below, the same
+// "@once schedules delete ~1h after their last run" pattern already used
+// for schedules, applied to agents instead of counting from creation.
+export interface Agent { id: string; name: string; description: string; instructions: string; ephemeral: boolean; lastRunEndedAt: string | null; createdAt: string; updatedAt: string; }
 export interface Schedule { id: string; agentId: string | null; name: string; instruction: string; cron: string; timezone: string; enabled: boolean; nextRunAt: string | null; lastRunAt: string | null; lastRunChatId: string | null; createdAt: string; }
 
-type AgentRow = { id: string; name: string; description: string; instructions: string; created_at: string; updated_at: string };
+type AgentRow = { id: string; name: string; description: string; instructions: string; ephemeral: number; last_run_ended_at: string | null; created_at: string; updated_at: string };
 type ScheduleRow = { id: string; agent_id: string | null; name: string; instruction: string; cron: string; timezone: string; enabled: number; next_run_at: string | null; last_run_at: string | null; last_run_chat_id?: string | null; created_at: string };
-const agent = (r: AgentRow): Agent => ({ id: r.id, name: r.name, description: r.description, instructions: r.instructions, createdAt: r.created_at, updatedAt: r.updated_at });
+const agent = (r: AgentRow): Agent => ({ id: r.id, name: r.name, description: r.description, instructions: r.instructions, ephemeral: Boolean(r.ephemeral), lastRunEndedAt: r.last_run_ended_at ?? null, createdAt: r.created_at, updatedAt: r.updated_at });
 const schedule = (r: ScheduleRow): Schedule => ({ id: r.id, agentId: r.agent_id, name: r.name, instruction: r.instruction, cron: r.cron, timezone: r.timezone, enabled: Boolean(r.enabled), nextRunAt: r.next_run_at, lastRunAt: r.last_run_at, lastRunChatId: r.last_run_chat_id ?? null, createdAt: r.created_at });
 
 export class AgentRegistry {
@@ -17,11 +22,36 @@ export class AgentRegistry {
     this.db.exec(`CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', instructions TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS schedules (id TEXT PRIMARY KEY, agent_id TEXT, name TEXT NOT NULL, instruction TEXT NOT NULL, cron TEXT NOT NULL, timezone TEXT NOT NULL DEFAULT 'Europe/Paris', enabled INTEGER NOT NULL DEFAULT 1, next_run_at TEXT, last_run_at TEXT, last_run_chat_id TEXT, created_at TEXT NOT NULL)`);
     try { this.db.exec("ALTER TABLE schedules ADD COLUMN last_run_chat_id TEXT"); } catch { /* already migrated */ }
+    try { this.db.exec("ALTER TABLE agents ADD COLUMN ephemeral INTEGER NOT NULL DEFAULT 0"); } catch { /* already migrated */ }
+    try { this.db.exec("ALTER TABLE agents ADD COLUMN last_run_ended_at TEXT"); } catch { /* already migrated */ }
   }
   listAgents(): Agent[] { return (this.db.prepare("SELECT * FROM agents ORDER BY updated_at DESC").all() as unknown as AgentRow[]).map(agent); }
   getAgent(id: string): Agent | undefined { const r = this.db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as AgentRow | undefined; return r && agent(r); }
-  createAgent(name: string, description = "", instructions = ""): Agent { const now = new Date().toISOString(); const a = { id: randomUUID(), name, description, instructions, createdAt: now, updatedAt: now }; this.db.prepare("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?)").run(a.id, a.name, a.description, a.instructions, a.createdAt, a.updatedAt); return a; }
+  createAgent(name: string, description = "", instructions = "", ephemeral = false): Agent {
+    const now = new Date().toISOString();
+    const a = { id: randomUUID(), name, description, instructions, ephemeral, lastRunEndedAt: null, createdAt: now, updatedAt: now };
+    this.db.prepare("INSERT INTO agents (id, name, description, instructions, created_at, updated_at, ephemeral, last_run_ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(a.id, a.name, a.description, a.instructions, a.createdAt, a.updatedAt, ephemeral ? 1 : 0, null);
+    return a;
+  }
   updateAgent(id: string, fields: Partial<Pick<Agent, "name" | "description" | "instructions">>): Agent | undefined { const current = this.getAgent(id); if (!current) return; const a = { ...current, ...fields, updatedAt: new Date().toISOString() }; this.db.prepare("UPDATE agents SET name=?, description=?, instructions=?, updated_at=? WHERE id=?").run(a.name, a.description, a.instructions, a.updatedAt, id); return a; }
+  // Called once a spawn_agent background run finishes (success, error, or
+  // abort — see runSpawnedAgent's finally block) so an ephemeral agent's
+  // 1h countdown starts from when it actually stopped working, not from
+  // when it was created — a long-running run must not get purged out from
+  // under itself, and a finished one should still be reviewable for a
+  // while, not vanish the instant it reports back.
+  markAgentRunEnded(id: string, now = new Date()): void { this.db.prepare("UPDATE agents SET last_run_ended_at=? WHERE id=?").run(now.toISOString(), id); }
+  // Ephemeral agents whose most recent run ended more than retentionMs ago
+  // — same "@once schedules, 1h after last_run_at" retention window as
+  // cleanupCompletedSchedules, just returning ids instead of deleting
+  // directly, since purging an agent also means purging its chats
+  // (server.ts's purgeAgent), not something this registry alone can do.
+  listExpiredEphemeralAgentIds(now = new Date(), retentionMs = 60 * 60 * 1000): string[] {
+    const rows = this.db
+      .prepare("SELECT id FROM agents WHERE ephemeral=1 AND last_run_ended_at IS NOT NULL AND last_run_ended_at <= ?")
+      .all(new Date(now.getTime() - retentionMs).toISOString()) as unknown as { id: string }[];
+    return rows.map((r) => r.id);
+  }
   deleteAgent(id: string): void { this.db.prepare("DELETE FROM schedules WHERE agent_id = ?").run(id); this.db.prepare("DELETE FROM agents WHERE id = ?").run(id); }
   listSchedules(): Schedule[] { return (this.db.prepare("SELECT * FROM schedules ORDER BY enabled DESC, next_run_at").all() as unknown as ScheduleRow[]).map(schedule); }
   getDueSchedules(now = new Date()): Schedule[] { return (this.db.prepare("SELECT * FROM schedules WHERE enabled=1 AND next_run_at IS NOT NULL AND next_run_at <= ?").all(now.toISOString()) as unknown as ScheduleRow[]).map(schedule); }

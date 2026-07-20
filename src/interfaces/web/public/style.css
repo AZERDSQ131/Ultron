@@ -430,6 +430,7 @@ body {
 .agent-delete-btn:hover { color: var(--accent); }
 .agent-toggle { width: 18px; padding: 1px; border: 0; background: transparent; color: var(--text-dimmer); cursor: pointer; }
 .agent-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--accent); }
+.agent-dot.ephemeral { background: var(--warn); }
 .agent-count { flex: none; margin-left: auto; font-size: var(--fs-2xs); }
 .agent-item:hover .agent-count { display: none; }
 .schedule-item small { margin-left: auto; color: var(--text-dimmer); font: var(--fs-2xs) var(--mono); }

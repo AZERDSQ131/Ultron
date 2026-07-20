@@ -833,10 +833,17 @@ async function handleCreateAgent(req: IncomingMessage, res: ServerResponse): Pro
   if (!p?.name?.trim()) { sendJson(res, 400, { error: "name is required" }); return; }
   sendJson(res, 200, { agent: agents.createAgent(p.name.trim(), p.description?.trim() ?? "", p.instructions?.trim() ?? "") });
 }
-async function handleDeleteAgent(res: ServerResponse, id: string): Promise<void> {
-  if (!agents.getAgent(id)) { sendJson(res, 404, { error: "unknown agent" }); return; }
+// Shared by the explicit DELETE /api/agents/:id route and the periodic
+// ephemeral-agent sweep below — an Agent's chats are never left orphaned
+// pointing at a deleted owner, whichever path triggered the deletion.
+function purgeAgent(id: string): void {
   for (const chat of chats.listAll().filter((candidate) => candidate.agentId === id)) chats.delete(chat.id);
   agents.deleteAgent(id);
+}
+
+async function handleDeleteAgent(res: ServerResponse, id: string): Promise<void> {
+  if (!agents.getAgent(id)) { sendJson(res, 404, { error: "unknown agent" }); return; }
+  purgeAgent(id);
   sendJson(res, 200, { deleted: true });
 }
 async function handleSchedules(res: ServerResponse): Promise<void> { sendJson(res, 200, { schedules: agents.listSchedules() }); }
@@ -851,6 +858,10 @@ async function handleDeleteSchedule(res: ServerResponse, id: string): Promise<vo
 
 async function runDueSchedules(): Promise<void> {
   agents.cleanupCompletedSchedules();
+  // Ephemeral agents (spawn_agent auto-created, see tools/agents.ts) whose
+  // last run ended over an hour ago — same retention window as the
+  // @once-schedule cleanup above, just for agents instead of schedules.
+  for (const id of agents.listExpiredEphemeralAgentIds()) purgeAgent(id);
   for (const task of agents.getDueSchedules()) {
     debugLog(`scheduler picked id=${task.id} name=${task.name} agent=${task.agentId ?? "ultron"}`);
     agents.markRun(task.id);
