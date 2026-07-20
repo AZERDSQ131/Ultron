@@ -49,6 +49,9 @@ const securityOptions = [...securityMenu.querySelectorAll(".security-option")];
 const SECURITY_LABELS = { bypass: "Bypass", accept_edit: "Accept Edit", manual: "Manual" };
 const verboseToggle = document.getElementById("verbose-toggle");
 const commandMenu = document.getElementById("command-menu");
+const attachBtn = document.getElementById("attach-btn");
+const attachInput = document.getElementById("attach-input");
+const attachmentRow = document.getElementById("attachment-row");
 
 export function focusInput() {
   input.focus();
@@ -955,12 +958,84 @@ async function runCommand(raw) {
   addSystemNote(`[ultron] unknown command: ${command} — try /help`, true);
 }
 
+// Files attached via the "+" button — uploaded to the server (see
+// api.uploadFile) as soon as they're picked, not deferred to submit time,
+// so a slow upload doesn't stall typing the message. Each entry tracks its
+// own status; submit only appends the ones that finished, dropping failed
+// ones with a warning rather than silently sending a broken reference.
+let attachments = [];
+
+function renderAttachments() {
+  attachmentRow.innerHTML = "";
+  attachmentRow.hidden = attachments.length === 0;
+  for (const att of attachments) {
+    const chip = document.createElement("span");
+    chip.className = `attachment-chip${att.status === "uploading" ? " uploading" : ""}${att.status === "failed" ? " failed" : ""}`;
+    const name = document.createElement("span");
+    name.className = "attachment-chip-name";
+    name.textContent = att.status === "uploading" ? `${att.filename} …` : att.status === "failed" ? `${att.filename} (failed)` : att.filename;
+    name.title = att.filename;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.title = "Remove attachment";
+    remove.addEventListener("click", () => {
+      attachments = attachments.filter((a) => a !== att);
+      renderAttachments();
+    });
+    chip.append(name, remove);
+    attachmentRow.appendChild(chip);
+  }
+}
+
+async function attachFile(file) {
+  const att = { filename: file.name, status: "uploading", path: null, size: file.size };
+  attachments.push(att);
+  renderAttachments();
+  try {
+    const dataBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+      reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+      reader.readAsDataURL(file);
+    });
+    const saved = await api.uploadFile(state.activeChatId, file.name, dataBase64);
+    if (!saved?.path) throw new Error(saved?.error ?? "upload failed");
+    att.status = "done";
+    att.path = saved.path;
+    att.size = saved.size;
+  } catch {
+    att.status = "failed";
+  }
+  renderAttachments();
+}
+
+attachBtn.addEventListener("click", () => attachInput.click());
+attachInput.addEventListener("change", () => {
+  for (const file of attachInput.files) attachFile(file);
+  attachInput.value = "";
+});
+
+function humanSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 composer.addEventListener("submit", (e) => {
   e.preventDefault();
   if (state.generating) return;
+  if (attachments.some((a) => a.status === "uploading")) {
+    addSystemNote("[ultron] still uploading attachment(s) — wait a moment and try again.", true);
+    return;
+  }
   const text = input.value.trim();
-  if (!text) return;
+  const ready = attachments.filter((a) => a.status === "done");
+  const failed = attachments.filter((a) => a.status === "failed");
+  if (!text && !ready.length) return;
   setInputValue("");
+  attachments = [];
+  renderAttachments();
   closeCommandMenu();
 
   if (text.startsWith("/") && LOCAL_COMMANDS.includes(text.split(/\s+/)[0])) {
@@ -968,8 +1043,15 @@ composer.addEventListener("submit", (e) => {
     return;
   }
 
-  addTurn("user").textContent = text;
-  streamTurn({ chatId: state.activeChatId, text, thinking: state.thinkingMode, taskMode: state.taskMode });
+  if (failed.length) addSystemNote(`[ultron] ${failed.length} attachment(s) failed to upload and were dropped.`, true);
+
+  const attachmentNote = ready.length
+    ? `\n\n[Attached file${ready.length > 1 ? "s" : ""}]\n${ready.map((a) => `- ${a.path} (${humanSize(a.size)})`).join("\n")}`
+    : "";
+  const fullText = `${text}${attachmentNote}`;
+
+  addTurn("user").textContent = fullText;
+  streamTurn({ chatId: state.activeChatId, text: fullText, thinking: state.thinkingMode, taskMode: state.taskMode });
 });
 
 stopBtn.addEventListener("click", async () => {

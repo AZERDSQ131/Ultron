@@ -1162,8 +1162,8 @@ footer {
 
 #composer {
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   background: var(--bg-raised);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -1173,6 +1173,76 @@ footer {
 #composer:focus-within {
   border-color: var(--accent-dim);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+/* Attach ("+") button and the pending-attachment chips above the input —
+   files are read client-side and base64-uploaded (see composer.js's
+   uploadAttachedFile), then the resulting absolute path is appended to the
+   message text so the model reads it with its own read_file tool instead
+   of the content being inlined into the prompt. */
+.attach-btn {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+.attach-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+.attachment-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 2px 0;
+}
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px 4px 10px;
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  color: var(--text-dim);
+  max-width: 220px;
+}
+.attachment-chip.uploading { opacity: 0.6; }
+.attachment-chip.failed { border-color: var(--accent-dim); color: var(--accent); }
+.attachment-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-chip button {
+  flex: none;
+  background: none;
+  border: 0;
+  color: var(--text-dimmer);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  padding: 2px;
+}
+.attachment-chip button:hover {
+  color: var(--text);
 }
 
 /* Task mode (see composer.js's setTaskMode) recolors the composer itself —

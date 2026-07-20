@@ -42,6 +42,7 @@ import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { abortRun, isRunning, subscribeToRun } from "../../core/runs.js";
 import { withThreadLock } from "../../core/threadLock.js";
 import { log } from "../../core/logger.js";
+import { saveUpload } from "../../core/uploads.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
@@ -472,6 +473,25 @@ async function handleStopExport(res: ServerResponse, chatId: string): Promise<vo
   sendJson(res, 200, { path: null });
 }
 
+// Files attached via the composer's "+" button (public/js/composer.js) —
+// base64 over the existing readJson plumbing rather than a multipart
+// parser, since the project has no such dependency and personal-scale file
+// sizes make the ~33% base64 overhead irrelevant. Returns an absolute path
+// the model can hand to its own read_file tool; no content is inlined
+// here or sent to the model directly.
+async function handleUpload(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const payload = await readJson<{ filename?: string; dataBase64?: string }>(req);
+  const filename = payload?.filename?.trim();
+  if (!filename || !payload?.dataBase64) {
+    sendJson(res, 400, { error: "filename and dataBase64 are required" });
+    return;
+  }
+  const buffer = Buffer.from(payload.dataBase64, "base64");
+  const saved = saveUpload(chatId, filename, buffer);
+  sendJson(res, 200, saved);
+}
+
 async function handleSetSecurity(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   const payload = await readJson<{ mode?: SecurityMode }>(req);
@@ -895,7 +915,7 @@ async function handleStatus(res: ServerResponse, chatId: string | undefined): Pr
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
-  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/events|\/todos|\/archive|\/resume|\/export)?$/);
+  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/events|\/todos|\/archive|\/resume|\/export|\/upload)?$/);
 
   if (req.method === "GET" && path === "/api/chats") {
     handleListChats(res).catch((err) => console.error("[ultron-web] list chats failed:", err));
@@ -952,6 +972,10 @@ const server = createServer((req, res) => {
   }
   if (chatMatch && chatMatch[2] === "/export" && req.method === "DELETE") {
     handleStopExport(res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] stop export failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/upload" && req.method === "POST") {
+    handleUpload(req, res, decodeURIComponent(chatMatch[1])).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
   const streamMatch = path.match(/^\/api\/chats\/([^/]+)\/stream$/);

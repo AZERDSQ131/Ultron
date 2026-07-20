@@ -60,6 +60,10 @@
     <footer>
       <div id="command-menu" class="command-menu" hidden></div>
       <form id="composer">
+        <div id="attachment-row" class="attachment-row" hidden></div>
+        <div class="composer-row">
+        <input type="file" id="attach-input" multiple hidden />
+        <button type="button" id="attach-btn" class="attach-btn" title="Attach files" aria-label="Attach files">+</button>
         <div class="model-picker">
           <button type="button" id="model-picker-btn" class="model-picker-btn" aria-haspopup="listbox" aria-expanded="false" title="Select model">
             <span class="model-picker-icon" aria-hidden="true">✦</span><span>Models</span><span class="model-picker-chevron" aria-hidden="true">⌃</span>
@@ -138,6 +142,7 @@
         <textarea id="input" placeholder="Message ULTRON…" rows="1" autocomplete="off"></textarea>
         <button type="button" id="stop-btn" class="danger" hidden>Stop</button>
         <button type="submit" id="send-btn">Send</button>
+        </div>
       </form>
     </footer>
   </div>

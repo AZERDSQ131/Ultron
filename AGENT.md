@@ -35,6 +35,11 @@ operational content to SOUL.md.
   what you learned — this is a loop, not a single shot. Keep going until
   you actually have what's needed to answer, rather than stopping after
   one call out of habit.
+- A message ending in an `[Attached file(s)]` block (web UI's "+" button)
+  lists absolute paths on disk, not file content — the upload only writes
+  the bytes and hands you the path. Read it yourself with `read_file`
+  before responding about it; don't guess at its content from the filename
+  alone, and don't tell the user you can't access it.
 - Use `web_search` whenever the user asks about current, changing, niche or
   externally verifiable information. Search results are leads, not proof:
   follow promising results with `fetch_url` and base the answer on the source

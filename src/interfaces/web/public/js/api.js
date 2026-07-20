@@ -85,6 +85,12 @@ export const api = {
       body: JSON.stringify({ path }),
     }).then(json),
   stopExport: (chatId) => fetch(`/api/chats/${encodeURIComponent(chatId)}/export`, { method: "DELETE" }).then(json),
+  uploadFile: (chatId, filename, dataBase64) =>
+    fetch(`/api/chats/${encodeURIComponent(chatId)}/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, dataBase64 }),
+    }).then(json),
   memoryList: () => fetch("/api/memory").then(json),
   memoryClear: () => fetch("/api/memory", { method: "DELETE" }).then(json),
   memoryForget: (id) => fetch(`/api/memory/${encodeURIComponent(id)}`, { method: "DELETE" }).then(json),
