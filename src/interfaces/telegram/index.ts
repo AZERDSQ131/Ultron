@@ -20,6 +20,9 @@ import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
 import { detectAnomalies } from "../../core/health/trends.js";
+import { getMealExerciseLogRegistry } from "../../core/memory/mealExerciseLog.js";
+import { savePhoto } from "../../core/health/photoStorage.js";
+import { analyzeHealthPhoto } from "../../core/health/visionAnalyzer.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -55,6 +58,7 @@ const todos = getTodoRegistry(config.databasePath);
 const goals = getGoalRegistry(config.databasePath);
 const userModel = getUserModelRegistry(config.databasePath);
 const health = getHealthRegistry(config.databasePath);
+const mealExerciseLog = getMealExerciseLogRegistry(config.databasePath);
 const links = getTelegramLinkRegistry(config.databasePath);
 const chatEvents = getChatEventRegistry(config.databasePath);
 
@@ -886,6 +890,86 @@ bot.callbackQuery(/^model:(\d+)$/, async (ctx) => {
   config.nemotronModel = id;
   graph = buildGraph();
   await ctx.editMessageText(`[ultron] model set to ${id}.`).catch(() => {});
+});
+
+// ---- meal/exercise photo logging ----
+
+// Deliberately a side channel, not routed through the main agent turn: same
+// shape as POST /api/health-data/ingest (a direct write to the health
+// store, not a tool call the model reasons about) rather than threading
+// multimodal messages through the LangGraph state, which none of the three
+// interfaces support yet.
+bot.on("message:photo", async (ctx) => {
+  const ultronChatId = currentChatId(ctx.chat.id);
+  chats.setFocus(ultronChatId, `telegram:${ctx.chat.id}`);
+  await ctx.replyWithChatAction("upload_photo").catch(() => {});
+
+  const caption = ctx.message.caption;
+  const largest = ctx.message.photo[ctx.message.photo.length - 1];
+  try {
+    const file = await ctx.api.getFile(largest.file_id);
+    if (!file.file_path) throw new Error("Telegram returned no file_path");
+    const response = await fetch(`https://api.telegram.org/file/bot${config.telegramBotToken}/${file.file_path}`);
+    if (!response.ok) throw new Error(`download failed: HTTP ${response.status}`);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const mimeType = file.file_path.endsWith(".png") ? "image/png" : "image/jpeg";
+    const base64 = buffer.toString("base64");
+
+    const analysis = await analyzeHealthPhoto(base64, mimeType, caption);
+    const date = new Date().toISOString().slice(0, 10);
+    const timestamp = new Date().toISOString();
+
+    if (analysis.kind === "unrecognized") {
+      await send(ctx.chat.id, `[ultron] Couldn't tell this was a meal or exercise photo: ${analysis.description}`);
+      return;
+    }
+
+    const photoPath = savePhoto(buffer, mimeType, analysis.kind, date);
+    if (analysis.kind === "meal") {
+      mealExerciseLog.addMeal({
+        date,
+        timestamp,
+        photoPath,
+        caption: caption ?? null,
+        description: analysis.description,
+        estimatedCalories: analysis.estimatedCalories,
+        proteinG: analysis.proteinG,
+        carbsG: analysis.carbsG,
+        fatG: analysis.fatG,
+        sourceChatId: ultronChatId,
+      });
+      const macros = [
+        analysis.estimatedCalories !== null ? `~${analysis.estimatedCalories} kcal` : undefined,
+        analysis.proteinG !== null ? `${analysis.proteinG}g protein` : undefined,
+        analysis.carbsG !== null ? `${analysis.carbsG}g carbs` : undefined,
+        analysis.fatG !== null ? `${analysis.fatG}g fat` : undefined,
+      ].filter((x) => x !== undefined);
+      await send(ctx.chat.id, `[ultron] Meal logged: ${analysis.description}${macros.length ? ` (${macros.join(", ")})` : ""}`);
+    } else {
+      mealExerciseLog.addExercise({
+        date,
+        timestamp,
+        photoPath,
+        caption: caption ?? null,
+        description: analysis.description,
+        exerciseType: analysis.exerciseType,
+        durationMinutes: analysis.durationMinutes,
+        intensity: analysis.intensity,
+        estimatedCaloriesBurned: analysis.estimatedCaloriesBurned,
+        sourceChatId: ultronChatId,
+      });
+      const details = [
+        analysis.exerciseType ?? undefined,
+        analysis.durationMinutes !== null ? `${analysis.durationMinutes} min` : undefined,
+        analysis.intensity ?? undefined,
+        analysis.estimatedCaloriesBurned !== null ? `~${analysis.estimatedCaloriesBurned} kcal burned` : undefined,
+      ].filter((x) => x !== undefined);
+      await send(ctx.chat.id, `[ultron] Exercise logged: ${analysis.description}${details.length ? ` (${details.join(", ")})` : ""}`);
+    }
+  } catch (err) {
+    debugLog(`photo analysis failed chat=${ctx.chat.id} error=${err instanceof Error ? err.message : String(err)}`);
+    await send(ctx.chat.id, "[ultron] Couldn't analyze that photo — try again?");
+  }
 });
 
 // ---- plain messages ----
