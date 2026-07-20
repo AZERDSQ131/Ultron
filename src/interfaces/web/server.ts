@@ -164,12 +164,12 @@ async function handleRenameChat(req: IncomingMessage, res: ServerResponse, chatI
 
 async function handleDeleteChat(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
-  if (chats.getMain(CLI_CHAT_SCOPE).id === chatId) {
-    sendJson(res, 400, { error: "the main conversation cannot be deleted" });
-    return;
-  }
   activeAborts.get(chatId)?.abort();
-  chats.delete(chatId);
+  // Deleting the current main rotates a fresh chat into that role instead
+  // of refusing (see ChatRegistry.delete) — the client's post-delete
+  // reload+reselect already lands on it, since it's the most recently
+  // updated chat.
+  chats.delete(chatId, CLI_CHAT_SCOPE);
   sendJson(res, 200, { deleted: true });
 }
 

@@ -579,11 +579,9 @@ bot.command("resume", async (ctx) => {
 bot.command("delete", async (ctx) => {
   const ultronChatId = currentChatId(ctx.chat.id);
   const current = chats.get(ultronChatId);
-  const main = chats.getMain(`telegram:${ctx.chat.id}`);
-  if (!current || current.id === main.id) {
-    await send(ctx.chat.id, "[ultron] the main conversation cannot be deleted.");
-    return;
-  }
+  if (!current) return;
+  // Deleting the current main rotates a fresh chat into that role instead
+  // of refusing (see ChatRegistry.delete) — activateMain below lands on it.
   chats.delete(current.id, `telegram:${ctx.chat.id}`);
   const next = chats.activateMain(`telegram:${ctx.chat.id}`);
   links.set(ctx.chat.id, next.id);

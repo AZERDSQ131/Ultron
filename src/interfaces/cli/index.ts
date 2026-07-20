@@ -245,11 +245,10 @@ async function main() {
 
   const deleteCurrentChat = async (): Promise<void> => {
     const current = chats.get(currentChatId);
-    const main = chats.getMain(CLI_CHAT_SCOPE);
-    if (!current || current.id === main.id) {
-      appendTranscript(chalk.yellow("[ultron] the main conversation cannot be deleted.\n\n"));
-      return;
-    }
+    if (!current) return;
+    // Deleting the current main rotates a fresh chat into that role
+    // instead of refusing (see ChatRegistry.delete) — activateMain below
+    // then lands on it.
     chats.delete(current.id, CLI_CHAT_SCOPE);
     const next = chats.activateMain(CLI_CHAT_SCOPE);
     currentChatId = next.id;

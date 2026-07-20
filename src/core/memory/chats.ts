@@ -296,11 +296,20 @@ export class ChatRegistry {
 
   // Delete the conversation from the registry only. Its LangGraph checkpoint
   // is intentionally preserved, so this command removes it from /resume and
-  // the sidebars without destroying the underlying memory.
+  // the sidebars without destroying the underlying memory. Deleting the
+  // current main rotates a fresh chat into that role first (same pattern
+  // as archiveAndCreate) rather than refusing outright — main used to be
+  // permanently undeletable, but "just start over" is a legitimate thing
+  // to want for the one chat every interface always falls back to.
   delete(id: string, scope: string = CLI_CHAT_SCOPE): boolean {
-    if (this.getMain(scope).id === id) return false;
+    const wasMain = this.getMain(scope).id === id;
+    if (wasMain) {
+      const fresh = this.create("Main");
+      this.setMain(fresh.id, scope);
+      this.setFocus(fresh.id, scope);
+    }
     const deleted = this.db.prepare("DELETE FROM chats WHERE id = ?").run(id);
-    if (this.getFocus(scope)?.id === id) this.activateMain(scope);
+    if (!wasMain && this.getFocus(scope)?.id === id) this.activateMain(scope);
     return Number(deleted.changes ?? 0) > 0;
   }
 }
