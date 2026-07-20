@@ -23,7 +23,7 @@ import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } f
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
 import { detectAnomalies } from "../../core/health/trends.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
+import { CLI_CHAT_SCOPE, getChatRegistry, type Chat } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -91,7 +91,9 @@ async function main() {
   // Registers the CLI's original hardcoded thread (from before chats
   // existed) so its history shows up in the registry instead of being
   // orphaned — same migration the web server runs on its own startup.
-  chats.ensure(LEGACY_CHAT_ID);
+  // Runs at most once ever (see ensureLegacyMigration): if the user later
+  // deletes that chat, this must not resurrect it on the next restart.
+  chats.ensureLegacyMigration();
   // CLI focus is deliberately independent from Telegram focus.
   let currentChatId = chats.getFocus(CLI_CHAT_SCOPE)?.id ?? chats.activateMain(CLI_CHAT_SCOPE).id;
   chats.setFocus(currentChatId, CLI_CHAT_SCOPE);

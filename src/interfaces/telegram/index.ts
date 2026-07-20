@@ -25,7 +25,7 @@ import { getMealExerciseLogRegistry } from "../../core/memory/mealExerciseLog.js
 import { savePhoto } from "../../core/health/photoStorage.js";
 import { analyzeHealthPhoto } from "../../core/health/visionAnalyzer.js";
 import { narrateLoggedEntry } from "../../core/health/narrator.js";
-import { getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
+import { getChatRegistry, type Chat } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
@@ -66,8 +66,10 @@ const chatEvents = getChatEventRegistry(config.databasePath);
 
 // Ensures pre-existing history from the CLI's original hardcoded thread
 // registers as a real chat — same migration every entry point does at
-// startup (see chats.ts's LEGACY_CHAT_ID comment).
-chats.ensure(LEGACY_CHAT_ID);
+// startup (see chats.ts's LEGACY_CHAT_ID comment). Runs at most once ever
+// (see ensureLegacyMigration): if the user later deletes that chat, this
+// must not resurrect it on the next restart.
+chats.ensureLegacyMigration();
 
 // Which ULTRON chat a Telegram chat currently points at is a movable
 // pointer (TelegramLinkRegistry), not a fixed derivation — /archive and

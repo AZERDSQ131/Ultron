@@ -60,8 +60,10 @@ const goals = getGoalRegistry(config.databasePath);
 const chatEvents = getChatEventRegistry(config.databasePath);
 // Migrates the CLI's original hardcoded thread ("ultron-main", used before
 // chats existed) into the registry on first run, so pre-existing history
-// shows up as a chat instead of being orphaned.
-chats.ensure(LEGACY_CHAT_ID);
+// shows up as a chat instead of being orphaned. Runs at most once ever
+// (see ensureLegacyMigration): if the user later deletes that chat, this
+// must not resurrect it on the next restart/deploy.
+chats.ensureLegacyMigration();
 
 // One AbortController per chat, so stopping or starting a generation in one
 // chat can't affect another that happens to also be streaming (e.g. the CLI

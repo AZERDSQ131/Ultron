@@ -114,6 +114,7 @@ export class ChatRegistry {
       this.db.prepare("INSERT INTO chat_focus_scoped (scope, chat_id, main_chat_id) VALUES ('cli', ?, ?) ON CONFLICT(scope) DO NOTHING")
         .run(legacyFocus.chat_id ?? LEGACY_CHAT_ID, legacyFocus.main_chat_id ?? legacyFocus.chat_id ?? LEGACY_CHAT_ID);
     }
+    this.db.exec("CREATE TABLE IF NOT EXISTS chat_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   }
 
   // Every registered conversation. The archived_at column is retained only
@@ -184,6 +185,22 @@ export class ChatRegistry {
       .prepare("INSERT INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt);
     return chat;
+  }
+
+  // Every entry point (CLI, web, Telegram) called `ensure(LEGACY_CHAT_ID)`
+  // unconditionally at startup — meant as a one-time migration for the
+  // pre-chats-feature hardcoded thread, but since `ensure()` recreates the
+  // row whenever it's missing, deleting that specific chat only lasted
+  // until the next process restart, which silently resurrected it every
+  // time. `chat_meta` makes the migration actually run once: the first
+  // startup ever creates the row (if the legacy thread exists) and flips
+  // the flag; every startup after that — including ones following an
+  // explicit delete — is a no-op, so a deleted chat stays deleted.
+  ensureLegacyMigration(): void {
+    const done = this.db.prepare("SELECT 1 FROM chat_meta WHERE key = 'legacy_migrated'").get();
+    if (done) return;
+    this.ensure(LEGACY_CHAT_ID);
+    this.db.prepare("INSERT INTO chat_meta (key, value) VALUES ('legacy_migrated', '1') ON CONFLICT(key) DO NOTHING").run();
   }
 
   // The main conversation is a shared return point for the CLI and Telegram.
