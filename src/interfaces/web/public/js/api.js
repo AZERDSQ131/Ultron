@@ -64,6 +64,7 @@ export const api = {
   skills: () => fetch("/api/skills").then(json),
   installSkill: (name) => fetch("/api/skills/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then(json),
   models: () => fetch("/api/models").then(json),
+  modelsGrouped: () => fetch("/api/models/grouped").then(json),
   setModel: (model) => fetch("/api/model", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) }).then(json),
   provider: () => fetch("/api/provider").then(json),
   setProvider: (provider) => fetch("/api/provider", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider }) }).then(json),

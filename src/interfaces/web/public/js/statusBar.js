@@ -16,6 +16,7 @@ const activeModelName = document.getElementById("active-model-name");
 const modelCount = document.getElementById("model-count");
 let availableModels = [];
 let activeModel = "";
+let activeProvider = "";
 
 export function updateContextGauge(usedTokens, maxTokens) {
   const ratio = Math.min(usedTokens / maxTokens, 1);
@@ -30,6 +31,7 @@ export async function loadStatus() {
   try {
     const data = await api.status(state.activeChatId);
     activeModel = data.model;
+    activeProvider = data.provider ?? activeProvider;
     modelLabel.textContent = data.model;
     activeModelName.textContent = data.model;
     settingsModel.textContent = data.model;
@@ -46,22 +48,31 @@ export async function loadStatus() {
 }
 
 function renderModelOptions(query = "") {
-  const matches = availableModels.filter((model) => model.id.toLowerCase().includes(query.toLowerCase()));
+  const matches = availableModels.filter((model) => `${model.provider}/${model.id}`.toLowerCase().includes(query.toLowerCase()));
   modelCount.textContent = `${matches.length} ${matches.length === 1 ? "model" : "models"}`;
   modelOptions.innerHTML = "";
   if (!matches.length) {
     modelOptions.innerHTML = '<div class="model-empty">No matching models</div>';
     return;
   }
+  let lastProvider;
   for (const model of matches) {
+    if (model.provider !== lastProvider) {
+      lastProvider = model.provider;
+      const header = document.createElement("div");
+      header.className = "model-group-heading";
+      header.textContent = model.provider;
+      modelOptions.appendChild(header);
+    }
+    const isActive = model.id === activeModel && model.provider === activeProvider;
     const option = document.createElement("button");
     option.type = "button";
-    option.className = `model-option${model.id === activeModel ? " active" : ""}`;
+    option.className = `model-option${isActive ? " active" : ""}`;
     option.setAttribute("role", "option");
-    option.setAttribute("aria-selected", String(model.id === activeModel));
+    option.setAttribute("aria-selected", String(isActive));
     const check = document.createElement("span");
     check.className = "model-option-check";
-    check.textContent = model.id === activeModel ? "✓" : "";
+    check.textContent = isActive ? "✓" : "";
     const name = document.createElement("span");
     name.className = "model-option-name";
     name.textContent = model.id;
@@ -72,8 +83,10 @@ function renderModelOptions(query = "") {
     meta.append(context);
     option.append(check, name, meta);
     option.addEventListener("click", async () => {
+      if (model.provider !== activeProvider) await api.setProvider(model.provider);
       await api.setModel(model.id);
       activeModel = model.id;
+      activeProvider = model.provider;
       modelMenu.hidden = true;
       modelPickerButton.setAttribute("aria-expanded", "false");
       await loadStatus();
@@ -84,8 +97,10 @@ function renderModelOptions(query = "") {
 
 async function loadModelPicker() {
   try {
-    availableModels = (await api.models()).models;
-    if (!activeModel) activeModel = availableModels.find((model) => model.id === (modelLabel.textContent ?? ""))?.id ?? "";
+    const data = await api.modelsGrouped();
+    availableModels = data.groups.flatMap((g) => g.models.map((m) => ({ ...m, provider: g.provider })));
+    if (!activeModel) activeModel = data.current ?? "";
+    if (!activeProvider) activeProvider = data.currentProvider ?? "";
     renderModelOptions();
   } catch {
     modelOptions.innerHTML = '<div class="model-empty">Could not load models</div>';
@@ -98,6 +113,7 @@ async function loadModelPicker() {
 // re-rendering the stale one.
 export async function reloadModelPicker() {
   activeModel = "";
+  activeProvider = "";
   await loadModelPicker();
   await loadStatus();
 }

@@ -90,7 +90,7 @@ export const COMMANDS = [
   { name: "/security", desc: "set tool approval: bypass, accept_edit or manual" },
   { name: "/permissions", desc: "open the tool-approval mode menu" },
   { name: "/model", desc: "open the model picker" },
-  { name: "/provider", desc: "switch chat-completion provider: nvidia or deepseek" },
+  { name: "/provider", desc: "cycle or set chat-completion provider: nvidia, deepseek or groq" },
   { name: "/theme", desc: "set theme: system, dark or light" },
   { name: "/verbose", desc: "toggle timing and token metrics" },
   { name: "/memory", desc: "list, clear, or forget auto-accumulated observations about you" },
@@ -676,7 +676,7 @@ async function runCommand(raw) {
     addSystemNote(
       "[ultron] commands: /status · /context · /stop · /retry · /compact · /archive · /resume · " +
         "/main · /delete · /think on|low|off · /task none|todo|plan|goal · /security bypass|accept_edit|manual · " +
-        "/permissions · /provider [nvidia|deepseek] · /model · /theme system|dark|light · /verbose on|off · /memory [clear|forget <id>] · " +
+        "/permissions · /provider [nvidia|deepseek|groq] · /model · /theme system|dark|light · /verbose on|off · /memory [clear|forget <id>] · " +
         "/health · /export [path|on|off] · /clear · /quit",
     );
     return;
@@ -847,13 +847,26 @@ async function runCommand(raw) {
 
   if (command === "/provider") {
     const target = arg.trim().toLowerCase();
-    if (target && target !== "nvidia" && target !== "deepseek") {
-      addSystemNote("[ultron] use /provider nvidia or /provider deepseek.", true);
+    if (target && !["nvidia", "deepseek", "groq"].includes(target)) {
+      addSystemNote("[ultron] use /provider nvidia, /provider deepseek or /provider groq.", true);
       return;
     }
     try {
       const current = await api.provider();
-      const next = target || (current.current === "nvidia" ? "deepseek" : "nvidia");
+      const configured = current.configured ?? ["nvidia"];
+      let next = target;
+      if (!next) {
+        const order = ["nvidia", "deepseek", "groq"];
+        const start = order.indexOf(current.current);
+        for (let step = 1; step <= order.length; step++) {
+          const candidate = order[(start + step) % order.length];
+          if (configured.includes(candidate)) { next = candidate; break; }
+        }
+      }
+      if (target && !configured.includes(target)) {
+        addSystemNote(`[ultron] ${target.toUpperCase()}_API_KEY is not set on the server — cannot switch to ${target}.`, true);
+        return;
+      }
       if (next === current.current) {
         addSystemNote(`[ultron] provider already ${next}.`);
         return;

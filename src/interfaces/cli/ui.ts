@@ -21,6 +21,7 @@ import type { ChatMessage, TaskMode, ToolApprovalDecision } from "../../core/gra
 import type { Chat, SecurityMode } from "../../core/memory/chats.js";
 import type { Goal } from "../../core/memory/goals.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import type { LlmProvider } from "../../config.js";
 import { listSkills, readSkill } from "../../core/skills.js";
 import { listHubSkills, installHubSkill, type HubSkill } from "../../core/skillsHub.js";
 
@@ -638,39 +639,50 @@ export async function pickArchivedChat(contextLine: string, source: ArchivedChat
   });
 }
 
-export interface NvidiaModelInfo {
+export interface ModelChoice {
   id: string;
   contextWindowTokens?: number;
+  provider: LlmProvider;
 }
 
-export function pickModel(contextLine: string, models: NvidiaModelInfo[], currentModel: string): Promise<NvidiaModelInfo | undefined> {
+const PROVIDER_LABELS: Record<LlmProvider, string> = { nvidia: "NVIDIA", deepseek: "DeepSeek", groq: "Groq" };
+
+export function pickModel(
+  contextLine: string,
+  models: ModelChoice[],
+  currentModel: string,
+  currentProvider: LlmProvider,
+): Promise<ModelChoice | undefined> {
   const MAX_VISIBLE_MODELS = 18;
 
   return new Promise((resolve) => {
     let query = "";
-    let selected = Math.max(0, models.findIndex((model) => model.id === currentModel));
+    let selected = Math.max(0, models.findIndex((model) => model.id === currentModel && model.provider === currentProvider));
     let finished = false;
 
-    const getMatches = () => models.filter((model) => model.id.toLowerCase().includes(query.toLowerCase()));
+    const getMatches = () => models.filter((model) => `${model.provider}/${model.id}`.toLowerCase().includes(query.toLowerCase()));
 
     const redraw = () => {
       const matches = getMatches();
       const visible = matches.slice(0, MAX_VISIBLE_MODELS);
       selected = Math.min(selected, Math.max(0, visible.length - 1));
-      const rows = visible.length
-        ? visible
-            .map((model, index) => {
-              const marker = index === selected ? chalk.greenBright("›") : " ";
-              const label = index === selected ? chalk.cyanBright.bold(model.id) : model.id;
-              const context = model.contextWindowTokens ? ` ${uiDim(`· ${model.contextWindowTokens.toLocaleString()} tokens`)}` : "";
-              const current = model.id === currentModel ? ` ${uiDim("(current)")}` : "";
-              return `  ${marker} ${label}${context}${current}`;
-            })
-            .join("\n")
-        : uiDim("  no matching NVIDIA models");
+      const rowLines: string[] = [];
+      let lastProvider: LlmProvider | undefined;
+      visible.forEach((model, index) => {
+        if (model.provider !== lastProvider) {
+          lastProvider = model.provider;
+          rowLines.push(`  ${uiDim(`── ${PROVIDER_LABELS[model.provider]} ──`)}`);
+        }
+        const marker = index === selected ? chalk.greenBright("›") : " ";
+        const label = index === selected ? chalk.cyanBright.bold(model.id) : model.id;
+        const context = model.contextWindowTokens ? ` ${uiDim(`· ${model.contextWindowTokens.toLocaleString()} tokens`)}` : "";
+        const current = model.id === currentModel && model.provider === currentProvider ? ` ${uiDim("(current)")}` : "";
+        rowLines.push(`  ${marker} ${label}${context}${current}`);
+      });
+      const rows = rowLines.length ? rowLines.join("\n") : uiDim("  no matching models");
       const count = matches.length > MAX_VISIBLE_MODELS ? ` · showing ${MAX_VISIBLE_MODELS}/${matches.length}` : "";
       const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
-      const picker = `${uiDim(`NVIDIA models · type to search · ↑/↓ select · Enter confirm · Esc cancel${count}`)}\n${rows}`;
+      const picker = `${uiDim(`models (NVIDIA/DeepSeek/Groq) · type to search · ↑/↓ select · Enter confirm · Esc cancel${count}`)}\n${rows}`;
       const prompt = `${chalk.magentaBright.bold("model")} ${uiDim("›")} `;
       const footer = `${rule()}\n${prompt}${query}\n${statusContextLine(contextLine)}\n${rule()}`;
       const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
@@ -679,7 +691,7 @@ export function pickModel(contextLine: string, models: NvidiaModelInfo[], curren
       readline.cursorTo(stdout, stripAnsi(prompt).length + query.length);
     };
 
-    const finish = (value?: NvidiaModelInfo) => {
+    const finish = (value?: ModelChoice) => {
       if (finished) return;
       finished = true;
       activePickerRedraw = undefined;
@@ -1040,7 +1052,7 @@ export function initResizeHandler(getModelName: () => string): void {
 
 export function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/provider")} switch chat-completion provider: NVIDIA or DeepSeek\n  ${chalk.cyanBright("/model")}    search and select a model for the active provider\n  ${chalk.cyanBright("/status")}   show provider, model, memory and tool status\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/resume")}   browse conversations — Enter to resume, Ctrl+D to delete\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/health")}   show the last 7 days of ingested health data\n  ${chalk.cyanBright("/export")}   [path|on|off] live-export this chat to a file, updated after every turn\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/provider")} [nvidia|deepseek|groq] cycle or set the chat-completion provider\n  ${chalk.cyanBright("/model")}    search and select a model across NVIDIA, DeepSeek and Groq\n  ${chalk.cyanBright("/status")}   show provider, model, memory and tool status\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/resume")}   browse conversations — Enter to resume, Ctrl+D to delete\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/health")}   show the last 7 days of ingested health data\n  ${chalk.cyanBright("/export")}   [path|on|off] live-export this chat to a file, updated after every turn\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
   appendTranscript(`  ${chalk.cyanBright("/main")}     return to the main conversation\n  ${chalk.cyanBright("/delete")}   delete this conversation from the registry (memory preserved)\n\n`);
 }

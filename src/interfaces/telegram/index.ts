@@ -1,8 +1,8 @@
 import { Bot, InlineKeyboard } from "grammy";
 import { Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
-import { config, setActiveModel, setActiveProvider, type LlmProvider } from "../../config.js";
-import { listAvailableModels } from "../../core/llm/models.js";
+import { config, setActiveModel, setActiveProvider, nextConfiguredProvider, hasProviderCredentials, type LlmProvider } from "../../config.js";
+import { listModelsByProvider } from "../../core/llm/models.js";
 import {
   buildGraph,
   compactThread,
@@ -451,14 +451,14 @@ async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
 // instead of a full chat id (Telegram caps callback_data at 64 bytes, and
 // chat ids/titles routinely exceed that combined).
 const archivePickerCache = new Map<number, Chat[]>();
-const modelPickerCache = new Map<number, string[]>();
+const modelPickerCache = new Map<number, { id: string; provider: LlmProvider }[]>();
 
 // ---- commands ----
 
 const HELP_TEXT = `local commands
 /help — show this help
-/provider [nvidia|deepseek] — switch chat-completion provider (bare toggles)
-/model [query] — search and select a model for the active provider
+/provider [nvidia|deepseek|groq] — switch chat-completion provider (bare cycles)
+/model [query] — search and select a model across NVIDIA, DeepSeek and Groq
 /status — show provider, model, memory, tool and runtime status
 /context — show current context usage
 /stop — stop the active generation
@@ -765,33 +765,47 @@ bot.command("theme", async (ctx) => {
 
 bot.command("model", async (ctx) => {
   const query = ctx.match?.trim().toLowerCase();
-  await send(ctx.chat.id, `[ultron] loading ${config.provider} models…`);
+  await send(ctx.chat.id, "[ultron] loading models…");
   try {
-    const ids = (await listAvailableModels()).map((m) => m.id).sort();
-    const matches = (query ? ids.filter((id) => id.toLowerCase().includes(query)) : ids)
-      .filter((id) => `model:${id}`.length <= 64)
-      .slice(0, 20);
+    const groups = await listModelsByProvider();
+    const flat = groups.flatMap((g) => g.models.map((m) => ({ id: m.id, provider: g.provider })));
+    const matches = (query ? flat.filter((m) => `${m.provider}/${m.id}`.toLowerCase().includes(query)) : flat)
+      .filter((m) => `model:${m.id}`.length <= 64)
+      .slice(0, 30);
     if (!matches.length) {
       await send(ctx.chat.id, "[ultron] no matching models.");
       return;
     }
     modelPickerCache.set(ctx.chat.id, matches);
     const keyboard = new InlineKeyboard();
-    matches.forEach((id, i) => {
-      keyboard.text(id, `model:${i}`);
+    let lastProvider: LlmProvider | undefined;
+    matches.forEach((m, i) => {
+      if (m.provider !== lastProvider) {
+        lastProvider = m.provider;
+        keyboard.text(`── ${m.provider} ──`, "model:noop").row();
+      }
+      keyboard.text(m.id, `model:${i}`);
       keyboard.row();
     });
-    await send(ctx.chat.id, `Current: ${config.nemotronModel}\nSelect a model:`, { reply_markup: keyboard });
+    await send(ctx.chat.id, `Current: ${config.provider}/${config.nemotronModel}\nSelect a model:`, { reply_markup: keyboard });
   } catch (error) {
-    await send(ctx.chat.id, `[ultron] could not list ${config.provider} models: ${error instanceof Error ? error.message : String(error)}`);
+    await send(ctx.chat.id, `[ultron] could not list models: ${error instanceof Error ? error.message : String(error)}`);
   }
 });
 
 bot.command("provider", async (ctx) => {
   const requested = ctx.match?.trim().toLowerCase();
-  const next: LlmProvider = requested === "nvidia" || requested === "deepseek" ? requested : config.provider === "nvidia" ? "deepseek" : "nvidia";
-  if (next === "deepseek" && !config.deepseekApiKey) {
-    await send(ctx.chat.id, "[ultron] DEEPSEEK_API_KEY is not set — cannot switch to DeepSeek (see .env.example).");
+  let next: LlmProvider;
+  if (requested === "nvidia" || requested === "deepseek" || requested === "groq") {
+    next = requested;
+  } else if (requested) {
+    await send(ctx.chat.id, "[ultron] use /provider nvidia, /provider deepseek or /provider groq.");
+    return;
+  } else {
+    next = nextConfiguredProvider(config.provider);
+  }
+  if (!hasProviderCredentials(next)) {
+    await send(ctx.chat.id, `[ultron] ${next.toUpperCase()}_API_KEY is not set — cannot switch to ${next} (see .env.example).`);
     return;
   }
   setActiveProvider(next);
@@ -882,18 +896,21 @@ bot.callbackQuery(/^resume_del_no:(\d+)$/, async (ctx) => {
   await ctx.editMessageText(entry ? `[ultron] kept "${entry.title}".` : "[ultron] cancelled.").catch(() => {});
 });
 
+bot.callbackQuery("model:noop", async (ctx) => { await ctx.answerCallbackQuery(); });
+
 bot.callbackQuery(/^model:(\d+)$/, async (ctx) => {
   const index = Number((ctx.match as unknown as [string, string])[1]);
   await ctx.answerCallbackQuery();
   const list = modelPickerCache.get(ctx.chat!.id);
-  const id = list?.[index];
-  if (!id) {
+  const choice = list?.[index];
+  if (!choice) {
     await send(ctx.chat!.id, "[ultron] selection expired — run /model again.");
     return;
   }
-  setActiveModel(id);
+  if (choice.provider !== config.provider) setActiveProvider(choice.provider);
+  setActiveModel(choice.id);
   graph = buildGraph();
-  await ctx.editMessageText(`[ultron] model set to ${id}.`).catch(() => {});
+  await ctx.editMessageText(`[ultron] model set to ${choice.provider}/${choice.id}.`).catch(() => {});
 });
 
 // ---- meal/exercise photo logging ----

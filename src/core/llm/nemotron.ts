@@ -22,31 +22,37 @@ function toPlainText(content: MessageContent): string {
 
 export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOpenAI {
   const thinking = thinkingMode !== "off";
-  const useDeepseek = config.provider === "deepseek";
-  if (useDeepseek && !config.deepseekApiKey) {
+  const provider = config.provider;
+  if (provider === "deepseek" && !config.deepseekApiKey) {
     throw new Error("DEEPSEEK_API_KEY is not set — cannot use the DeepSeek provider (see .env.example).");
   }
+  if (provider === "groq" && !config.groqApiKey) {
+    throw new Error("GROQ_API_KEY is not set — cannot use the Groq provider (see .env.example).");
+  }
+
+  const apiKey = provider === "deepseek" ? config.deepseekApiKey : provider === "groq" ? config.groqApiKey : config.nvidiaApiKey;
+  const baseURL = provider === "deepseek" ? config.deepseekBaseUrl : provider === "groq" ? config.groqBaseUrl : config.nemotronBaseUrl;
 
   const model = new ChatOpenAI({
     model: config.nemotronModel,
-    apiKey: useDeepseek ? config.deepseekApiKey : config.nvidiaApiKey,
+    apiKey,
     temperature: 1.0,
     topP: 0.95,
-    // DeepSeek's API has no equivalent to NVIDIA NIM's chat_template_kwargs
-    // knob — thinkingMode only shapes reasoning depth on NVIDIA-hosted
-    // models for now.
-    ...(useDeepseek
-      ? {}
-      : {
+    // Neither DeepSeek's nor Groq's API has an equivalent to NVIDIA NIM's
+    // chat_template_kwargs knob — thinkingMode only shapes reasoning depth
+    // on NVIDIA-hosted models for now.
+    ...(provider === "nvidia"
+      ? {
           modelKwargs: {
             chat_template_kwargs: {
               enable_thinking: thinking,
               ...(thinkingMode === "low" ? { low_effort: true } : {}),
             },
           },
-        }),
+        }
+      : {}),
     configuration: {
-      baseURL: useDeepseek ? config.deepseekBaseUrl : config.nemotronBaseUrl,
+      baseURL,
     },
     streaming: true,
     // Verified against the live NVIDIA endpoint: it does return real usage

@@ -16,9 +16,9 @@ import {
   type TaskMode,
   type ToolApprovalDecision,
 } from "../../core/graph.js";
-import { config, setActiveModel, setActiveProvider, type LlmProvider } from "../../config.js";
+import { config, setActiveModel, setActiveProvider, hasProviderCredentials, PROVIDER_CYCLE } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import { listAvailableModels, resolveModelContext } from "../../core/llm/models.js";
+import { listAvailableModels, listModelsByProvider, resolveModelContext, type ModelInfo } from "../../core/llm/models.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
@@ -788,11 +788,20 @@ async function handleModels(res: ServerResponse): Promise<void> {
   sendJson(res, 200, { current: config.nemotronModel, models: models.sort((a, b) => a.id.localeCompare(b.id)) });
 }
 
+// Grouped by provider (NVIDIA / DeepSeek / Groq), regardless of which one
+// is currently active — what the model picker (CLI, web, remote CLI) shows
+// so picking a model from a different provider than the active one can
+// switch both in one step.
+async function handleModelsGrouped(res: ServerResponse): Promise<void> {
+  const groups = await listModelsByProvider();
+  sendJson(res, 200, { current: config.nemotronModel, currentProvider: config.provider, groups });
+}
+
 async function handleSetModel(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const payload = await readJson<{ model?: string }>(req);
   const model = payload?.model?.trim();
   if (!model) { sendJson(res, 400, { error: "model is required" }); return; }
-  const selected = await resolveModelContext({ id: model });
+  const selected = await resolveModelContext<ModelInfo>({ id: model });
   setActiveModel(model);
   config.contextWindowTokens = selected.contextWindowTokens ?? fallbackContextWindowTokens;
   graph = buildGraph();
@@ -800,15 +809,19 @@ async function handleSetModel(req: IncomingMessage, res: ServerResponse): Promis
 }
 
 async function handleProvider(res: ServerResponse): Promise<void> {
-  sendJson(res, 200, { current: config.provider, providers: ["nvidia", "deepseek"] });
+  sendJson(res, 200, {
+    current: config.provider,
+    providers: PROVIDER_CYCLE,
+    configured: PROVIDER_CYCLE.filter((p) => hasProviderCredentials(p)),
+  });
 }
 
 async function handleSetProvider(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const payload = await readJson<{ provider?: string }>(req);
   const provider = payload?.provider;
-  if (provider !== "nvidia" && provider !== "deepseek") { sendJson(res, 400, { error: "provider must be nvidia or deepseek" }); return; }
-  if (provider === "deepseek" && !config.deepseekApiKey) { sendJson(res, 400, { error: "DEEPSEEK_API_KEY is not set" }); return; }
-  setActiveProvider(provider as LlmProvider);
+  if (provider !== "nvidia" && provider !== "deepseek" && provider !== "groq") { sendJson(res, 400, { error: "provider must be nvidia, deepseek or groq" }); return; }
+  if (!hasProviderCredentials(provider)) { sendJson(res, 400, { error: `${provider.toUpperCase()}_API_KEY is not set` }); return; }
+  setActiveProvider(provider);
   const models = await listAvailableModels();
   const currentModel = models.find((m) => m.id === config.nemotronModel);
   config.contextWindowTokens = (currentModel ? await resolveModelContext(currentModel) : undefined)?.contextWindowTokens ?? fallbackContextWindowTokens;
@@ -1007,6 +1020,10 @@ const server = createServer((req, res) => {
   }
   if (req.method === "GET" && path === "/api/models") {
     handleModels(res).catch((err) => sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/models/grouped") {
+    handleModelsGrouped(res).catch((err) => sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
   if (req.method === "PATCH" && path === "/api/model") {

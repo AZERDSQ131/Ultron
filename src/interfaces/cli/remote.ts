@@ -17,6 +17,7 @@ import type { ChatMessage, TaskMode } from "../../core/graph.js";
 import type { Chat, SecurityMode } from "../../core/memory/chats.js";
 import type { Goal } from "../../core/memory/goals.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import type { LlmProvider } from "../../config.js";
 import { MarkdownStreamRenderer } from "./markdown.js";
 import {
   appendTranscript,
@@ -49,7 +50,7 @@ import {
   transcript,
   uiDim,
   writeLive,
-  type NvidiaModelInfo,
+  type ModelChoice,
   type PendingToolCall,
 } from "./ui.js";
 
@@ -135,7 +136,7 @@ async function main() {
   let eventPollBusy = false;
   let currentContextLine = "";
   let modelName = "";
-  let providerName = "";
+  let providerName: LlmProvider = "nvidia";
   let toolCount = 0;
 
   const syncEventCursor = async (): Promise<void> => {
@@ -201,34 +202,52 @@ async function main() {
   let verbose = false;
 
   const changeModel = async (contextLine: string): Promise<void> => {
-    appendTranscript(uiDim(`[ultron] loading ${providerName || "provider"} models…\n`));
+    appendTranscript(uiDim("[ultron] loading models…\n"));
     renderScreen("", 0, contextLine);
     flushRender();
     try {
-      const data = await apiGet("/api/models");
-      const models: NvidiaModelInfo[] = data.models;
-      if (models.length === 0) {
+      const data = await apiGet("/api/models/grouped");
+      const groups: { provider: LlmProvider; models: { id: string; contextWindowTokens?: number }[] }[] = data.groups;
+      const flat: ModelChoice[] = groups.flatMap((g) => g.models.map((m) => ({ ...m, provider: g.provider })));
+      if (flat.length === 0) {
         appendTranscript(chalk.yellow("[ultron] no models available.\n\n"));
         return;
       }
-      const selected = await pickModel(contextLine, models, data.current);
+      const selected = await pickModel(contextLine, flat, modelName, providerName);
       if (!selected) return;
-      if (selected.id === data.current) return;
+      if (selected.id === modelName && selected.provider === providerName) return;
+      if (selected.provider !== providerName) await apiPatch("/api/provider", { provider: selected.provider });
       await apiPatch("/api/model", { model: selected.id });
-      await refreshStatus();
-      const contextLabel = selected.contextWindowTokens
-        ? ` · context ${selected.contextWindowTokens.toLocaleString()} tokens`
-        : " · context fallback in use";
-      appendTranscript(uiDim(`[ultron] model set to ${selected.id}${contextLabel}.\n\n`));
+      const status = await refreshStatus();
+      appendTranscript(uiDim(`[ultron] model set to ${selected.provider}/${selected.id} · context ${status.maxTokens.toLocaleString()} tokens.\n\n`));
     } catch (error) {
       appendTranscript(chalk.red(`[ultron] could not list models: ${error instanceof Error ? error.message : String(error)}\n\n`));
     }
   };
 
-  const changeProvider = async (contextLine: string): Promise<void> => {
+  const PROVIDER_ORDER: LlmProvider[] = ["nvidia", "deepseek", "groq"];
+
+  const changeProvider = async (contextLine: string, explicit?: LlmProvider): Promise<void> => {
     try {
       const data = await apiGet("/api/provider");
-      const next = data.current === "nvidia" ? "deepseek" : "nvidia";
+      const configured: LlmProvider[] = data.configured ?? ["nvidia"];
+      let next: LlmProvider | undefined = explicit;
+      if (next && !configured.includes(next)) {
+        appendTranscript(chalk.red(`[ultron] ${next.toUpperCase()}_API_KEY is not set on the server — cannot switch to ${next}.\n\n`));
+        renderScreen("", 0, contextLine);
+        return;
+      }
+      if (!next) {
+        const startIndex = PROVIDER_ORDER.indexOf(data.current);
+        for (let step = 1; step <= PROVIDER_ORDER.length; step++) {
+          const candidate = PROVIDER_ORDER[(startIndex + step) % PROVIDER_ORDER.length];
+          if (configured.includes(candidate)) {
+            next = candidate;
+            break;
+          }
+        }
+        next ??= "nvidia";
+      }
       await apiPatch("/api/provider", { provider: next });
       await refreshStatus();
       printBanner(modelName);
@@ -563,6 +582,15 @@ async function main() {
               await apiPatch(`/api/chats/${encodeURIComponent(currentChatId)}/security`, { mode });
               setActivePermissionLabel(mode as SecurityMode);
               appendTranscript(uiDim(`[ultron] tool approval set to ${mode}.\n\n`));
+              continue;
+            }
+            if (command.startsWith("/provider ")) {
+              const requested = command.slice("/provider ".length).trim();
+              if (requested !== "nvidia" && requested !== "deepseek" && requested !== "groq") {
+                appendTranscript(chalk.yellow("[ultron] use /provider nvidia, /provider deepseek or /provider groq.\n\n"));
+                continue;
+              }
+              await changeProvider(contextLine, requested);
               continue;
             }
             if (command === "/theme") {

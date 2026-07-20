@@ -14,9 +14,9 @@ import {
   type ToolApprovalDecision,
 } from "../../core/graph.js";
 import { withThreadLock } from "../../core/threadLock.js";
-import { config, setActiveModel, setActiveProvider, type LlmProvider } from "../../config.js";
+import { config, setActiveModel, setActiveProvider, nextConfiguredProvider, hasProviderCredentials, type LlmProvider } from "../../config.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
-import { listAvailableModels, resolveModelContext } from "../../core/llm/models.js";
+import { listAvailableModels, listModelsByProvider, resolveModelContext } from "../../core/llm/models.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } from "../../core/memory/health.js";
@@ -64,7 +64,7 @@ import {
   transcript,
   uiDim,
   writeLive,
-  type NvidiaModelInfo,
+  type ModelChoice,
 } from "./ui.js";
 
 // Local CLI — runs the graph in-process (needs NVIDIA_API_KEY, opens the
@@ -127,43 +127,45 @@ async function main() {
   let verbose = false;
   const fallbackContextWindowTokens = config.contextWindowTokens;
 
-  const applyModelContext = (model: NvidiaModelInfo | undefined): void => {
+  const applyModelContext = (model: { contextWindowTokens?: number } | undefined): void => {
     config.contextWindowTokens = model?.contextWindowTokens ?? fallbackContextWindowTokens;
   };
 
   const changeModel = async (contextLine: string): Promise<void> => {
-    appendTranscript(uiDim(`[ultron] loading ${config.provider} models…\n`));
+    appendTranscript(uiDim("[ultron] loading models…\n"));
     renderScreen("", 0, contextLine);
     flushRender();
     try {
-      const models = await listAvailableModels();
-      if (models.length === 0) {
-        appendTranscript(chalk.yellow(`[ultron] ${config.provider} returned no models.\n\n`));
+      const grouped = await listModelsByProvider();
+      const flat: ModelChoice[] = grouped.flatMap((g) => g.models.map((m) => ({ id: m.id, contextWindowTokens: m.contextWindowTokens, provider: g.provider })));
+      if (flat.length === 0) {
+        appendTranscript(chalk.yellow("[ultron] no models available.\n\n"));
         return;
       }
-      const selected = await pickModel(contextLine, models, config.nemotronModel);
+      const selected = await pickModel(contextLine, flat, config.nemotronModel, config.provider);
       if (!selected) return;
-      const resolvedSelected = await resolveModelContext(selected);
-      if (resolvedSelected.id === config.nemotronModel) {
-        applyModelContext(resolvedSelected);
+      if (selected.id === config.nemotronModel && selected.provider === config.provider) {
+        applyModelContext(selected);
         return;
       }
+      const resolvedSelected = await resolveModelContext(selected);
+      if (resolvedSelected.provider !== config.provider) setActiveProvider(resolvedSelected.provider);
       setActiveModel(resolvedSelected.id);
       applyModelContext(resolvedSelected);
       graph = buildGraph();
       const contextLabel = resolvedSelected.contextWindowTokens
         ? ` · context ${resolvedSelected.contextWindowTokens.toLocaleString()} tokens`
         : " · context fallback in use";
-      appendTranscript(uiDim(`[ultron] model set to ${resolvedSelected.id}${contextLabel}.\n\n`));
+      appendTranscript(uiDim(`[ultron] model set to ${resolvedSelected.provider}/${resolvedSelected.id}${contextLabel}.\n\n`));
     } catch (error) {
-      appendTranscript(chalk.red(`[ultron] could not list ${config.provider} models: ${error instanceof Error ? error.message : String(error)}\n\n`));
+      appendTranscript(chalk.red(`[ultron] could not list models: ${error instanceof Error ? error.message : String(error)}\n\n`));
     }
   };
 
-  const changeProvider = async (contextLine: string): Promise<void> => {
-    const next: LlmProvider = config.provider === "nvidia" ? "deepseek" : "nvidia";
-    if (next === "deepseek" && !config.deepseekApiKey) {
-      appendTranscript(chalk.red("[ultron] DEEPSEEK_API_KEY is not set — cannot switch to DeepSeek (see .env.example).\n\n"));
+  const changeProvider = async (contextLine: string, explicit?: LlmProvider): Promise<void> => {
+    const next = explicit ?? nextConfiguredProvider(config.provider);
+    if (!hasProviderCredentials(next)) {
+      appendTranscript(chalk.red(`[ultron] ${next.toUpperCase()}_API_KEY is not set — cannot switch to ${next} (see .env.example).\n\n`));
       return;
     }
     setActiveProvider(next);
@@ -666,6 +668,15 @@ async function main() {
               chats.setSecurityMode(currentChatId, mode);
               setActivePermissionLabel(mode);
               appendTranscript(uiDim(`[ultron] tool approval set to ${mode}.\n\n`));
+              continue;
+            }
+            if (command.startsWith("/provider ")) {
+              const requested = command.slice("/provider ".length).trim();
+              if (requested !== "nvidia" && requested !== "deepseek" && requested !== "groq") {
+                appendTranscript(chalk.yellow("[ultron] use /provider nvidia, /provider deepseek or /provider groq.\n\n"));
+                continue;
+              }
+              await changeProvider(contextLine, requested);
               continue;
             }
             if (command === "/theme") {

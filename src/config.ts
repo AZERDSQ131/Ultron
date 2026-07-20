@@ -15,12 +15,17 @@ function required(name: string): string {
 
 // The active chat-completion provider (CLI /provider, web PATCH /api/provider,
 // Telegram /provider). Independent of visionModel below, which always stays
-// on NVIDIA regardless of this setting — photo analysis has no DeepSeek
+// on NVIDIA regardless of this setting — photo analysis has no DeepSeek/Groq
 // equivalent wired up.
-export type LlmProvider = "nvidia" | "deepseek";
+export type LlmProvider = "nvidia" | "deepseek" | "groq";
+
+// Fixed cycle order for the bare (argument-less) /provider command.
+export const PROVIDER_CYCLE: LlmProvider[] = ["nvidia", "deepseek", "groq"];
 
 function initialProvider(): LlmProvider {
-  return process.env.LLM_PROVIDER === "deepseek" ? "deepseek" : "nvidia";
+  return process.env.LLM_PROVIDER === "deepseek" || process.env.LLM_PROVIDER === "groq"
+    ? process.env.LLM_PROVIDER
+    : "nvidia";
 }
 
 // Each provider remembers its own last-picked model, so toggling providers
@@ -30,6 +35,7 @@ function initialProvider(): LlmProvider {
 const providerModels: Record<LlmProvider, string> = {
   nvidia: process.env.NEMOTRON_MODEL ?? "deepseek-ai/deepseek-v4-flash",
   deepseek: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
+  groq: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
 };
 
 const startingProvider = initialProvider();
@@ -46,6 +52,10 @@ export const config = {
   // createNemotronModel, when the DeepSeek provider is actually selected.
   deepseekApiKey: process.env.DEEPSEEK_API_KEY,
   deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com/v1",
+  // Groq — third provider, OpenAI-compatible, free tier. Same lazy
+  // validation as deepseekApiKey above.
+  groqApiKey: process.env.GROQ_API_KEY,
+  groqBaseUrl: process.env.GROQ_BASE_URL ?? "https://api.groq.com/openai/v1",
   // Separate vision-capable model for meal/exercise photo analysis (see
   // src/core/health/visionAnalyzer.ts) — the main chat model
   // (nemotronModel) is text-only, so photos go to NVIDIA's own
@@ -110,4 +120,23 @@ export function setActiveProvider(next: LlmProvider): void {
 export function setActiveModel(modelId: string): void {
   config.nemotronModel = modelId;
   providerModels[config.provider] = modelId;
+}
+
+export function hasProviderCredentials(provider: LlmProvider): boolean {
+  if (provider === "nvidia") return true;
+  if (provider === "deepseek") return Boolean(config.deepseekApiKey);
+  return Boolean(config.groqApiKey);
+}
+
+// Next provider in the fixed nvidia → deepseek → groq → nvidia cycle that
+// actually has credentials configured — the bare /provider command (CLI,
+// web, Telegram) skips over providers with no API key set instead of
+// switching to one that would just fail on the next turn.
+export function nextConfiguredProvider(current: LlmProvider): LlmProvider {
+  const startIndex = PROVIDER_CYCLE.indexOf(current);
+  for (let step = 1; step <= PROVIDER_CYCLE.length; step++) {
+    const candidate = PROVIDER_CYCLE[(startIndex + step) % PROVIDER_CYCLE.length];
+    if (hasProviderCredentials(candidate)) return candidate;
+  }
+  return "nvidia";
 }

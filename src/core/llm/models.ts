@@ -1,15 +1,16 @@
-import { config } from "../../config.js";
+import { config, PROVIDER_CYCLE, type LlmProvider } from "../../config.js";
 
 // Shared by the local CLI (src/interfaces/cli/index.ts), the web server
 // (src/interfaces/web/server.ts, which the remote CLI and Telegram's /model
 // both go through) — one place that knows how to enumerate/enrich models
-// for whichever provider (config.provider) is currently active, instead of
-// three near-identical copies of the NVIDIA /models fetch + modelcard
-// scrape that used to live inline in each interface.
+// for whichever provider is asked about, instead of three near-identical
+// copies of the NVIDIA /models fetch + modelcard scrape that used to live
+// inline in each interface.
 
 export interface ModelInfo {
   id: string;
   contextWindowTokens?: number;
+  provider?: LlmProvider;
 }
 
 async function fetchNvidiaModels(): Promise<ModelInfo[]> {
@@ -52,8 +53,69 @@ function deepseekModels(): ModelInfo[] {
   ];
 }
 
+async function fetchGroqModels(): Promise<ModelInfo[]> {
+  const baseUrl = config.groqBaseUrl.replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/models`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${config.groqApiKey}` },
+  });
+  if (!response.ok) throw new Error(`Groq returned HTTP ${response.status}`);
+  const payload = (await response.json()) as {
+    data?: { id?: unknown; active?: unknown; context_window?: unknown; output_modalities?: unknown; supported_features?: unknown }[];
+  };
+  return (payload.data ?? [])
+    .filter((model) => {
+      // Groq's catalog also lists TTS/vision/safety-only models ULTRON's
+      // tool-calling loop can't use — keep only active, text-out models
+      // that declare function-calling support.
+      const outputs = Array.isArray(model.output_modalities) ? model.output_modalities : [];
+      const features = Array.isArray(model.supported_features) ? model.supported_features : [];
+      return model.active !== false && outputs.includes("text") && features.includes("tools") && typeof model.id === "string";
+    })
+    .map((model) => ({
+      id: model.id as string,
+      ...(typeof model.context_window === "number" && model.context_window > 0
+        ? { contextWindowTokens: model.context_window }
+        : {}),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function fetchProviderModels(provider: LlmProvider): Promise<ModelInfo[]> {
+  if (provider === "deepseek") return deepseekModels();
+  if (provider === "groq") return fetchGroqModels();
+  return fetchNvidiaModels();
+}
+
+// The active provider's models only — used where only one provider's list
+// makes sense (CLI/web/Telegram's initial context-window lookup at
+// startup, and after a /provider switch).
 export async function listAvailableModels(): Promise<ModelInfo[]> {
-  return config.provider === "deepseek" ? deepseekModels() : fetchNvidiaModels();
+  return fetchProviderModels(config.provider);
+}
+
+export interface GroupedModels {
+  provider: LlmProvider;
+  models: ModelInfo[];
+}
+
+// All three providers' catalogs, tagged and grouped in a fixed order — what
+// /model actually shows now, so switching providers is a side effect of
+// picking a model rather than a separate step. A provider with no API key
+// configured (deepseek/groq are optional) contributes an empty group
+// instead of failing the whole listing.
+export async function listModelsByProvider(): Promise<GroupedModels[]> {
+  return Promise.all(
+    PROVIDER_CYCLE.map(async (provider): Promise<GroupedModels> => {
+      if (provider === "deepseek" && !config.deepseekApiKey) return { provider, models: [] };
+      if (provider === "groq" && !config.groqApiKey) return { provider, models: [] };
+      try {
+        const models = await fetchProviderModels(provider);
+        return { provider, models: models.map((model) => ({ ...model, provider })) };
+      } catch {
+        return { provider, models: [] };
+      }
+    }),
+  );
 }
 
 const modelContextCache = new Map<string, number | undefined>();
@@ -61,11 +123,11 @@ const modelContextCache = new Map<string, number | undefined>();
 // NVIDIA's hosted NIM /v1/models omits max_model_len for most models — the
 // public model card on build.nvidia.com states the same context length in
 // prose (e.g. "1M context" / "128,000 tokens"), so this scrapes that as a
-// fallback. Not applicable to DeepSeek (no such catalog to scrape, and the
-// two models above are already given a context figure directly).
-export async function resolveModelContext(model: ModelInfo): Promise<ModelInfo> {
+// fallback. Not applicable to DeepSeek/Groq — neither has such a catalog to
+// scrape, and both already give a context figure directly in their listing.
+export async function resolveModelContext<T extends ModelInfo>(model: T): Promise<T> {
   if (model.contextWindowTokens) return model;
-  if (config.provider === "deepseek") return model;
+  if ((model.provider ?? config.provider) !== "nvidia") return model;
   if (modelContextCache.has(model.id)) {
     const contextWindowTokens = modelContextCache.get(model.id);
     return contextWindowTokens ? { ...model, contextWindowTokens } : model;
