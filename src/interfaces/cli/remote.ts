@@ -255,6 +255,11 @@ async function main() {
       appendTranscript(chalk.yellow("[ultron] no archived chat selected.\n\n"));
       return;
     }
+    // Keep the server-side CLI focus aligned with this explicit selection;
+    // otherwise the background focus poll immediately sends us back to the
+    // CLI main chat and we stop receiving events from the resumed Telegram
+    // conversation.
+    await apiPost(`/api/chats/${encodeURIComponent(target.id)}/resume`);
     currentChatId = target.id;
     currentChatTitle = target.title;
     await syncEventCursor();
