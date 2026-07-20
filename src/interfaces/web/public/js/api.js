@@ -73,4 +73,17 @@ export const api = {
   createSchedule: (body) => fetch("/api/schedules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(json),
   toggleSchedule: (id, enabled) => fetch(`/api/schedules/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) }).then(json),
   deleteSchedule: (id) => fetch(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }).then(json),
+  main: () => fetch("/api/main", { method: "POST" }).then(json),
+  getExport: (chatId) => fetch(`/api/chats/${encodeURIComponent(chatId)}/export`).then(json),
+  setExport: (chatId, path) =>
+    fetch(`/api/chats/${encodeURIComponent(chatId)}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }).then(json),
+  stopExport: (chatId) => fetch(`/api/chats/${encodeURIComponent(chatId)}/export`, { method: "DELETE" }).then(json),
+  memoryList: () => fetch("/api/memory").then(json),
+  memoryClear: () => fetch("/api/memory", { method: "DELETE" }).then(json),
+  memoryForget: (id) => fetch(`/api/memory/${encodeURIComponent(id)}`, { method: "DELETE" }).then(json),
+  healthSummary: () => fetch("/api/health-data/summary").then(json),
 };

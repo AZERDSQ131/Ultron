@@ -608,7 +608,8 @@ async function handleHealthIngest(req: IncomingMessage, res: ServerResponse): Pr
   sendJson(res, 200, { status: "ok", dates });
 }
 
-// Read-only data for the health dashboard (public/health.html). Computes
+// Read-only data for the health dashboard view (public/js/healthView.js,
+// folded into the main app shell rather than a separate page). Computes
 // per-day recovery/activity scores against the CURRENT baseline for every
 // day in the window (not a historical baseline-at-the-time), same
 // simplification the <health_recent> prompt block and health_query's
@@ -659,6 +660,25 @@ async function handleHealthSummary(res: ServerResponse): Promise<void> {
 
   const latestScores = { date: latest.date, recovery: latestRecovery, activity: latestActivity };
   sendJson(res, 200, { hasData: true, from, to, days, records, sleepDebt, anomalies, bioAge, latestScores, latestRawJson: latest.rawJson });
+}
+
+// Web-UI parity for the CLI/Telegram /memory command (passive user-model
+// observations, see src/core/memory/userModel.ts) — previously only
+// reachable from the CLI, so "every command" in the redesigned web UI had a
+// real gap here.
+async function handleMemoryList(res: ServerResponse): Promise<void> {
+  const registry = getUserModelRegistry(config.databasePath);
+  sendJson(res, 200, { observations: registry.list(200), count: registry.count() });
+}
+async function handleMemoryClear(res: ServerResponse): Promise<void> {
+  getUserModelRegistry(config.databasePath).clear();
+  sendJson(res, 200, { status: "ok" });
+}
+async function handleMemoryForget(res: ServerResponse, id: string): Promise<void> {
+  const parsed = Number(id);
+  if (!Number.isInteger(parsed)) { sendJson(res, 400, { error: "invalid id" }); return; }
+  getUserModelRegistry(config.databasePath).remove(parsed);
+  sendJson(res, 200, { status: "ok" });
 }
 
 async function handleEdit(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -956,6 +976,19 @@ const server = createServer((req, res) => {
   }
   if (req.method === "GET" && path === "/api/health-data/summary") {
     handleHealthSummary(res).catch((err) => console.error("[ultron-web] health summary failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/memory") {
+    handleMemoryList(res).catch((err) => console.error("[ultron-web] memory list failed:", err));
+    return;
+  }
+  if (req.method === "DELETE" && path === "/api/memory") {
+    handleMemoryClear(res).catch((err) => console.error("[ultron-web] memory clear failed:", err));
+    return;
+  }
+  const memoryMatch = path.match(/^\/api\/memory\/([^/]+)$/);
+  if (memoryMatch && req.method === "DELETE") {
+    handleMemoryForget(res, decodeURIComponent(memoryMatch[1])).catch((err) => console.error("[ultron-web] memory forget failed:", err));
     return;
   }
   if (req.method === "GET" && path === "/api/status") {

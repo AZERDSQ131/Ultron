@@ -18,6 +18,9 @@
       <span class="icon">⌕</span> Search
       <span class="kbd-hint">⌘K</span>
     </button>
+    <button type="button" id="health-nav-btn" class="rail-btn">
+      <span class="icon">🩺</span> Health
+    </button>
     <div id="chat-list" aria-label="Chats"></div>
     <section id="automation-panel" aria-label="Agents and schedules">
       <div class="panel-heading"><span>Agents</span><button type="button" id="new-agent-btn" class="icon-btn" title="New agent">+</button></div>
@@ -32,6 +35,7 @@
       <button type="button" id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
       <div class="header-title" id="active-chat-title">ULTRON</div>
       <div class="status">
+        <button type="button" id="goal-widget" class="goal-widget" hidden></button>
         <span id="model-label" class="dim"></span>
         <div class="context-bar" title="Context usage">
           <div id="context-fill" class="context-fill"></div>
@@ -44,6 +48,12 @@
     </header>
 
     <main id="thread"></main>
+
+    <!-- Health dashboard — a view swapped in for #thread/footer (see
+         healthView.js), not a separate page, so the sidebar/header stay in
+         place and switching back to any chat returns you to it exactly
+         where you left off. -->
+    <section id="health-view" class="health-view" hidden></section>
 
     <footer>
       <div id="command-menu" class="command-menu" hidden></div>

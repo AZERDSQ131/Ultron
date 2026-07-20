@@ -14,9 +14,11 @@ import {
   updateTurnActions,
 } from "./thread.js";
 import { openArchiveDialog, openResumePanel } from "./archivePanel.js";
-import { loadStatus, updateContextGauge } from "./statusBar.js";
-import { loadChats, selectChat } from "./chatList.js";
+import { loadStatus, updateContextGauge, openModelMenu } from "./statusBar.js";
+import { loadChats, selectChat, getChat, createNewChat } from "./chatList.js";
 import { refreshTodos } from "./todos.js";
+import { setTheme } from "./theme.js";
+import { openHealthView } from "./healthView.js";
 
 // Any tool result from either of these means the panel is stale — refresh
 // it. Kept as a set so a future todo tool only needs adding here once,
@@ -69,6 +71,9 @@ function setInputValue(text) {
   autoGrow();
 }
 
+// The full CLI command surface (see src/interfaces/cli/index.ts), replicated
+// here so the web UI is a superset, not a subset, of what the CLI/Telegram
+// can do — this was the biggest gap the redesign was asked to close.
 export const COMMANDS = [
   { name: "/help", desc: "show available commands" },
   { name: "/status", desc: "show model, memory, tool and runtime status" },
@@ -78,9 +83,18 @@ export const COMMANDS = [
   { name: "/compact", desc: "summarize old messages, keep recent context" },
   { name: "/archive", desc: "rename (optional) and archive this chat, start a new one" },
   { name: "/resume", desc: "browse archived chats — reopen or delete one" },
+  { name: "/main", desc: "switch to the main conversation" },
+  { name: "/delete", desc: "delete this conversation (memory preserved)" },
   { name: "/think", desc: "set reasoning: on, low or off" },
   { name: "/task", desc: "set task mode: none, todo, plan or goal" },
+  { name: "/security", desc: "set tool approval: bypass, accept_edit or manual" },
+  { name: "/permissions", desc: "open the tool-approval mode menu" },
+  { name: "/model", desc: "open the model picker" },
+  { name: "/theme", desc: "set theme: system, dark or light" },
   { name: "/verbose", desc: "toggle timing and token metrics" },
+  { name: "/memory", desc: "list, clear, or forget auto-accumulated observations about you" },
+  { name: "/health", desc: "open the health dashboard" },
+  { name: "/export", desc: "live-export this chat to a file: [path|on|off]" },
   { name: "/clear", desc: "clear this chat view" },
   { name: "/quit", desc: "about closing this interface" },
 ];
@@ -348,7 +362,7 @@ function closeSecurityMenu() {
   securityBtn.setAttribute("aria-expanded", "false");
 }
 
-function openSecurityMenu() {
+export function openSecurityMenu() {
   securityMenu.hidden = false;
   securityBtn.setAttribute("aria-expanded", "true");
   (securityOptions.find((opt) => opt.dataset.value === state.securityMode) ?? securityOptions[0])?.focus();
@@ -497,6 +511,7 @@ export async function streamTurn(body) {
           }
         } else if (eventName === "goal") {
           addSystemNote(`[ultron] goal ${data.status}${data.reason ? ` — ${data.reason}` : ""}`);
+          loadStatus();
         } else if (eventName === "aborted") {
           finishAssistant();
           addSystemNote("[ultron] generation stopped.");
@@ -644,8 +659,10 @@ async function runCommand(raw) {
 
   if (command === "/help") {
     addSystemNote(
-      "[ultron] commands: /status · /context · /stop · /retry · /compact · " +
-        "/archive · /resume · /think on|low|off · /verbose on|off · /clear · /quit",
+      "[ultron] commands: /status · /context · /stop · /retry · /compact · /archive · /resume · " +
+        "/main · /delete · /think on|low|off · /task none|todo|plan|goal · /security bypass|accept_edit|manual · " +
+        "/permissions · /model · /theme system|dark|light · /verbose on|off · /memory [clear|forget <id>] · " +
+        "/health · /export [path|on|off] · /clear · /quit",
     );
     return;
   }
@@ -767,6 +784,121 @@ async function runCommand(raw) {
 
   if (command === "/resume") {
     await openResumePanel();
+    return;
+  }
+
+  if (command === "/main") {
+    const data = await api.main();
+    await loadChats();
+    await selectChat(data.chat.id);
+    return;
+  }
+
+  if (command === "/delete") {
+    const chat = getChat(state.activeChatId);
+    if (!chat) return;
+    if (!confirm(`Delete "${chat.title}"? This removes its full history.`)) return;
+    await api.deleteChat(chat.id);
+    await loadChats();
+    if (state.chatsCache.length > 0) await selectChat(state.chatsCache[0].id);
+    else await createNewChat();
+    return;
+  }
+
+  if (command === "/security" || command === "/permissions") {
+    const mode = arg.toLowerCase();
+    if (!mode) {
+      openSecurityMenu();
+      return;
+    }
+    if (!["bypass", "accept_edit", "manual"].includes(mode)) {
+      addSystemNote("[ultron] use /security bypass, /security accept_edit or /security manual.", true);
+      return;
+    }
+    syncSecurityMode(mode);
+    if (state.activeChatId) {
+      await api.setSecurityMode(state.activeChatId, mode);
+      const chat = getChat(state.activeChatId);
+      if (chat) chat.securityMode = mode;
+    }
+    addSystemNote(`[ultron] tool approval mode set to ${mode}.`);
+    return;
+  }
+
+  if (command === "/model") {
+    openModelMenu();
+    return;
+  }
+
+  if (command === "/theme") {
+    const mode = arg.toLowerCase();
+    if (!mode) {
+      addSystemNote("[ultron] use /theme system, /theme dark or /theme light.");
+      return;
+    }
+    if (!["system", "dark", "light"].includes(mode)) {
+      addSystemNote("[ultron] use /theme system, /theme dark or /theme light.", true);
+      return;
+    }
+    setTheme(mode);
+    addSystemNote(`[ultron] theme set to ${mode}.`);
+    return;
+  }
+
+  if (command === "/health") {
+    openHealthView();
+    return;
+  }
+
+  if (command === "/export") {
+    if (!state.activeChatId) return;
+    const value = arg.trim();
+    if (!value) {
+      const data = await api.getExport(state.activeChatId);
+      addSystemNote(
+        data.path
+          ? `[ultron] live export: ${data.path} (updates after every turn) — /export off to stop.`
+          : "[ultron] no live export active for this chat — /export [path] to start, /export off to stop.",
+      );
+      return;
+    }
+    if (value.toLowerCase() === "off") {
+      await api.stopExport(state.activeChatId);
+      addSystemNote("[ultron] live export stopped (file left as-is).");
+      return;
+    }
+    const data = await api.setExport(state.activeChatId, value.toLowerCase() === "on" ? undefined : value);
+    addSystemNote(`[ultron] live export started: ${data.path} (updates after every turn).`);
+    return;
+  }
+
+  if (command === "/memory") {
+    const sub = arg.trim().toLowerCase();
+    if (!sub) {
+      const data = await api.memoryList();
+      if (!data.observations.length) {
+        addSystemNote("[ultron] no observations accumulated yet.");
+        return;
+      }
+      const lines = data.observations
+        .slice(0, 30)
+        .map((o) => `#${o.id} (${o.category}) ${o.content}`)
+        .join("\n");
+      addSystemNote(`[ultron] ${data.count} observation(s) accumulated automatically — /memory clear or /memory forget <id>\n${lines}`);
+      return;
+    }
+    if (sub === "clear") {
+      await api.memoryClear();
+      addSystemNote("[ultron] all accumulated observations cleared.");
+      return;
+    }
+    if (sub.startsWith("forget ")) {
+      const id = sub.slice("forget ".length).trim();
+      await api.memoryForget(id);
+      addSystemNote(`[ultron] observation #${id} forgotten (if it existed).`);
+      return;
+    }
+    addSystemNote("[ultron] use /memory, /memory clear or /memory forget <id>.", true);
     return;
   }
 

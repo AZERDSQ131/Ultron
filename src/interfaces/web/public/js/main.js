@@ -8,6 +8,8 @@ import { state } from "./store.js";
 import { initAutomation } from "./automation.js";
 import { initTodos } from "./todos.js";
 import { initArchivePanel } from "./archivePanel.js";
+import { initHealthView } from "./healthView.js";
+import { initGoalWidget } from "./goalWidget.js";
 
 initThread({ onEditLast: editLast, onRegenerateLast: regenerateLast });
 initChatList({ onAfterSelect: focusInput });
@@ -18,6 +20,8 @@ initShortcuts();
 initAutomation();
 initTodos();
 initArchivePanel();
+initHealthView();
+initGoalWidget();
 
 (async () => {
   await loadChats();

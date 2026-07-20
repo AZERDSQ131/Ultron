@@ -11,7 +11,6 @@ const title = document.getElementById("automation-dialog-title");
 const description = document.getElementById("automation-description");
 const instructions = document.getElementById("automation-instructions");
 let agents = [];
-const collapsedAgents = new Set();
 
 function openDialog() {
   title.textContent = "New agent";
@@ -21,41 +20,27 @@ function openDialog() {
   document.getElementById("automation-name").focus();
 }
 function closeDialog() { dialog.hidden = true; }
+
+// Agent-owned (and schedule-owned) conversations now live in the unified
+// sidebar chat list (see chatList.js's groupChats/chatBadge — 🤖/⏰ badges),
+// so this panel is purely agent/schedule management: create, delete, and
+// "start a new chat with this agent" — not a second place to browse their
+// past conversations.
 function render() {
   agentList.innerHTML = agents.length ? agents.map((a) => {
-    const agentChats = state.chatsCache.filter((chat) => chat.agentId === a.id && !chat.scheduleId);
-    const chats = agentChats.map((chat) => `<div class="agent-chat-row"><button class="agent-chat-entry${chat.id === state.activeChatId ? " active" : ""}" data-chat-id="${chat.id}">${chat.title}</button><span class="agent-chat-actions"><button class="agent-chat-rename" data-chat-id="${chat.id}" title="Rename conversation">✎</button><button class="agent-chat-delete" data-chat-id="${chat.id}" title="Delete conversation">🗑</button></span></div>`).join("");
-    const collapsed = collapsedAgents.has(a.id);
-    return `<div class="agent-block"><div class="automation-item agent-item"><button class="agent-toggle" data-agent-id="${a.id}" title="${collapsed ? "Expand" : "Collapse"} conversations">${collapsed ? "▸" : "▾"}</button><span class="agent-dot"></span><span class="agent-name" title="${a.description}">${a.name}</span><span class="agent-actions"><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">+</button><button class="agent-delete-btn" data-agent-id="${a.id}" title="Delete ${a.name}" aria-label="Delete ${a.name}">🗑</button></span></div>${collapsed ? "" : `<div class="agent-conversations">${chats || '<div class="agent-empty">No conversations</div>'}</div>`}</div>`;
+    const chatCount = state.chatsCache.filter((chat) => chat.agentId === a.id).length;
+    return `<div class="automation-item agent-item"><span class="agent-dot"></span><span class="agent-name" title="${a.description}">${a.name}</span><span class="agent-count dim">${chatCount} chat${chatCount === 1 ? "" : "s"}</span><span class="agent-actions"><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">+</button><button class="agent-delete-btn" data-agent-id="${a.id}" title="Delete ${a.name}" aria-label="Delete ${a.name}">🗑</button></span></div>`;
   }).join("") : '<div class="empty-hint">No agents</div>';
   agentList.querySelectorAll(".agent-chat-btn").forEach((button) => button.addEventListener("click", async (event) => {
     event.stopPropagation();
     const agent = agents.find((candidate) => candidate.id === button.dataset.agentId);
     if (agent) await createAgentChat(agent);
   }));
-  agentList.querySelectorAll(".agent-toggle").forEach((button) => button.addEventListener("click", () => { const id = button.dataset.agentId; if (collapsedAgents.has(id)) collapsedAgents.delete(id); else collapsedAgents.add(id); render(); }));
   agentList.querySelectorAll(".agent-delete-btn").forEach((button) => button.addEventListener("click", async () => {
     const agent = agents.find((candidate) => candidate.id === button.dataset.agentId);
     if (!agent || !confirm(`Delete Agent \"${agent.name}\" and all its conversations?`)) return;
     await api.deleteAgent(agent.id);
     if (state.chatsCache.some((chat) => chat.agentId === agent.id && chat.id === state.activeChatId)) state.activeChatId = null;
-    await loadChats();
-    await load();
-  }));
-  agentList.querySelectorAll(".agent-chat-entry").forEach((button) => button.addEventListener("click", async () => { await selectChat(button.dataset.chatId); render(); }));
-  agentList.querySelectorAll(".agent-chat-rename").forEach((button) => button.addEventListener("click", async (event) => {
-    event.stopPropagation();
-    const chat = state.chatsCache.find((candidate) => candidate.id === button.dataset.chatId);
-    if (!chat) return;
-    const title = prompt("Rename conversation", chat.title)?.trim();
-    if (title && title !== chat.title) { await api.renameChat(chat.id, title); await loadChats(); await load(); }
-  }));
-  agentList.querySelectorAll(".agent-chat-delete").forEach((button) => button.addEventListener("click", async (event) => {
-    event.stopPropagation();
-    const chat = state.chatsCache.find((candidate) => candidate.id === button.dataset.chatId);
-    if (!chat || !confirm(`Delete \"${chat.title}\"? This removes its full history.`)) return;
-    await api.deleteChat(chat.id);
-    if (state.activeChatId === chat.id) state.activeChatId = null;
     await loadChats();
     await load();
   }));

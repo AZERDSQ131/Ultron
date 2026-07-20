@@ -1,9 +1,16 @@
-// Read-only health dashboard — fetches GET /api/health-data/summary (see
-// handleHealthSummary in server.ts) and renders everything with plain SVG,
-// no charting library, consistent with the rest of this frontend (native
-// ES modules, no bundler, no framework).
+// Health dashboard folded into the main app shell as a view — previously
+// public/health.html was a fully separate page (own <body>, own script, not
+// linked from index.html at all). Reuses the same GET /api/health-data/summary
+// endpoint and the same hand-rolled SVG charts (see the removed health.js),
+// just rendered into a container inside the SPA instead of a standalone
+// document, so the sidebar/header/chat list stay put while it's open.
+import { api } from "./api.js";
 
-const root = document.getElementById("health-root");
+const thread = document.getElementById("thread");
+const footer = document.querySelector("footer");
+const view = document.getElementById("health-view");
+const navBtn = document.getElementById("health-nav-btn");
+const activeChatTitle = document.getElementById("active-chat-title");
 
 const STAGE_COLORS = {
   awake: "var(--warn)",
@@ -28,7 +35,6 @@ function svgEl(tag, attrs = {}) {
   return node;
 }
 
-// Two overlaid lines (recovery, activity) over the last N days, each 0-100.
 function scoreLineChart(days) {
   const width = 600;
   const height = 120;
@@ -103,16 +109,25 @@ function card(title, children) {
 async function render() {
   let data;
   try {
-    data = await fetch("/api/health-data/summary").then((r) => r.json());
+    data = await api.healthSummary();
   } catch {
-    root.innerHTML = "";
-    root.append(el("div", { class: "empty-hint" }, [document.createTextNode("Could not load health data.")]));
+    view.innerHTML = "";
+    view.append(el("div", { class: "empty-hint" }, [document.createTextNode("Could not load health data.")]));
     return;
   }
 
-  root.innerHTML = "";
+  view.innerHTML = "";
+  const backRow = el("div", { class: "health-back-row" }, [
+    (() => {
+      const btn = el("button", { class: "rail-btn", type: "button" }, [document.createTextNode("← Back to chat")]);
+      btn.addEventListener("click", closeHealthView);
+      return btn;
+    })(),
+  ]);
+  view.append(backRow);
+
   if (!data.hasData) {
-    root.append(el("div", { class: "empty-hint" }, [document.createTextNode("No health data ingested yet.")]));
+    view.append(el("div", { class: "empty-hint" }, [document.createTextNode("No health data ingested yet.")]));
     return;
   }
 
@@ -161,7 +176,30 @@ async function render() {
     grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Last night's sleep stages")]), stageTimeline]));
   }
 
-  root.append(grid);
+  view.append(grid);
 }
 
-render();
+export function openHealthView() {
+  thread.hidden = true;
+  footer.hidden = true;
+  view.hidden = false;
+  navBtn.classList.add("active");
+  activeChatTitle.textContent = "Health";
+  render();
+}
+
+export function closeHealthView() {
+  if (view.hidden) return;
+  thread.hidden = false;
+  footer.hidden = false;
+  view.hidden = true;
+  navBtn.classList.remove("active");
+}
+
+export function isHealthViewOpen() {
+  return !view.hidden;
+}
+
+export function initHealthView() {
+  navBtn.addEventListener("click", () => (isHealthViewOpen() ? closeHealthView() : openHealthView()));
+}

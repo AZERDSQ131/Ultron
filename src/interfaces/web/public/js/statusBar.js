@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { state } from "./store.js";
+import { updateGoalWidget } from "./goalWidget.js";
 
 const modelLabel = document.getElementById("model-label");
 const contextLabel = document.getElementById("context-label");
@@ -33,6 +34,7 @@ export async function loadStatus() {
     settingsModel.textContent = data.model;
     settingsToolCount.textContent = String(data.toolCount);
     updateContextGauge(data.contextTokens, data.maxTokens);
+    updateGoalWidget(data.goal);
     if (availableModels.length) renderModelOptions(modelSearch.value);
     return data;
   } catch {
@@ -88,10 +90,20 @@ async function loadModelPicker() {
   }
 }
 
+export function openModelMenu() {
+  modelMenu.hidden = false;
+  modelPickerButton.setAttribute("aria-expanded", "true");
+  modelSearch.value = "";
+  modelSearch.focus();
+  renderModelOptions();
+}
+
 modelPickerButton.addEventListener("click", () => {
-  modelMenu.hidden = !modelMenu.hidden;
-  modelPickerButton.setAttribute("aria-expanded", String(!modelMenu.hidden));
-  if (!modelMenu.hidden) { modelSearch.value = ""; modelSearch.focus(); renderModelOptions(); }
+  if (modelMenu.hidden) openModelMenu();
+  else {
+    modelMenu.hidden = true;
+    modelPickerButton.setAttribute("aria-expanded", "false");
+  }
 });
 modelSearch.addEventListener("input", () => renderModelOptions(modelSearch.value));
 document.addEventListener("click", (event) => {

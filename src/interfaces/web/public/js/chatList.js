@@ -4,6 +4,7 @@ import { state } from "./store.js";
 import { addTurn, addToolBlock, addSystemNote, clearThread, updateTurnActions } from "./thread.js";
 import { loadStatus } from "./statusBar.js";
 import { attachToRunningChat, setGenerating, syncSecurityMode } from "./composer.js";
+import { closeHealthView } from "./healthView.js";
 
 const sidebar = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebar-toggle");
@@ -12,7 +13,6 @@ const newChatBtn = document.getElementById("new-chat-btn");
 const activeChatTitle = document.getElementById("active-chat-title");
 
 let handlers = { onAfterSelect: () => {} };
-const collapsedAgents = new Set();
 
 export function initChatList(injectedHandlers) {
   handlers = injectedHandlers;
@@ -34,10 +34,56 @@ function timeAgo(iso) {
   return `${Math.round(hours / 24)}d`;
 }
 
+// Every chat — including spawn_agent and schedule-owned ones — shows up
+// here now, grouped chronologically like ChatGPT's sidebar (Today /
+// Yesterday / Previous 7 days / a bucket per older month). Previously the
+// list filtered out any chat with an agentId or scheduleId, so a sub-agent
+// run or a scheduled task's execution was only reachable from the
+// Agents/Schedules panel — sometimes from NEITHER of them if it had both
+// fields set (see automation.js). A small badge distinguishes chat type
+// instead of splitting them into separate surfaces.
+function dayKey(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function groupChats(chats) {
+  const now = new Date();
+  const today = dayKey(now.toISOString());
+  const yesterday = dayKey(new Date(now.getTime() - 86400000).toISOString());
+  const weekAgo = now.getTime() - 7 * 86400000;
+
+  const groups = new Map();
+  const order = [];
+  const push = (label, chat) => {
+    if (!groups.has(label)) {
+      groups.set(label, []);
+      order.push(label);
+    }
+    groups.get(label).push(chat);
+  };
+
+  for (const chat of chats) {
+    const t = new Date(chat.updatedAt).getTime();
+    const key = dayKey(chat.updatedAt);
+    if (key === today) push("Today", chat);
+    else if (key === yesterday) push("Yesterday", chat);
+    else if (t >= weekAgo) push("Previous 7 days", chat);
+    else push(new Date(chat.updatedAt).toLocaleString(undefined, { month: "long", year: t < new Date(now.getFullYear(), 0, 1).getTime() ? "numeric" : undefined }), chat);
+  }
+  return order.map((label) => ({ label, chats: groups.get(label) }));
+}
+
+function chatBadge(chat) {
+  if (chat.scheduleId) return { icon: "⏰", label: "scheduled run" };
+  if (chat.agentId) return { icon: "🤖", label: "agent" };
+  return null;
+}
+
 function renderChatList() {
   chatListEl.innerHTML = "";
-  const visibleChats = state.chatsCache.filter((chat) => !chat.scheduleId);
-  if (visibleChats.length === 0 && state.agentsCache.length === 0) {
+  const allChats = [...state.chatsCache].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  if (allChats.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-hint";
     empty.textContent = "No chats yet";
@@ -49,6 +95,15 @@ function renderChatList() {
     const item = document.createElement("div");
     item.className = "chat-item" + (chat.id === state.activeChatId ? " active" : "");
     item.tabIndex = 0;
+
+    const badge = chatBadge(chat);
+    if (badge) {
+      const badgeEl = document.createElement("span");
+      badgeEl.className = "chat-badge";
+      badgeEl.textContent = badge.icon;
+      badgeEl.title = badge.label;
+      item.appendChild(badgeEl);
+    }
 
     const title = document.createElement("div");
     title.className = "chat-title";
@@ -91,15 +146,13 @@ function renderChatList() {
     return item;
   };
 
-  const rootChats = visibleChats.filter((chat) => !chat.agentId);
-  if (rootChats.length > 0) {
+  for (const group of groupChats(allChats)) {
     const heading = document.createElement("div");
-    heading.className = "chat-group-heading root-heading";
-    heading.textContent = "ULTRON";
+    heading.className = "chat-group-heading";
+    heading.textContent = group.label;
     chatListEl.appendChild(heading);
-    rootChats.forEach((chat) => chatListEl.appendChild(renderChat(chat)));
+    group.chats.forEach((chat) => chatListEl.appendChild(renderChat(chat)));
   }
-
 }
 
 function startRenameChat(chat, titleEl) {
@@ -167,6 +220,7 @@ export function getChat(id) {
 }
 
 export async function selectChat(id) {
+  closeHealthView();
   state.activeChatId = id;
   window.dispatchEvent(new Event("chat:selected"));
   renderChatList();
