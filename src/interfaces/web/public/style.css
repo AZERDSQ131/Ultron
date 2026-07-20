@@ -665,6 +665,16 @@ main#thread {
   }
 }
 
+/* #thread's ID selector (1,0,0) always beats the UA stylesheet's
+   [hidden] { display: none } (0,1,0), so healthView.js's thread.hidden =
+   true left the (empty, so invisible-looking) thread still occupying flex
+   space above #health-view instead of actually hiding it — the health
+   dashboard was never a real full-page swap, just visually mistaken for
+   one whenever the underlying chat had no messages to bleed through. */
+main#thread[hidden] {
+  display: none !important;
+}
+
 .turn {
   display: flex;
   flex-direction: column;
