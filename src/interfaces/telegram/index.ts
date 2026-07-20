@@ -24,6 +24,7 @@ import { detectAnomalies } from "../../core/health/trends.js";
 import { getMealExerciseLogRegistry } from "../../core/memory/mealExerciseLog.js";
 import { savePhoto } from "../../core/health/photoStorage.js";
 import { analyzeHealthPhoto } from "../../core/health/visionAnalyzer.js";
+import { narrateLoggedEntry } from "../../core/health/narrator.js";
 import { getChatRegistry, LEGACY_CHAT_ID, type Chat } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -141,12 +142,18 @@ interface Session {
   thinkingMode: ThinkingMode;
   taskMode: TaskMode;
   verbose: boolean;
+  // /show-tools (see runSingleTurn) — off by default: a tool call runs
+  // silently behind the "…" placeholder, only the final generated reply
+  // ever shows. On: every distinct tool call gets its own standalone
+  // message ("⚙ toolname", name only, never its args/result) that is never
+  // edited or deleted afterward, unlike the placeholder itself.
+  showTools: boolean;
 }
 const sessions = new Map<string, Session>();
 function getSession(ultronChatId: string): Session {
   let session = sessions.get(ultronChatId);
   if (!session) {
-    session = { thinkingMode: "full", taskMode: "none", verbose: false };
+    session = { thinkingMode: "full", taskMode: "none", verbose: false, showTools: false };
     sessions.set(ultronChatId, session);
   }
   return session;
@@ -293,7 +300,11 @@ async function runSingleTurn(
           const name = toolCallChunks.find((tc) => tc.name)?.name;
           if (name && name !== lastToolName) {
             lastToolName = name;
-            await safeEditMessage(telegramChatId, placeholder.message_id, `⚙ ${name}…`);
+            // /show-tools off (default): stays silent behind the "…"
+            // placeholder — no tool name leaks out, only the final reply
+            // ever appears. /show-tools on: each distinct call gets its own
+            // standalone message, name only, that is never edited/deleted.
+            if (session.showTools) await send(telegramChatId, `⚙ ${name}`);
           }
           continue;
         }
@@ -472,6 +483,7 @@ const HELP_TEXT = `local commands
 /permissions — choose bypass, accept_edit or manual
 /security bypass|accept_edit|manual — same, set directly
 /verbose on|off — show model/tokens/time/cost after each reply
+/show-tools on|off — off (default): tool calls stay silent, only the final reply shows; on: each tool call gets its own standalone message (name only)
 /memory [clear|forget <id>] — list, clear, or remove auto-accumulated observations about you
 /health — show the last 7 days of ingested health data
 /export [path|on|off] — live-export this chat to a file, updated after every turn
@@ -502,6 +514,7 @@ bot.command("status", async (ctx) => {
       `security: ${chat.securityMode}`,
       `goal: ${goalStatusLine(goal)}`,
       `verbose: ${session.verbose ? "on" : "off"}`,
+      `show-tools: ${session.showTools ? "on" : "off"}`,
       "status: ready",
     ].join("\n"),
   );
@@ -965,7 +978,9 @@ bot.on("message:photo", async (ctx) => {
         analysis.carbsG !== null ? `${analysis.carbsG}g carbs` : undefined,
         analysis.fatG !== null ? `${analysis.fatG}g fat` : undefined,
       ].filter((x) => x !== undefined);
-      await send(ctx.chat.id, `[ultron] Meal logged: ${analysis.description}${macros.length ? ` (${macros.join(", ")})` : ""}`);
+      const fallback = `Meal logged: ${analysis.description}${macros.length ? ` (${macros.join(", ")})` : ""}`;
+      const reply = await narrateLoggedEntry("meal", analysis, caption ?? null).catch(() => fallback);
+      await send(ctx.chat.id, reply);
     } else {
       mealExerciseLog.addExercise({
         date,
@@ -985,7 +1000,9 @@ bot.on("message:photo", async (ctx) => {
         analysis.intensity ?? undefined,
         analysis.estimatedCaloriesBurned !== null ? `~${analysis.estimatedCaloriesBurned} kcal burned` : undefined,
       ].filter((x) => x !== undefined);
-      await send(ctx.chat.id, `[ultron] Exercise logged: ${analysis.description}${details.length ? ` (${details.join(", ")})` : ""}`);
+      const fallback = `Exercise logged: ${analysis.description}${details.length ? ` (${details.join(", ")})` : ""}`;
+      const reply = await narrateLoggedEntry("exercise", analysis, caption ?? null).catch(() => fallback);
+      await send(ctx.chat.id, reply);
     }
   } catch (err) {
     debugLog(`photo analysis failed chat=${ctx.chat.id} error=${err instanceof Error ? err.message : String(err)}`);
@@ -995,9 +1012,31 @@ bot.on("message:photo", async (ctx) => {
 
 // ---- plain messages ----
 
+// grammY's bot.command() only matches Telegram's "bot_command" message
+// entity, which requires [a-zA-Z0-9_] — a hyphen (as in "/show-tools")
+// never registers as one, so it's handled here as plain text instead of a
+// bot.command("show_tools", ...) handler that would simply never fire.
 bot.on("message:text", async (ctx) => {
   const text = ctx.message.text.trim();
-  if (!text || text.startsWith("/")) return;
+  if (!text) return;
+  if (text.toLowerCase().startsWith("/show-tools")) {
+    const ultronChatId = currentChatId(ctx.chat.id);
+    const session = getSession(ultronChatId);
+    const arg = text.slice("/show-tools".length).trim().toLowerCase();
+    if (!arg) {
+      await send(ctx.chat.id, `[ultron] show-tools: ${session.showTools ? "on" : "off"} (use /show-tools on or /show-tools off).`);
+      return;
+    }
+    if (arg === "on" || arg === "true") session.showTools = true;
+    else if (arg === "off" || arg === "false") session.showTools = false;
+    else {
+      await send(ctx.chat.id, "[ultron] use /show-tools on or /show-tools off.");
+      return;
+    }
+    await send(ctx.chat.id, `[ultron] show-tools ${session.showTools ? "on" : "off"}.`);
+    return;
+  }
+  if (text.startsWith("/")) return;
 
   const ultronChatId = currentChatId(ctx.chat.id);
   const session = getSession(ultronChatId);

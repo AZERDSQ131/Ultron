@@ -2,6 +2,7 @@ import { createNemotronModel } from "../llm/nemotron.js";
 import type { HealthAnomaly } from "./trends.js";
 import type { HealthRecords, HealthSleepDebt } from "../memory/health.js";
 import type { BioAgeResult } from "./bioAge.js";
+import type { PhotoAnalysis } from "./visionAnalyzer.js";
 
 // Turns already-computed numbers into 2-4 sentences of coach-style prose —
 // same pattern as userModelExtractor.ts/goalJudge.ts: a separate, cheap,
@@ -56,6 +57,44 @@ export async function narrateHealth(input: HealthNarrationInput, signal?: AbortS
     [
       { role: "system" as const, content: NARRATOR_SYSTEM_PROMPT },
       { role: "user" as const, content: buildUserPrompt(input) },
+    ],
+    { signal },
+  );
+  const raw = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+  return raw.trim();
+}
+
+// Same cheap-separate-LLM-call pattern, for Telegram's meal/exercise photo
+// side channel (bot.on("message:photo", ...)) — that flow computed macros
+// deterministically via the vision model already, but was replying with a
+// fixed "Meal logged: X (Ykcal, ...)" template, which read like raw tool
+// output instead of a normal conversational confirmation. This phrases the
+// same already-computed numbers naturally instead.
+const LOG_NARRATOR_SYSTEM_PROMPT = `You just logged a meal or exercise entry from a photo the user sent to their personal health tracker. All the numbers are already computed — never recompute, contradict, or add numbers not given to you. Write ONE short, natural confirmation reply for the user to read directly: 1-2 sentences, conversational, not a template or a bullet list. Mention what was logged and the most relevant numbers, phrased like a person would say it, not a report line. Reply in the same language as the user's caption if one is given; otherwise reply in English.`;
+
+function buildLogPrompt(kind: "meal" | "exercise", analysis: PhotoAnalysis, caption: string | null): string {
+  const lines = [`Logged as: ${kind}.`, `Description: ${analysis.description}.`];
+  if (kind === "meal") {
+    if (analysis.estimatedCalories !== null) lines.push(`Estimated calories: ${analysis.estimatedCalories} kcal.`);
+    if (analysis.proteinG !== null) lines.push(`Protein: ${analysis.proteinG}g.`);
+    if (analysis.carbsG !== null) lines.push(`Carbs: ${analysis.carbsG}g.`);
+    if (analysis.fatG !== null) lines.push(`Fat: ${analysis.fatG}g.`);
+  } else {
+    if (analysis.exerciseType) lines.push(`Exercise type: ${analysis.exerciseType}.`);
+    if (analysis.durationMinutes !== null) lines.push(`Duration: ${analysis.durationMinutes} min.`);
+    if (analysis.intensity) lines.push(`Intensity: ${analysis.intensity}.`);
+    if (analysis.estimatedCaloriesBurned !== null) lines.push(`Estimated calories burned: ${analysis.estimatedCaloriesBurned} kcal.`);
+  }
+  if (caption) lines.push(`User's caption: "${caption}"`);
+  return lines.join("\n");
+}
+
+export async function narrateLoggedEntry(kind: "meal" | "exercise", analysis: PhotoAnalysis, caption: string | null, signal?: AbortSignal): Promise<string> {
+  const model = createNemotronModel("low");
+  const response = await model.invoke(
+    [
+      { role: "system" as const, content: LOG_NARRATOR_SYSTEM_PROMPT },
+      { role: "user" as const, content: buildLogPrompt(kind, analysis, caption) },
     ],
     { signal },
   );
