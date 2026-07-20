@@ -428,6 +428,10 @@ body {
 .schedule-delete:hover { color: var(--accent); }
 .schedule-item.clickable, .agent-item.clickable { cursor: pointer; }
 .schedule-item.clickable:hover, .agent-item.clickable:hover { background: var(--bg-raised); }
+.agent-chat-sublist { display: flex; flex-direction: column; padding-left: 22px; }
+.agent-chat-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: var(--radius-sm); cursor: pointer; font-size: var(--fs-xs); }
+.agent-chat-row:hover, .agent-chat-row.active { background: var(--bg-raised); }
+.agent-chat-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .schedule-item button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
 .empty-hint { padding: 8px; color: var(--text-dimmer); font-size: var(--fs-xs); }
 

@@ -25,6 +25,13 @@ export type RunEvent =
 interface RunHandle {
   controller: AbortController;
   subscribers: Set<(event: RunEvent) => void>;
+  // Every event emitted so far this run, replayed to a subscriber that
+  // attaches mid-stream (see subscribeToRun) — without this, switching to
+  // another chat and back only ever showed text/tool events emitted
+  // *after* re-attaching, not what had already streamed while the tab was
+  // elsewhere. Scoped to a single run's lifetime (cleared with the handle
+  // in end()), so this never accumulates across runs.
+  history: RunEvent[];
 }
 
 const runs = new Map<string, RunHandle>();
@@ -42,11 +49,12 @@ export interface ActiveRun {
 // once replaced, since they operate on a handle no longer in the map).
 export function beginRun(chatId: string): ActiveRun {
   const controller = new AbortController();
-  const handle: RunHandle = { controller, subscribers: new Set() };
+  const handle: RunHandle = { controller, subscribers: new Set(), history: [] };
   runs.set(chatId, handle);
   return {
     signal: controller.signal,
     emit: (event) => {
+      handle.history.push(event);
       for (const listener of handle.subscribers) listener(event);
     },
     end: () => {
@@ -70,9 +78,13 @@ export function abortRun(chatId: string): boolean {
 
 // Returns an unsubscribe function, or undefined if the chat has no active
 // run to attach to (caller should fall back to showing static history).
+// Replays everything emitted so far before the new listener starts
+// receiving live events, so a client attaching mid-run sees the full
+// accumulated output, not just what's emitted from this point on.
 export function subscribeToRun(chatId: string, listener: (event: RunEvent) => void): (() => void) | undefined {
   const handle = runs.get(chatId);
   if (!handle) return undefined;
+  for (const event of handle.history) listener(event);
   handle.subscribers.add(listener);
   return () => handle.subscribers.delete(listener);
 }
