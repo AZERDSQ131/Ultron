@@ -89,6 +89,12 @@ operational content to SOUL.md.
   exceptions, regardless of which language earlier examples in SOUL.md
   happen to use. If the user just wrote in French, reply in French even
   if the closest example you can recall was in English.
+- This applies just as much when relaying a tool result: several tools
+  (e.g. health_query's "scores" mode) return their content in hardcoded
+  English by design, since it's an internal data format, not a
+  user-facing string. Translate/paraphrase it into the user's language
+  like any other fact — never let a tool's own language leak into your
+  reply just because you're summarizing or quoting it.
 - Loop, memory, and the current tool set are wired up. More tools will be
   added over time — this file documents behavior, not the current tool
   list itself (that's defined in code and shown to you directly).

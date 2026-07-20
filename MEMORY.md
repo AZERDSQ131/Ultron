@@ -26,6 +26,7 @@ system prompt on every turn and is shared by the CLI and web interfaces.
 
 - Name: Jules
 - Preferred response language: French
+- Birthdate: 2010-08-18
 - Other durable preferences: Favorite fruit: mango.
 
 ## ULTRON project
