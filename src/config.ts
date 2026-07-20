@@ -13,10 +13,39 @@ function required(name: string): string {
   return value;
 }
 
+// The active chat-completion provider (CLI /provider, web PATCH /api/provider,
+// Telegram /provider). Independent of visionModel below, which always stays
+// on NVIDIA regardless of this setting — photo analysis has no DeepSeek
+// equivalent wired up.
+export type LlmProvider = "nvidia" | "deepseek";
+
+function initialProvider(): LlmProvider {
+  return process.env.LLM_PROVIDER === "deepseek" ? "deepseek" : "nvidia";
+}
+
+// Each provider remembers its own last-picked model, so toggling providers
+// back and forth (CLI /provider, web, Telegram) restores whichever model was
+// last active on that provider instead of resetting to the .env default
+// every time.
+const providerModels: Record<LlmProvider, string> = {
+  nvidia: process.env.NEMOTRON_MODEL ?? "deepseek-ai/deepseek-v4-flash",
+  deepseek: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
+};
+
+const startingProvider = initialProvider();
+
 export const config = {
   nvidiaApiKey: required("NVIDIA_API_KEY"),
-  nemotronModel: process.env.NEMOTRON_MODEL ?? "deepseek-ai/deepseek-v4-flash",
+  provider: startingProvider as LlmProvider,
+  nemotronModel: providerModels[startingProvider],
   nemotronBaseUrl: process.env.NEMOTRON_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
+  // DeepSeek's own API (not NVIDIA-hosted) — a second provider alongside
+  // NVIDIA, selected via config.provider. Only nvidiaApiKey is required()
+  // above since visionModel (below) always needs it regardless of which
+  // chat provider is active; deepseekApiKey is only validated lazily, in
+  // createNemotronModel, when the DeepSeek provider is actually selected.
+  deepseekApiKey: process.env.DEEPSEEK_API_KEY,
+  deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com/v1",
   // Separate vision-capable model for meal/exercise photo analysis (see
   // src/core/health/visionAnalyzer.ts) — the main chat model
   // (nemotronModel) is text-only, so photos go to NVIDIA's own
@@ -65,3 +94,20 @@ export const config = {
     return isAbsolute(raw) ? raw : join(projectRoot, raw);
   })(),
 };
+
+// Switches the active chat-completion provider at runtime (CLI /provider,
+// web PATCH /api/provider, Telegram /provider) — restores whichever model
+// was last active on that provider (see providerModels above).
+export function setActiveProvider(next: LlmProvider): void {
+  config.provider = next;
+  config.nemotronModel = providerModels[next];
+}
+
+// Called whenever the active provider's model changes (CLI /model, web
+// PATCH /api/model, Telegram's model picker) so providerModels stays in
+// sync with what's actually running and a later /provider switch restores
+// the right thing.
+export function setActiveModel(modelId: string): void {
+  config.nemotronModel = modelId;
+  providerModels[config.provider] = modelId;
+}

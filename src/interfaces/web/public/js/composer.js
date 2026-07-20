@@ -14,7 +14,7 @@ import {
   updateTurnActions,
 } from "./thread.js";
 import { openArchiveDialog, openResumePanel } from "./archivePanel.js";
-import { loadStatus, updateContextGauge, openModelMenu } from "./statusBar.js";
+import { loadStatus, updateContextGauge, openModelMenu, reloadModelPicker } from "./statusBar.js";
 import { loadChats, selectChat, getChat, createNewChat } from "./chatList.js";
 import { refreshTodos } from "./todos.js";
 import { setTheme } from "./theme.js";
@@ -90,6 +90,7 @@ export const COMMANDS = [
   { name: "/security", desc: "set tool approval: bypass, accept_edit or manual" },
   { name: "/permissions", desc: "open the tool-approval mode menu" },
   { name: "/model", desc: "open the model picker" },
+  { name: "/provider", desc: "switch chat-completion provider: nvidia or deepseek" },
   { name: "/theme", desc: "set theme: system, dark or light" },
   { name: "/verbose", desc: "toggle timing and token metrics" },
   { name: "/memory", desc: "list, clear, or forget auto-accumulated observations about you" },
@@ -675,7 +676,7 @@ async function runCommand(raw) {
     addSystemNote(
       "[ultron] commands: /status · /context · /stop · /retry · /compact · /archive · /resume · " +
         "/main · /delete · /think on|low|off · /task none|todo|plan|goal · /security bypass|accept_edit|manual · " +
-        "/permissions · /model · /theme system|dark|light · /verbose on|off · /memory [clear|forget <id>] · " +
+        "/permissions · /provider [nvidia|deepseek] · /model · /theme system|dark|light · /verbose on|off · /memory [clear|forget <id>] · " +
         "/health · /export [path|on|off] · /clear · /quit",
     );
     return;
@@ -685,7 +686,7 @@ async function runCommand(raw) {
     try {
       const data = await api.status(state.activeChatId);
       addSystemNote(
-        `[ultron] model ${data.model} · chat ${state.activeChatId} · ${data.toolCount} tools · ` +
+        `[ultron] provider ${data.provider} · model ${data.model} · chat ${state.activeChatId} · ${data.toolCount} tools · ` +
           `think ${state.thinkingMode} · verbose ${state.verbose ? "on" : "off"} · status ready`,
       );
     } catch {
@@ -841,6 +842,28 @@ async function runCommand(raw) {
 
   if (command === "/model") {
     openModelMenu();
+    return;
+  }
+
+  if (command === "/provider") {
+    const target = arg.trim().toLowerCase();
+    if (target && target !== "nvidia" && target !== "deepseek") {
+      addSystemNote("[ultron] use /provider nvidia or /provider deepseek.", true);
+      return;
+    }
+    try {
+      const current = await api.provider();
+      const next = target || (current.current === "nvidia" ? "deepseek" : "nvidia");
+      if (next === current.current) {
+        addSystemNote(`[ultron] provider already ${next}.`);
+        return;
+      }
+      const data = await api.setProvider(next);
+      await reloadModelPicker();
+      addSystemNote(`[ultron] provider set to ${data.provider} (model: ${data.model}).`);
+    } catch (err) {
+      addSystemNote(`[ultron] could not switch provider: ${err.message ?? err}`, true);
+    }
     return;
   }
 

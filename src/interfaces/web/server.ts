@@ -16,8 +16,9 @@ import {
   type TaskMode,
   type ToolApprovalDecision,
 } from "../../core/graph.js";
-import { config } from "../../config.js";
+import { config, setActiveModel, setActiveProvider, type LlmProvider } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import { listAvailableModels, resolveModelContext } from "../../core/llm/models.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
@@ -50,7 +51,6 @@ function debugLog(message: string): void {
 
 let graph = buildGraph();
 const fallbackContextWindowTokens = config.contextWindowTokens;
-const modelContextCache = new Map<string, number | undefined>();
 const chats = getChatRegistry(config.databasePath);
 const agents = new AgentRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
@@ -784,47 +784,36 @@ async function handleInstallSkill(req: IncomingMessage, res: ServerResponse): Pr
 }
 
 async function handleModels(res: ServerResponse): Promise<void> {
-  const response = await fetch(`${config.nemotronBaseUrl}/models`, { headers: { Authorization: `Bearer ${config.nvidiaApiKey}` } });
-  if (!response.ok) throw new Error(`NVIDIA models request failed: HTTP ${response.status}`);
-  const payload = (await response.json()) as { data?: { id?: unknown; max_model_len?: unknown; max_context_length?: unknown }[] };
-  const models = await Promise.all((payload.data ?? []).flatMap((model) => typeof model.id === "string" && model.id ? [getModelInfo(model.id, model.max_model_len ?? model.max_context_length)] : []));
+  const models = await listAvailableModels();
   sendJson(res, 200, { current: config.nemotronModel, models: models.sort((a, b) => a.id.localeCompare(b.id)) });
-}
-
-async function getModelInfo(id: string, rawContext?: unknown): Promise<{ id: string; contextWindowTokens?: number }> {
-  const direct = typeof rawContext === "number" ? rawContext : typeof rawContext === "string" && /^\d+$/.test(rawContext) ? Number(rawContext) : undefined;
-  if (direct && Number.isSafeInteger(direct) && direct > 0) return { id, contextWindowTokens: direct };
-  if (modelContextCache.has(id)) {
-    const cached = modelContextCache.get(id);
-    return cached ? { id, contextWindowTokens: cached } : { id };
-  }
-  try {
-    const path = id.split("/").map(encodeURIComponent).join("/");
-    const response = await fetch(`https://build.nvidia.com/${path}/modelcard`, { signal: AbortSignal.timeout(5_000) });
-    const html = await response.text();
-    const match = html.match(/(?:([\d][\d,.]*)\s*(million|[kKmM])?\s*[- ]?token(?:s)?\s*context|context(?: window| length)?[^\d]{0,40}([\d][\d,.]*)\s*(million|[kKmM])?\s*token(?:s)?)/i);
-    const value = match?.[1] ?? match?.[3];
-    const unit = (match?.[2] ?? match?.[4] ?? "").toLowerCase();
-    const numeric = value ? Number(value.replace(/,/g, "")) : 0;
-    const context = numeric * (unit === "million" || unit === "m" ? 1_000_000 : unit === "k" ? 1_000 : 1);
-    if (!Number.isSafeInteger(context) || context <= 0) throw new Error("unknown context");
-    modelContextCache.set(id, context);
-    return { id, contextWindowTokens: context };
-  } catch {
-    modelContextCache.set(id, undefined);
-    return { id };
-  }
 }
 
 async function handleSetModel(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const payload = await readJson<{ model?: string }>(req);
   const model = payload?.model?.trim();
   if (!model) { sendJson(res, 400, { error: "model is required" }); return; }
-  const selected = await getModelInfo(model);
-  config.nemotronModel = model;
+  const selected = await resolveModelContext({ id: model });
+  setActiveModel(model);
   config.contextWindowTokens = selected.contextWindowTokens ?? fallbackContextWindowTokens;
   graph = buildGraph();
   sendJson(res, 200, { model });
+}
+
+async function handleProvider(res: ServerResponse): Promise<void> {
+  sendJson(res, 200, { current: config.provider, providers: ["nvidia", "deepseek"] });
+}
+
+async function handleSetProvider(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ provider?: string }>(req);
+  const provider = payload?.provider;
+  if (provider !== "nvidia" && provider !== "deepseek") { sendJson(res, 400, { error: "provider must be nvidia or deepseek" }); return; }
+  if (provider === "deepseek" && !config.deepseekApiKey) { sendJson(res, 400, { error: "DEEPSEEK_API_KEY is not set" }); return; }
+  setActiveProvider(provider as LlmProvider);
+  const models = await listAvailableModels();
+  const currentModel = models.find((m) => m.id === config.nemotronModel);
+  config.contextWindowTokens = (currentModel ? await resolveModelContext(currentModel) : undefined)?.contextWindowTokens ?? fallbackContextWindowTokens;
+  graph = buildGraph();
+  sendJson(res, 200, { provider: config.provider, model: config.nemotronModel });
 }
 
 async function handleAgents(res: ServerResponse): Promise<void> { sendJson(res, 200, { agents: agents.listAgents() }); }
@@ -882,6 +871,7 @@ async function handleStatus(res: ServerResponse, chatId: string | undefined): Pr
   const contextTokens = await estimateContextUsage(graph, id);
   sendJson(res, 200, {
     model: config.nemotronModel,
+    provider: config.provider,
     toolCount: tools.length,
     contextTokens,
     maxTokens: config.contextWindowTokens,
@@ -1021,6 +1011,14 @@ const server = createServer((req, res) => {
   }
   if (req.method === "PATCH" && path === "/api/model") {
     handleSetModel(req, res).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/provider") {
+    handleProvider(res).catch((err) => sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  if (req.method === "PATCH" && path === "/api/provider") {
+    handleSetProvider(req, res).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
   if (req.method === "GET" && path === "/api/agents") { handleAgents(res).catch((err) => console.error("[ultron-web] list agents failed:", err)); return; }

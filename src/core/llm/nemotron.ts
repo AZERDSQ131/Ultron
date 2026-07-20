@@ -22,20 +22,31 @@ function toPlainText(content: MessageContent): string {
 
 export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOpenAI {
   const thinking = thinkingMode !== "off";
+  const useDeepseek = config.provider === "deepseek";
+  if (useDeepseek && !config.deepseekApiKey) {
+    throw new Error("DEEPSEEK_API_KEY is not set — cannot use the DeepSeek provider (see .env.example).");
+  }
 
   const model = new ChatOpenAI({
     model: config.nemotronModel,
-    apiKey: config.nvidiaApiKey,
+    apiKey: useDeepseek ? config.deepseekApiKey : config.nvidiaApiKey,
     temperature: 1.0,
     topP: 0.95,
-    modelKwargs: {
-      chat_template_kwargs: {
-        enable_thinking: thinking,
-        ...(thinkingMode === "low" ? { low_effort: true } : {}),
-      },
-    },
+    // DeepSeek's API has no equivalent to NVIDIA NIM's chat_template_kwargs
+    // knob — thinkingMode only shapes reasoning depth on NVIDIA-hosted
+    // models for now.
+    ...(useDeepseek
+      ? {}
+      : {
+          modelKwargs: {
+            chat_template_kwargs: {
+              enable_thinking: thinking,
+              ...(thinkingMode === "low" ? { low_effort: true } : {}),
+            },
+          },
+        }),
     configuration: {
-      baseURL: config.nemotronBaseUrl,
+      baseURL: useDeepseek ? config.deepseekBaseUrl : config.nemotronBaseUrl,
     },
     streaming: true,
     // Verified against the live NVIDIA endpoint: it does return real usage

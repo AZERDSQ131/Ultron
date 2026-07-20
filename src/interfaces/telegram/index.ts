@@ -1,7 +1,8 @@
 import { Bot, InlineKeyboard } from "grammy";
 import { Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
-import { config } from "../../config.js";
+import { config, setActiveModel, setActiveProvider, type LlmProvider } from "../../config.js";
+import { listAvailableModels } from "../../core/llm/models.js";
 import {
   buildGraph,
   compactThread,
@@ -456,8 +457,9 @@ const modelPickerCache = new Map<number, string[]>();
 
 const HELP_TEXT = `local commands
 /help — show this help
-/model [query] — search and select an NVIDIA model
-/status — show model, memory, tool and runtime status
+/provider [nvidia|deepseek] — switch chat-completion provider (bare toggles)
+/model [query] — search and select a model for the active provider
+/status — show provider, model, memory, tool and runtime status
 /context — show current context usage
 /stop — stop the active generation
 /retry — remove the previous reply and run the last message again
@@ -491,6 +493,7 @@ bot.command("status", async (ctx) => {
   await send(
     ctx.chat.id,
     [
+      `provider: ${config.provider}`,
       `model: ${config.nemotronModel}`,
       `chat: ${ultronChatId}`,
       `tools: ${tools.length} available`,
@@ -762,18 +765,9 @@ bot.command("theme", async (ctx) => {
 
 bot.command("model", async (ctx) => {
   const query = ctx.match?.trim().toLowerCase();
-  await send(ctx.chat.id, "[ultron] loading NVIDIA models…");
+  await send(ctx.chat.id, `[ultron] loading ${config.provider} models…`);
   try {
-    const baseUrl = config.nemotronBaseUrl.replace(/\/+$/, "");
-    const response = await fetch(`${baseUrl}/models`, {
-      headers: { Accept: "application/json", Authorization: `Bearer ${config.nvidiaApiKey}` },
-    });
-    if (!response.ok) throw new Error(`NVIDIA returned HTTP ${response.status}`);
-    const payload = (await response.json()) as { data?: { id?: unknown }[] };
-    const ids = (payload.data ?? [])
-      .map((m) => (typeof m.id === "string" ? m.id : undefined))
-      .filter((id): id is string => Boolean(id))
-      .sort();
+    const ids = (await listAvailableModels()).map((m) => m.id).sort();
     const matches = (query ? ids.filter((id) => id.toLowerCase().includes(query)) : ids)
       .filter((id) => `model:${id}`.length <= 64)
       .slice(0, 20);
@@ -789,8 +783,20 @@ bot.command("model", async (ctx) => {
     });
     await send(ctx.chat.id, `Current: ${config.nemotronModel}\nSelect a model:`, { reply_markup: keyboard });
   } catch (error) {
-    await send(ctx.chat.id, `[ultron] could not list NVIDIA models: ${error instanceof Error ? error.message : String(error)}`);
+    await send(ctx.chat.id, `[ultron] could not list ${config.provider} models: ${error instanceof Error ? error.message : String(error)}`);
   }
+});
+
+bot.command("provider", async (ctx) => {
+  const requested = ctx.match?.trim().toLowerCase();
+  const next: LlmProvider = requested === "nvidia" || requested === "deepseek" ? requested : config.provider === "nvidia" ? "deepseek" : "nvidia";
+  if (next === "deepseek" && !config.deepseekApiKey) {
+    await send(ctx.chat.id, "[ultron] DEEPSEEK_API_KEY is not set — cannot switch to DeepSeek (see .env.example).");
+    return;
+  }
+  setActiveProvider(next);
+  graph = buildGraph();
+  await send(ctx.chat.id, `[ultron] provider set to ${next} (model: ${config.nemotronModel}).`);
 });
 
 bot.command("quit", async (ctx) => {
@@ -885,7 +891,7 @@ bot.callbackQuery(/^model:(\d+)$/, async (ctx) => {
     await send(ctx.chat!.id, "[ultron] selection expired — run /model again.");
     return;
   }
-  config.nemotronModel = id;
+  setActiveModel(id);
   graph = buildGraph();
   await ctx.editMessageText(`[ultron] model set to ${id}.`).catch(() => {});
 });

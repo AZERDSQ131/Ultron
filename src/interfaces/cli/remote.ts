@@ -135,6 +135,7 @@ async function main() {
   let eventPollBusy = false;
   let currentContextLine = "";
   let modelName = "";
+  let providerName = "";
   let toolCount = 0;
 
   const syncEventCursor = async (): Promise<void> => {
@@ -183,6 +184,7 @@ async function main() {
   const refreshStatus = async (): Promise<{ contextTokens: number; maxTokens: number; goal: Goal | null }> => {
     const data = await apiGet(`/api/status?chatId=${encodeURIComponent(currentChatId)}`);
     modelName = data.model;
+    providerName = data.provider ?? providerName;
     toolCount = data.toolCount;
     return data;
   };
@@ -199,14 +201,14 @@ async function main() {
   let verbose = false;
 
   const changeModel = async (contextLine: string): Promise<void> => {
-    appendTranscript(uiDim("[ultron] loading NVIDIA models…\n"));
+    appendTranscript(uiDim(`[ultron] loading ${providerName || "provider"} models…\n`));
     renderScreen("", 0, contextLine);
     flushRender();
     try {
       const data = await apiGet("/api/models");
       const models: NvidiaModelInfo[] = data.models;
       if (models.length === 0) {
-        appendTranscript(chalk.yellow("[ultron] NVIDIA returned no models.\n\n"));
+        appendTranscript(chalk.yellow("[ultron] no models available.\n\n"));
         return;
       }
       const selected = await pickModel(contextLine, models, data.current);
@@ -219,8 +221,22 @@ async function main() {
         : " · context fallback in use";
       appendTranscript(uiDim(`[ultron] model set to ${selected.id}${contextLabel}.\n\n`));
     } catch (error) {
-      appendTranscript(chalk.red(`[ultron] could not list NVIDIA models: ${error instanceof Error ? error.message : String(error)}\n\n`));
+      appendTranscript(chalk.red(`[ultron] could not list models: ${error instanceof Error ? error.message : String(error)}\n\n`));
     }
+  };
+
+  const changeProvider = async (contextLine: string): Promise<void> => {
+    try {
+      const data = await apiGet("/api/provider");
+      const next = data.current === "nvidia" ? "deepseek" : "nvidia";
+      await apiPatch("/api/provider", { provider: next });
+      await refreshStatus();
+      printBanner(modelName);
+      appendTranscript(uiDim(`[ultron] provider set to ${next} (model: ${modelName}).\n\n`));
+    } catch (error) {
+      appendTranscript(chalk.red(`[ultron] could not switch provider: ${error instanceof Error ? error.message : String(error)}\n\n`));
+    }
+    renderScreen("", 0, contextLine);
   };
 
   const deleteCurrentChat = async (): Promise<void> => {
@@ -452,9 +468,12 @@ async function main() {
           case "/model":
             await changeModel(contextLine);
             continue;
+          case "/provider":
+            await changeProvider(contextLine);
+            continue;
           case "/status": {
             const chat = (await apiGet("/api/chats")).chats.find((c: Chat) => c.id === currentChatId);
-            printStatus(modelName, toolCount, thinkingMode, taskMode, verbose, currentChatId, chat?.securityMode ?? "bypass", status.goal ?? undefined);
+            printStatus(modelName, toolCount, thinkingMode, taskMode, verbose, currentChatId, chat?.securityMode ?? "bypass", status.goal ?? undefined, providerName);
             continue;
           }
           case "/context":

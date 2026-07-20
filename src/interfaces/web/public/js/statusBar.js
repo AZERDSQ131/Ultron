@@ -6,6 +6,7 @@ const modelLabel = document.getElementById("model-label");
 const contextLabel = document.getElementById("context-label");
 const contextFill = document.getElementById("context-fill");
 const settingsModel = document.getElementById("settings-model");
+const settingsProvider = document.getElementById("settings-provider");
 const settingsToolCount = document.getElementById("settings-tool-count");
 const modelMenu = document.getElementById("model-menu");
 const modelSearch = document.getElementById("model-search");
@@ -32,6 +33,7 @@ export async function loadStatus() {
     modelLabel.textContent = data.model;
     activeModelName.textContent = data.model;
     settingsModel.textContent = data.model;
+    settingsProvider.textContent = data.provider ?? "—";
     settingsToolCount.textContent = String(data.toolCount);
     updateContextGauge(data.contextTokens, data.maxTokens);
     updateGoalWidget(data.goal);
@@ -88,6 +90,16 @@ async function loadModelPicker() {
   } catch {
     modelOptions.innerHTML = '<div class="model-empty">Could not load models</div>';
   }
+}
+
+// Called after switching provider (composer.js's /provider command) — the
+// model picker's cached list belongs to whichever provider was active when
+// it last loaded, so a provider switch needs a fresh fetch instead of just
+// re-rendering the stale one.
+export async function reloadModelPicker() {
+  activeModel = "";
+  await loadModelPicker();
+  await loadStatus();
 }
 
 export function openModelMenu() {

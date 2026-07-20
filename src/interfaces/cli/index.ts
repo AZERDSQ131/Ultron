@@ -14,8 +14,9 @@ import {
   type ToolApprovalDecision,
 } from "../../core/graph.js";
 import { withThreadLock } from "../../core/threadLock.js";
-import { config } from "../../config.js";
+import { config, setActiveModel, setActiveProvider, type LlmProvider } from "../../config.js";
 import { formatTurnStats } from "../../core/llm/usage.js";
+import { listAvailableModels, resolveModelContext } from "../../core/llm/models.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } from "../../core/memory/health.js";
@@ -72,79 +73,6 @@ import {
 // ULTRON_SERVER_URL — the two share every rendering primitive (ui.ts) so
 // they look and behave identically; only how a turn actually gets executed
 // differs.
-
-async function listNvidiaModels(): Promise<NvidiaModelInfo[]> {
-  const baseUrl = config.nemotronBaseUrl.replace(/\/+$/, "");
-  const response = await fetch(`${baseUrl}/models`, {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${config.nvidiaApiKey}`,
-    },
-  });
-  if (!response.ok) throw new Error(`NVIDIA returned HTTP ${response.status}`);
-  const payload = (await response.json()) as {
-    data?: { id?: unknown; max_model_len?: unknown; max_context_length?: unknown }[];
-  };
-  return (payload.data ?? [])
-    .map((model) => {
-      if (typeof model.id !== "string" || !model.id) return undefined;
-      const rawContext = model.max_model_len ?? model.max_context_length;
-      const contextWindowTokens = typeof rawContext === "number"
-        ? rawContext
-        : typeof rawContext === "string" && /^\d+$/.test(rawContext)
-          ? Number(rawContext)
-          : undefined;
-      return {
-        id: model.id,
-        ...(contextWindowTokens && Number.isSafeInteger(contextWindowTokens) && contextWindowTokens > 0
-          ? { contextWindowTokens }
-          : {}),
-      };
-    })
-    .filter((model): model is NvidiaModelInfo => Boolean(model))
-    .sort((a, b) => a.id.localeCompare(b.id));
-}
-
-const modelContextCache = new Map<string, number | undefined>();
-
-async function resolveNvidiaModelContext(model: NvidiaModelInfo): Promise<NvidiaModelInfo> {
-  if (model.contextWindowTokens) return model;
-  if (modelContextCache.has(model.id)) {
-    const contextWindowTokens = modelContextCache.get(model.id);
-    return contextWindowTokens ? { ...model, contextWindowTokens } : model;
-  }
-
-  try {
-    const modelPath = model.id.split("/").map(encodeURIComponent).join("/");
-    const response = await fetch(`https://build.nvidia.com/${modelPath}/modelcard`, {
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const html = await response.text();
-    // Hosted NIM's /v1/models omits max_model_len. The NVIDIA model card
-    // exposes the same capability in its description (for example, "1M
-    // context" or "1,000,000 tokens").
-    const contextMatch = html.match(/(?:([\d][\d,.]*)\s*(million|[kKmM])\s*[- ]?token(?:s)?\s*context|context(?: window| length)?[^\d]{0,40}([\d][\d,.]*)\s*(million|[kKmM])?\s*token(?:s)?)/i);
-    const value = contextMatch?.[1] ?? contextMatch?.[3];
-    const unit = (contextMatch?.[2] ?? contextMatch?.[4] ?? "").toLowerCase();
-    if (!value) {
-      modelContextCache.set(model.id, undefined);
-      return model;
-    }
-    const numeric = Number(value.replace(/,/g, ""));
-    const multiplier = unit === "million" || unit === "m" ? 1_000_000 : unit === "k" ? 1_000 : 1;
-    const contextWindowTokens = numeric * multiplier;
-    if (!Number.isSafeInteger(contextWindowTokens) || contextWindowTokens <= 0) {
-      modelContextCache.set(model.id, undefined);
-      return model;
-    }
-    modelContextCache.set(model.id, contextWindowTokens);
-    return { ...model, contextWindowTokens };
-  } catch {
-    modelContextCache.set(model.id, undefined);
-    return model;
-  }
-}
 
 async function main() {
   // Must happen before anything else can log — the CLI owns raw-mode
@@ -204,23 +132,23 @@ async function main() {
   };
 
   const changeModel = async (contextLine: string): Promise<void> => {
-    appendTranscript(uiDim("[ultron] loading NVIDIA models…\n"));
+    appendTranscript(uiDim(`[ultron] loading ${config.provider} models…\n`));
     renderScreen("", 0, contextLine);
     flushRender();
     try {
-      const models = await listNvidiaModels();
+      const models = await listAvailableModels();
       if (models.length === 0) {
-        appendTranscript(chalk.yellow("[ultron] NVIDIA returned no models.\n\n"));
+        appendTranscript(chalk.yellow(`[ultron] ${config.provider} returned no models.\n\n`));
         return;
       }
       const selected = await pickModel(contextLine, models, config.nemotronModel);
       if (!selected) return;
-      const resolvedSelected = await resolveNvidiaModelContext(selected);
+      const resolvedSelected = await resolveModelContext(selected);
       if (resolvedSelected.id === config.nemotronModel) {
         applyModelContext(resolvedSelected);
         return;
       }
-      config.nemotronModel = resolvedSelected.id;
+      setActiveModel(resolvedSelected.id);
       applyModelContext(resolvedSelected);
       graph = buildGraph();
       const contextLabel = resolvedSelected.contextWindowTokens
@@ -228,17 +156,36 @@ async function main() {
         : " · context fallback in use";
       appendTranscript(uiDim(`[ultron] model set to ${resolvedSelected.id}${contextLabel}.\n\n`));
     } catch (error) {
-      appendTranscript(chalk.red(`[ultron] could not list NVIDIA models: ${error instanceof Error ? error.message : String(error)}\n\n`));
+      appendTranscript(chalk.red(`[ultron] could not list ${config.provider} models: ${error instanceof Error ? error.message : String(error)}\n\n`));
     }
+  };
+
+  const changeProvider = async (contextLine: string): Promise<void> => {
+    const next: LlmProvider = config.provider === "nvidia" ? "deepseek" : "nvidia";
+    if (next === "deepseek" && !config.deepseekApiKey) {
+      appendTranscript(chalk.red("[ultron] DEEPSEEK_API_KEY is not set — cannot switch to DeepSeek (see .env.example).\n\n"));
+      return;
+    }
+    setActiveProvider(next);
+    graph = buildGraph();
+    try {
+      const models = await listAvailableModels();
+      const currentModel = models.find((model) => model.id === config.nemotronModel);
+      applyModelContext(currentModel ? await resolveModelContext(currentModel) : undefined);
+    } catch {
+      // The provider can still be used with the configured fallback window.
+    }
+    printBanner(config.nemotronModel);
+    appendTranscript(uiDim(`[ultron] provider set to ${next} (model: ${config.nemotronModel}).\n\n`));
   };
 
   // Use the served model's advertised limit for the initial context gauge as
   // well. If the endpoint is unavailable or omits the field, retain the
   // explicit CONTEXT_WINDOW_TOKENS fallback from the environment.
   try {
-    const models = await listNvidiaModels();
+    const models = await listAvailableModels();
     const currentModel = models.find((model) => model.id === config.nemotronModel);
-    applyModelContext(currentModel ? await resolveNvidiaModelContext(currentModel) : undefined);
+    applyModelContext(currentModel ? await resolveModelContext(currentModel) : undefined);
   } catch {
     // The model can still be used with the configured fallback window.
   }
@@ -603,8 +550,11 @@ async function main() {
           case "/model":
             await changeModel(contextLine);
             continue;
+          case "/provider":
+            await changeProvider(contextLine);
+            continue;
           case "/status":
-            printStatus(config.nemotronModel, tools.length, thinkingMode, taskMode, verbose, currentChatId, chats.getSecurityMode(currentChatId), goals.get(currentChatId));
+            printStatus(config.nemotronModel, tools.length, thinkingMode, taskMode, verbose, currentChatId, chats.getSecurityMode(currentChatId), goals.get(currentChatId), config.provider);
             continue;
           case "/context": {
             const contextTokens = await estimateContextUsage(graph, currentChatId);

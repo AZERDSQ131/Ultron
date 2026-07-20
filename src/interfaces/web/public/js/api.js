@@ -65,6 +65,8 @@ export const api = {
   installSkill: (name) => fetch("/api/skills/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then(json),
   models: () => fetch("/api/models").then(json),
   setModel: (model) => fetch("/api/model", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) }).then(json),
+  provider: () => fetch("/api/provider").then(json),
+  setProvider: (provider) => fetch("/api/provider", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider }) }).then(json),
   search: (query) => fetch(`/api/search?q=${encodeURIComponent(query)}`).then(json),
   listAgents: () => fetch("/api/agents").then(json),
   createAgent: (body) => fetch("/api/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(json),
