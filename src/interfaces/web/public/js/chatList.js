@@ -36,14 +36,13 @@ function timeAgo(iso) {
   return `${Math.round(hours / 24)}d`;
 }
 
-// Every chat — including spawn_agent and schedule-owned ones — shows up
-// here now, grouped chronologically like ChatGPT's sidebar (Today /
-// Yesterday / Previous 7 days / a bucket per older month). Previously the
-// list filtered out any chat with an agentId or scheduleId, so a sub-agent
-// run or a scheduled task's execution was only reachable from the
-// Agents/Schedules panel — sometimes from NEITHER of them if it had both
-// fields set (see automation.js). A small badge distinguishes chat type
-// instead of splitting them into separate surfaces.
+// Schedule-owned chats still show here, grouped chronologically like
+// ChatGPT's sidebar (Today / Yesterday / Previous 7 days / a bucket per
+// older month), with a ⏰ badge. Agent-owned chats (chat.agentId set) are
+// deliberately excluded from this list — they clutter the day-to-day
+// timeline with sub-agent runs that aren't really "today's conversations"
+// — and are reached from the Agents panel instead (automation.js), by
+// clicking an agent to open its most recent chat.
 function dayKey(iso) {
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -78,13 +77,12 @@ function groupChats(chats) {
 
 function chatBadge(chat) {
   if (chat.scheduleId) return { icon: "⏰", label: "scheduled run" };
-  if (chat.agentId) return { icon: "🤖", label: "agent" };
   return null;
 }
 
 function renderChatList() {
   chatListEl.innerHTML = "";
-  const allChats = [...state.chatsCache].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  const allChats = [...state.chatsCache].filter((chat) => !chat.agentId).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   if (allChats.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-hint";
@@ -111,10 +109,6 @@ function renderChatList() {
     title.className = "chat-title";
     title.textContent = chat.title;
     title.title = `${chat.title} · ${timeAgo(chat.updatedAt)} ago`;
-    if (chat.agentId) {
-      const owner = state.agentsCache.find((agent) => agent.id === chat.agentId);
-      if (owner) { title.textContent = `${owner.name} · ${chat.title}`; title.title = `${owner.name} · ${chat.title}`; }
-    }
 
     const actions = document.createElement("div");
     actions.className = "chat-actions";

@@ -21,16 +21,25 @@ function openDialog() {
 }
 function closeDialog() { dialog.hidden = true; }
 
-// Agent-owned (and schedule-owned) conversations now live in the unified
-// sidebar chat list (see chatList.js's groupChats/chatBadge — 🤖/⏰ badges),
-// so this panel is purely agent/schedule management: create, delete, and
-// "start a new chat with this agent" — not a second place to browse their
-// past conversations.
+// Agent-owned chats are deliberately excluded from the unified sidebar
+// chat list (see chatList.js) — they'd clutter the day-to-day Today/
+// Yesterday timeline with sub-agent runs. This panel is where they live
+// instead: clicking an agent opens its most recent conversation, the "+"
+// button starts a new one, schedules follow the same pattern below.
 function render() {
   agentList.innerHTML = agents.length ? agents.map((a) => {
-    const chatCount = state.chatsCache.filter((chat) => chat.agentId === a.id).length;
-    return `<div class="automation-item agent-item"><span class="agent-dot"></span><span class="agent-name" title="${a.description}">${a.name}</span><span class="agent-count dim">${chatCount} chat${chatCount === 1 ? "" : "s"}</span><span class="agent-actions"><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">+</button><button class="agent-delete-btn" data-agent-id="${a.id}" title="Delete ${a.name}" aria-label="Delete ${a.name}">🗑</button></span></div>`;
+    const agentChats = state.chatsCache.filter((chat) => chat.agentId === a.id).sort((x, y) => new Date(y.updatedAt) - new Date(x.updatedAt));
+    const chatCount = agentChats.length;
+    const latestChatId = agentChats[0]?.id ?? "";
+    return `<div class="automation-item agent-item${latestChatId ? " clickable" : ""}" data-chat-id="${latestChatId}"><span class="agent-dot"></span><span class="agent-name" title="${a.description}">${a.name}</span><span class="agent-count dim">${chatCount} chat${chatCount === 1 ? "" : "s"}</span><span class="agent-actions"><button class="agent-chat-btn" data-agent-id="${a.id}" title="Start a chat with ${a.name}" aria-label="Start a chat with ${a.name}">+</button><button class="agent-delete-btn" data-agent-id="${a.id}" title="Delete ${a.name}" aria-label="Delete ${a.name}">🗑</button></span></div>`;
   }).join("") : '<div class="empty-hint">No agents</div>';
+  agentList.querySelectorAll(".agent-item[data-chat-id]").forEach((item) => {
+    if (!item.dataset.chatId) return;
+    item.addEventListener("click", async (event) => {
+      if (event.target.closest("button")) return;
+      await selectChat(item.dataset.chatId);
+    });
+  });
   agentList.querySelectorAll(".agent-chat-btn").forEach((button) => button.addEventListener("click", async (event) => {
     event.stopPropagation();
     const agent = agents.find((candidate) => candidate.id === button.dataset.agentId);
