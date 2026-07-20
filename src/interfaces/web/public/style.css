@@ -409,7 +409,18 @@ body {
 .schedule-heading { margin-top: 12px; }
 .automation-item { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: var(--radius-md); color: var(--text-dim); font-size: var(--fs-sm); }
 .automation-item:hover { background: var(--bg-raised); }
-.automation-item span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Was `span:nth-child(2)` — a positional selector that broke the moment
+   agent-toggle was added before agent-dot, silently losing nowrap on
+   agent-name and letting long names reflow between 1-2 lines on hover
+   (whatever grew/shrank the row jittered visibly). Targeting the class
+   directly survives future markup changes. min-width: 0 is required for
+   a flex child to actually shrink/ellipsize instead of overflowing. */
+.automation-item .agent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .agent-item .agent-chat-btn { opacity: 0; margin-left: auto; border: 0; border-radius: 4px; padding: 2px 5px; background: var(--accent-soft); color: var(--accent); cursor: pointer; transition: opacity .15s ease; }
 .agent-item:hover .agent-chat-btn, .agent-item:focus-within .agent-chat-btn { opacity: 1; }
 .agent-item .agent-chat-btn:hover { background: var(--accent); color: white; }
