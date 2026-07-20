@@ -192,6 +192,30 @@ body {
   }
 }
 
+/* Off-canvas drawer scrim: only relevant below the mobile breakpoint,
+   where #sidebar becomes position:fixed above everything else — dims and
+   click-dismisses the app behind it, same convention as the palette/dialog
+   overlays already used elsewhere in this file. */
+#sidebar-scrim {
+  display: none;
+}
+@media (max-width: 860px) {
+  #sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  #sidebar:not(.collapsed) ~ #sidebar-scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 /* ============================================================
    To-do panel — right side, mirrors todo_write/todo_read (see
    core/tools/todos.ts). Collapses to nothing when the active chat has no

@@ -8,6 +8,7 @@ import { closeHealthView } from "./healthView.js";
 
 const sidebar = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebar-toggle");
+const sidebarScrim = document.getElementById("sidebar-scrim");
 const chatListEl = document.getElementById("chat-list");
 const newChatBtn = document.getElementById("new-chat-btn");
 const activeChatTitle = document.getElementById("active-chat-title");
@@ -18,6 +19,7 @@ export function initChatList(injectedHandlers) {
   handlers = injectedHandlers;
   newChatBtn.addEventListener("click", () => createNewChat());
   sidebarToggle.addEventListener("click", () => sidebar.classList.toggle("collapsed"));
+  sidebarScrim.addEventListener("click", () => sidebar.classList.add("collapsed"));
   window.addEventListener("agents:loaded", renderChatList);
 }
 
