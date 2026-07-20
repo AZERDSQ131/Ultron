@@ -669,12 +669,17 @@ async function handleFinanceSummary(req: IncomingMessage, res: ServerResponse): 
   const days = Number(url.searchParams.get("days") ?? 30);
   const to = new Date().toISOString().slice(0, 10);
   const from = new Date(Date.now() - Math.max(1, days) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const monthTo = new Date().toISOString().slice(0, 10);
+  const monthFrom = `${monthTo.slice(0, 7)}-01`;
   sendJson(res, 200, {
     hasData: true,
     netWorth: finance.netWorth(),
     accounts: finance.listAccountsWithBalance(),
     netWorthHistory: finance.getNetWorthHistory(from, to),
     transactions: finance.listTransactions(50),
+    monthSummary: finance.currentMonthSummary(),
+    spendingByCategory: finance.getSpendingByCategory(monthFrom, monthTo),
+    monthlyCashFlow: finance.getMonthlyCashFlow(6),
   });
 }
 

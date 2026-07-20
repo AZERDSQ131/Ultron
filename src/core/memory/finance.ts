@@ -2,16 +2,21 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 // Personal finance tracking — accounts, daily balance snapshots, and manual
-// transactions. Deliberately manual-entry only for now (no bank sync): the
-// user doesn't yet have an Enable Banking developer account (Application
-// ID, RSA keypair, OAuth redirect URI), which any real DSP2 connector
-// would need — see the "Finance" chat discussion. Structured the same way
-// HealthRegistry is (accounts/snapshots/transactions, global, never
-// purged) so a future sync provider has an obvious place to write into
-// without a schema rework: it would just populate finance_balance_snapshots
-// on a schedule instead of a human calling finance_record_balance.
+// transactions. Deliberately manual-entry only (bank sync via Enable
+// Banking was scoped out — too much setup for a personal-use OAuth flow:
+// a developer Application ID, an RSA keypair, and a publicly reachable
+// redirect URI the Jetson doesn't have). The design instead optimizes for
+// "just say it in chat" — see getOrCreateAccount below and
+// src/core/tools/finance.ts, which auto-creates an account by name instead
+// of erroring when it doesn't exist yet, so there's no bookkeeping step
+// before logging a balance or a transaction.
 
 export type AccountType = "checking" | "savings" | "investment" | "crypto" | "loan" | "other";
+
+// Used when the user mentions a balance/transaction without naming an
+// account at all ("j'ai 500€", "j'ai payé 15€ au resto") — one default
+// wallet instead of forcing an account name on every message.
+export const DEFAULT_ACCOUNT_NAME = "Principal";
 
 export interface FinanceAccount {
   id: string;
@@ -145,6 +150,13 @@ export class FinanceRegistry {
     return row ? toAccount(row) : undefined;
   }
 
+  // Resolves an account by exact name (or id), creating it on the fly if
+  // it doesn't exist yet — the whole point being that logging a balance or
+  // a transaction never requires a separate "create account" step first.
+  getOrCreateAccount(nameOrId: string, type: AccountType = "checking", currency = "EUR"): FinanceAccount {
+    return this.getAccount(nameOrId) ?? this.findAccountByName(nameOrId) ?? this.createAccount(nameOrId, type, currency);
+  }
+
   listAccounts(): FinanceAccount[] {
     return (this.db.prepare("SELECT * FROM finance_accounts ORDER BY created_at ASC").all() as unknown as AccountRow[]).map(toAccount);
   }
@@ -219,6 +231,62 @@ export class FinanceRegistry {
 
   netWorth(): number {
     return this.listAccountsWithBalance().reduce((sum, a) => sum + (a.balance ?? 0), 0);
+  }
+
+  // Expenses only (negative amounts), grouped by category, most negative
+  // (biggest spend) first — "no category" transactions are grouped under
+  // "Other" rather than dropped, since a lot of quick manual entries won't
+  // have one.
+  getSpendingByCategory(from: string, to: string): { category: string; total: number; count: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT COALESCE(NULLIF(category, ''), 'Other') AS category, SUM(amount) AS total, COUNT(*) AS count
+         FROM finance_transactions
+         WHERE date >= ? AND date <= ? AND amount < 0
+         GROUP BY category
+         ORDER BY total ASC`,
+      )
+      .all(from, to) as unknown as { category: string; total: number; count: number }[];
+    return rows;
+  }
+
+  // Income vs. expenses per calendar month, for the last `months` months
+  // including the current one — the "am I actually saving money" chart.
+  getMonthlyCashFlow(months = 6): { month: string; income: number; expenses: number; net: number }[] {
+    const now = new Date();
+    const result: { month: string; income: number; expenses: number; net: number }[] = [];
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      const month = d.toISOString().slice(0, 7);
+      const row = this.db
+        .prepare(
+          `SELECT
+             COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS income,
+             COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS expenses
+           FROM finance_transactions
+           WHERE substr(date, 1, 7) = ?`,
+        )
+        .get(month) as { income: number; expenses: number };
+      result.push({ month, income: row.income, expenses: row.expenses, net: row.income - row.expenses });
+    }
+    return result;
+  }
+
+  // This-calendar-month income/expenses/savings-rate — the headline
+  // numbers for the dashboard hero row and finance_query's chat answer.
+  currentMonthSummary(): { income: number; expenses: number; savings: number; savingsRatePct: number | null } {
+    const month = new Date().toISOString().slice(0, 7);
+    const row = this.db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS income,
+           COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS expenses
+         FROM finance_transactions
+         WHERE substr(date, 1, 7) = ?`,
+      )
+      .get(month) as { income: number; expenses: number };
+    const savings = row.income - row.expenses;
+    return { income: row.income, expenses: row.expenses, savings, savingsRatePct: row.income > 0 ? (savings / row.income) * 100 : null };
   }
 
   addTransaction(accountId: string, description: string, amount: number, date: string = new Date().toISOString().slice(0, 10), category: string | null = null): FinanceTransaction {

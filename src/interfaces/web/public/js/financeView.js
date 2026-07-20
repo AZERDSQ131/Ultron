@@ -1,10 +1,13 @@
 // "Finance" dashboard — manual-entry accounts, balances, and transactions
-// (src/core/memory/finance.ts). No bank sync provider is wired up yet: a
-// real DSP2/Enable Banking connector needs a developer Application ID, an
-// RSA keypair, and a public OAuth redirect URI, none of which exist yet
-// (see the "Finance" chat discussion) — everything here is typed in by
-// hand, same as the health dashboard before its ingest endpoint existed.
-// Same swapped-in-view pattern as healthView.js/usageView.js.
+// (src/core/memory/finance.ts). No bank sync provider is wired up: DSP2/
+// Enable Banking would need a developer Application ID, an RSA keypair,
+// and a public OAuth redirect URI the Jetson doesn't have — scoped out as
+// too much setup. Optimized instead for "just tell ULTRON in chat": the
+// finance_* tools auto-create an account by name, so this dashboard is
+// mainly for *reading* the richer picture (spending by category, monthly
+// cash flow, net worth trend) rather than the primary way of logging
+// anything, though the inline per-account forms below still work fine for
+// that too. Same swapped-in-view pattern as healthView.js/usageView.js.
 import { api } from "./api.js";
 import { closeOtherViews } from "./viewSwitcher.js";
 
@@ -80,6 +83,53 @@ function netWorthChart(history) {
   const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
   svg.append(svgEl("polyline", { points: coords, fill: "none", stroke: "var(--good)", "stroke-width": "2" }));
   return svg;
+}
+
+// Monthly income (green) vs. expenses (accent/red) grouped bars — the
+// "am I saving money" chart, last 6 months including the current one.
+function cashFlowChart(months) {
+  const width = 600;
+  const height = 110;
+  if (!months.length) return svgEl("svg", { viewBox: `0 0 ${width} ${height}` });
+  const max = Math.max(1, ...months.flatMap((m) => [m.income, m.expenses]));
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
+  const groupWidth = width / months.length;
+  months.forEach((m, i) => {
+    const barWidth = groupWidth * 0.32;
+    const gap = groupWidth * 0.06;
+    const x0 = i * groupWidth + groupWidth * 0.15;
+    const incomeH = (m.income / max) * height;
+    const expensesH = (m.expenses / max) * height;
+    svg.append(svgEl("rect", { x: x0, y: height - incomeH, width: barWidth, height: incomeH, fill: "var(--good)", rx: 2 }));
+    svg.append(svgEl("rect", { x: x0 + barWidth + gap, y: height - expensesH, width: barWidth, height: expensesH, fill: "var(--accent)", rx: 2 }));
+  });
+  return svg;
+}
+
+// Spending-by-category breakdown, reusing the .usage-table look — biggest
+// category first, with a proportional bar like the Tokens page's tables.
+function categoryTable(rows) {
+  if (!rows.length) return el("div", { class: "empty-hint" }, [text("No spending logged this month yet.")]);
+  const maxAmount = Math.max(1, ...rows.map((r) => Math.abs(r.total)));
+  const table = el("div", { class: "usage-table" });
+  table.append(
+    el("div", { class: "usage-table-row usage-table-head" }, [
+      el("span", {}, [text("Category")]),
+      el("span", {}, [text("Transactions")]),
+      el("span", {}, [text("Total")]),
+    ]),
+  );
+  for (const row of rows) {
+    const barPct = Math.round((Math.abs(row.total) / maxAmount) * 100);
+    table.append(
+      el("div", { class: "usage-table-row" }, [
+        el("span", { class: "usage-table-key" }, [text(row.category), el("span", { class: "usage-table-bar", style: `width:${barPct}%` })]),
+        el("span", {}, [text(String(row.count))]),
+        el("span", { class: "finance-amount-negative" }, [text(fmtMoney(row.total))]),
+      ]),
+    );
+  }
+  return table;
 }
 
 let currentRangeDays = 30;
@@ -214,17 +264,39 @@ async function render() {
   view.append(el("div", { class: "usage-header-row" }, [backRow, rangePicker]));
 
   if (!data.hasData) {
-    view.append(section("Finance", [addAccountCard(), el("div", { class: "empty-hint" }, [text("No accounts tracked yet — add one above to start.")])]));
+    view.append(
+      section("Finance", [
+        el("div", { class: "empty-hint" }, [text("No data yet — just tell ULTRON a balance or a transaction in chat and it'll start tracking automatically, or add an account below.")]),
+        addAccountCard(),
+      ]),
+    );
     return;
   }
 
+  const month = data.monthSummary;
   const heroRow = el("div", { class: "hero-row" });
   heroRow.append(heroTile("Net worth", fmtMoney(data.netWorth), `${data.accounts.length} account(s)`, "hero-good"));
-  const withBalance = data.accounts.filter((a) => a.balance !== null);
-  const mostRecent = withBalance.sort((a, b) => (b.balanceDate ?? "").localeCompare(a.balanceDate ?? ""))[0];
-  heroRow.append(heroTile("Last update", mostRecent?.balanceDate ?? "—", mostRecent?.name ?? "no balance recorded", "hero-accent"));
-  heroRow.append(heroTile("Transactions", String(data.transactions.length), `last ${currentRangeDays}d window`, "hero-link"));
-  view.append(section("Overview", [heroRow, card("Net worth trend", [netWorthChart(data.netWorthHistory)], "chart-card wide")]));
+  heroRow.append(heroTile("Income this month", fmtMoney(month.income), "logged so far", "hero-link"));
+  heroRow.append(heroTile("Expenses this month", fmtMoney(month.expenses), "logged so far", "hero-accent"));
+  heroRow.append(
+    heroTile(
+      "Savings this month",
+      `${month.savings >= 0 ? "+" : ""}${fmtMoney(month.savings)}`,
+      month.savingsRatePct !== null ? `${month.savingsRatePct.toFixed(0)}% savings rate` : "no income logged yet",
+      month.savings >= 0 ? "hero-good" : "hero-warn",
+    ),
+  );
+  view.append(
+    section("Overview", [
+      heroRow,
+      el("div", { class: "chart-grid" }, [
+        card("Net worth trend", [netWorthChart(data.netWorthHistory)], "chart-card mini"),
+        card("Income (green) vs. expenses (red) — 6 months", [cashFlowChart(data.monthlyCashFlow)], "chart-card mini"),
+      ]),
+    ]),
+  );
+
+  view.append(section("Spending by category — this month", [card(`${data.spendingByCategory.length} categor${data.spendingByCategory.length === 1 ? "y" : "ies"}`, [categoryTable(data.spendingByCategory)])]));
 
   const accountsGrid = el("div", { class: "chart-grid" }, [...data.accounts.map(accountCard), addAccountCard()]);
   view.append(section("Accounts", [accountsGrid]));
