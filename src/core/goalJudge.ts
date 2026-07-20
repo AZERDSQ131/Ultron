@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { createNemotronModel } from "./llm/nemotron.js";
+import { recordUsage } from "./llm/usage.js";
 import { config as appConfig } from "../config.js";
 import { getHealthRegistry } from "./memory/health.js";
 
@@ -117,6 +118,7 @@ export async function judgeGoal(input: GoalJudgeInput, signal?: AbortSignal): Pr
     .filter((line): line is string => Boolean(line))
     .join("\n\n");
 
+  const started = Date.now();
   const response = await model.invoke(
     [
       { role: "system" as const, content: JUDGE_SYSTEM_PROMPT },
@@ -124,6 +126,7 @@ export async function judgeGoal(input: GoalJudgeInput, signal?: AbortSignal): Pr
     ],
     { signal },
   );
+  recordUsage("goal_judge", null, appConfig.nemotronModel, response.usage_metadata?.input_tokens ?? 0, response.usage_metadata?.output_tokens ?? 0, Date.now() - started);
   const raw = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
   return parseVerdict(raw);
 }

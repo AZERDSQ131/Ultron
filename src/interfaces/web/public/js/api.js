@@ -95,4 +95,5 @@ export const api = {
   memoryClear: () => fetch("/api/memory", { method: "DELETE" }).then(json),
   memoryForget: (id) => fetch(`/api/memory/${encodeURIComponent(id)}`, { method: "DELETE" }).then(json),
   healthSummary: () => fetch("/api/health-data/summary").then(json),
+  usageSummary: (days = 30) => fetch(`/api/usage/summary?days=${encodeURIComponent(days)}`).then(json),
 };

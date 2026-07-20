@@ -15,7 +15,7 @@ import {
 } from "../../core/graph.js";
 import { withThreadLock } from "../../core/threadLock.js";
 import { config, setActiveModel, setActiveProvider, nextConfiguredProvider, hasProviderCredentials, type LlmProvider } from "../../config.js";
-import { formatTurnStats } from "../../core/llm/usage.js";
+import { formatTurnStats, recordUsage } from "../../core/llm/usage.js";
 import { listAvailableModels, listModelsByProvider, resolveModelContext } from "../../core/llm/models.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
@@ -410,6 +410,7 @@ async function main() {
       // (see nemotron.ts); fall back to the chars/4 estimate only if a
       // turn was interrupted before that chunk arrived.
       const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
+      recordUsage("chat", chatId, config.nemotronModel, inputTokens ?? 0, generatedTokens, Math.round(elapsedSeconds * 1000));
       if (verbose) {
         appendTranscript(
           uiDim(

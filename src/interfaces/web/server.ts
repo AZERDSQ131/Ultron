@@ -19,7 +19,7 @@ import {
 import { config, setActiveModel, setActiveProvider, hasProviderCredentials, PROVIDER_CYCLE } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { listAvailableModels, listModelsByProvider, resolveModelContext, type ModelInfo } from "../../core/llm/models.js";
-import { formatTurnStats } from "../../core/llm/usage.js";
+import { formatTurnStats, recordUsage } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
@@ -43,6 +43,7 @@ import { abortRun, isRunning, subscribeToRun } from "../../core/runs.js";
 import { withThreadLock } from "../../core/threadLock.js";
 import { log } from "../../core/logger.js";
 import { saveUpload } from "../../core/uploads.js";
+import { getUsageRegistry } from "../../core/memory/usage.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
@@ -311,6 +312,7 @@ async function streamGraphTurn(
         // (see nemotron.ts); fall back to the chars/4 estimate only if a turn
         // was interrupted before that chunk arrived.
         const generatedTokens = outputTokens ?? Math.max(1, Math.round(generatedChars / 4));
+        recordUsage("chat", chatId, config.nemotronModel, inputTokens ?? 0, generatedTokens, Math.round(elapsedSeconds * 1000));
         const contextTokens = await estimateContextUsage(graph, chatId);
         const stats = formatTurnStats({
           model: config.nemotronModel,
@@ -632,6 +634,23 @@ async function handleHealthIngest(req: IncomingMessage, res: ServerResponse): Pr
   }
   const { dates } = getHealthRegistry(config.databasePath).ingest(payload);
   sendJson(res, 200, { status: "ok", dates });
+}
+
+// Read-only data for the "Tokens" view (public/js/usageView.js) — every
+// LLM call ULTRON has made, across every interface and provider, logged by
+// recordUsage (src/core/llm/usage.ts) at the point each call's real usage
+// is already known. `days` query param (default 30, 0 = all-time) mirrors
+// the health dashboard's own range picker.
+async function handleUsageSummary(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const daysParam = url.searchParams.get("days");
+  const days = daysParam === null ? 30 : Number(daysParam);
+  const usage = getUsageRegistry(config.databasePath);
+  if (!usage.hasData()) {
+    sendJson(res, 200, { hasData: false });
+    return;
+  }
+  sendJson(res, 200, { hasData: true, ...usage.summary(days > 0 ? days : undefined) });
 }
 
 // Read-only data for the health dashboard view (public/js/healthView.js,
@@ -1081,6 +1100,10 @@ const server = createServer((req, res) => {
   }
   if (req.method === "GET" && path === "/api/health-data/summary") {
     handleHealthSummary(res).catch((err) => console.error("[ultron-web] health summary failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/usage/summary") {
+    handleUsageSummary(req, res).catch((err) => console.error("[ultron-web] usage summary failed:", err));
     return;
   }
   if (req.method === "GET" && path === "/api/memory") {

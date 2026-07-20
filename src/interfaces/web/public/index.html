@@ -21,6 +21,9 @@
     <button type="button" id="health-nav-btn" class="rail-btn">
       <span class="icon">🩺</span> Health
     </button>
+    <button type="button" id="usage-nav-btn" class="rail-btn">
+      <span class="icon">◈</span> Tokens
+    </button>
     <div id="chat-list" aria-label="Chats"></div>
     <section id="automation-panel" aria-label="Agents and schedules">
       <div class="panel-heading"><span>Agents</span><button type="button" id="new-agent-btn" class="icon-btn" title="New agent">+</button></div>
@@ -56,6 +59,11 @@
          place and switching back to any chat returns you to it exactly
          where you left off. -->
     <section id="health-view" class="health-view" hidden></section>
+
+    <!-- Tokens dashboard — every LLM call ULTRON has made (see
+         src/core/memory/usage.ts), same swapped-in-view pattern as
+         health-view above (usageView.js). -->
+    <section id="usage-view" class="health-view" hidden></section>
 
     <footer>
       <div id="command-menu" class="command-menu" hidden></div>

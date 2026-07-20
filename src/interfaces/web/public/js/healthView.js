@@ -374,6 +374,13 @@ function logTimeline(title, entries, subtitleOf) {
 }
 
 export function openHealthView() {
+  // Not imported from usageView.js (mutual exclusivity would need it back
+  // the other way too, i.e. a circular import) — reach into the Tokens
+  // view's DOM directly instead, same trick usageView.js uses for this one.
+  const usageView = document.getElementById("usage-view");
+  const usageNavBtn = document.getElementById("usage-nav-btn");
+  usageView.hidden = true;
+  usageNavBtn.classList.remove("active");
   thread.hidden = true;
   footer.hidden = true;
   view.hidden = false;

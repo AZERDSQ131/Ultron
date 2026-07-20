@@ -2252,6 +2252,73 @@ kbd {
   gap: 14px;
   align-items: start;
 }
+
+/* Tokens view (usageView.js) — the range picker + breakdown/recent tables
+   it adds on top of the shared .health-view/.hero-row/.chart-grid
+   scaffolding from healthView.js. */
+.usage-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.usage-range-picker {
+  display: flex;
+  gap: 6px;
+}
+.usage-range-picker .rail-btn {
+  width: auto;
+  padding: 6px 12px;
+}
+.usage-table {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--fs-sm);
+}
+.usage-table-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.6fr) 0.7fr 1.4fr 0.7fr;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+.usage-table-recent .usage-table-row {
+  grid-template-columns: 1.3fr 1.4fr 1fr 1.4fr 0.6fr 0.7fr;
+}
+.usage-table-row:last-child {
+  border-bottom: 0;
+}
+.usage-table-head {
+  color: var(--text-dimmer);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--line);
+}
+.usage-table-key {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-weight: 600;
+}
+.usage-table-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-soft);
+  z-index: -1;
+  border-radius: var(--radius-sm);
+}
+.usage-table-model {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .log-timeline {
   display: flex;
   flex-direction: column;

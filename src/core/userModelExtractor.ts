@@ -1,5 +1,6 @@
 import { config as appConfig } from "../config.js";
 import { createNemotronModel } from "./llm/nemotron.js";
+import { recordUsage } from "./llm/usage.js";
 import { getUserModelRegistry, type ObservationCategory } from "./memory/userModel.js";
 import { log } from "./logger.js";
 
@@ -55,9 +56,11 @@ export async function extractUserModelObservation(
   humanMessage: string,
   aiMessage: string,
   signal?: AbortSignal,
+  chatId: string | null = null,
 ): Promise<ExtractedObservation | undefined> {
   if (!humanMessage.trim() || !aiMessage.trim()) return undefined;
   const model = createNemotronModel("low");
+  const started = Date.now();
   const response = await model.invoke(
     [
       { role: "system" as const, content: EXTRACTOR_SYSTEM_PROMPT },
@@ -68,6 +71,7 @@ export async function extractUserModelObservation(
     ],
     { signal },
   );
+  recordUsage("user_model", chatId, appConfig.nemotronModel, response.usage_metadata?.input_tokens ?? 0, response.usage_metadata?.output_tokens ?? 0, Date.now() - started);
   const raw = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
   return parseObservation(raw);
 }
@@ -80,7 +84,7 @@ export async function extractUserModelObservation(
 // retrying.
 export async function recordUserModelObservation(chatId: string, humanText: string, aiText: string): Promise<void> {
   try {
-    const observation = await extractUserModelObservation(humanText, aiText);
+    const observation = await extractUserModelObservation(humanText, aiText, undefined, chatId);
     if (!observation) return;
     getUserModelRegistry(appConfig.databasePath).add(observation.content, observation.category, chatId);
   } catch (err) {

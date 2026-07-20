@@ -15,7 +15,7 @@ import {
 } from "../../core/graph.js";
 import { markdownToTelegramHtml } from "./format.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import { formatTurnStats } from "../../core/llm/usage.js";
+import { formatTurnStats, recordUsage } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } from "../../core/memory/health.js";
@@ -339,12 +339,14 @@ async function runSingleTurn(
       await safeEditMessage(telegramChatId, placeholder.message_id, visibleText.trim() || "(empty reply)");
       if (visibleText.trim()) chatEvents.append(ultronChatId, "ai", "telegram", visibleText.trim());
 
+      const elapsedSeconds = (Date.now() - turnStarted) / 1000;
+      const generatedTokens = outputTokens ?? Math.max(1, Math.round(finalText.length / 4));
+      recordUsage("chat", ultronChatId, config.nemotronModel, inputTokens ?? 0, generatedTokens, Math.round(elapsedSeconds * 1000));
+
       // A separate message, sent after the reply is already on screen —
       // not appended to it — per explicit request: the stats line is a
       // distinct piece of information, not part of the answer.
       if (session.verbose) {
-        const elapsedSeconds = (Date.now() - turnStarted) / 1000;
-        const generatedTokens = outputTokens ?? Math.max(1, Math.round(finalText.length / 4));
         await send(
           telegramChatId,
           formatTurnStats({ model: config.nemotronModel, inputTokens: inputTokens ?? 0, outputTokens: generatedTokens, elapsedSeconds }),

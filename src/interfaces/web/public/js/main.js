@@ -9,6 +9,7 @@ import { initAutomation } from "./automation.js";
 import { initTodos } from "./todos.js";
 import { initArchivePanel } from "./archivePanel.js";
 import { initHealthView } from "./healthView.js";
+import { initUsageView } from "./usageView.js";
 import { initGoalWidget } from "./goalWidget.js";
 
 initThread({ onEditLast: editLast, onRegenerateLast: regenerateLast });
@@ -21,6 +22,7 @@ initAutomation();
 initTodos();
 initArchivePanel();
 initHealthView();
+initUsageView();
 initGoalWidget();
 
 (async () => {

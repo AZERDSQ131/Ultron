@@ -1,4 +1,6 @@
 import { createVisionModel } from "../llm/nemotron.js";
+import { recordUsage } from "../llm/usage.js";
+import { config } from "../../config.js";
 
 // Turns a meal/exercise photo into structured data — same "separate cheap
 // LLM call fed only what it needs" pattern as narrator.ts/goalJudge.ts, but
@@ -57,6 +59,7 @@ function parseAnalysis(raw: string): PhotoAnalysis {
 
 export async function analyzeHealthPhoto(imageBase64: string, mimeType: string, caption: string | undefined, signal?: AbortSignal): Promise<PhotoAnalysis> {
   const model = createVisionModel();
+  const started = Date.now();
   const response = await model.invoke(
     [
       { role: "system" as const, content: ANALYZER_SYSTEM_PROMPT },
@@ -70,6 +73,7 @@ export async function analyzeHealthPhoto(imageBase64: string, mimeType: string, 
     ],
     { signal },
   );
+  recordUsage("vision", null, config.visionModel, response.usage_metadata?.input_tokens ?? 0, response.usage_metadata?.output_tokens ?? 0, Date.now() - started, "nvidia");
   const raw = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
   return parseAnalysis(raw);
 }

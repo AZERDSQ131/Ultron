@@ -1,4 +1,6 @@
 import { createNemotronModel } from "../llm/nemotron.js";
+import { recordUsage } from "../llm/usage.js";
+import { config } from "../../config.js";
 import type { HealthAnomaly } from "./trends.js";
 import type { HealthRecords, HealthSleepDebt } from "../memory/health.js";
 import type { BioAgeResult } from "./bioAge.js";
@@ -53,6 +55,7 @@ function buildUserPrompt(input: HealthNarrationInput): string {
 
 export async function narrateHealth(input: HealthNarrationInput, signal?: AbortSignal): Promise<string> {
   const model = createNemotronModel("low");
+  const started = Date.now();
   const response = await model.invoke(
     [
       { role: "system" as const, content: NARRATOR_SYSTEM_PROMPT },
@@ -60,6 +63,7 @@ export async function narrateHealth(input: HealthNarrationInput, signal?: AbortS
     ],
     { signal },
   );
+  recordUsage("narrator", null, config.nemotronModel, response.usage_metadata?.input_tokens ?? 0, response.usage_metadata?.output_tokens ?? 0, Date.now() - started);
   const raw = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
   return raw.trim();
 }
@@ -91,6 +95,7 @@ function buildLogPrompt(kind: "meal" | "exercise", analysis: PhotoAnalysis, capt
 
 export async function narrateLoggedEntry(kind: "meal" | "exercise", analysis: PhotoAnalysis, caption: string | null, signal?: AbortSignal): Promise<string> {
   const model = createNemotronModel("low");
+  const started = Date.now();
   const response = await model.invoke(
     [
       { role: "system" as const, content: LOG_NARRATOR_SYSTEM_PROMPT },
@@ -98,6 +103,7 @@ export async function narrateLoggedEntry(kind: "meal" | "exercise", analysis: Ph
     ],
     { signal },
   );
+  recordUsage("narrator", null, config.nemotronModel, response.usage_metadata?.input_tokens ?? 0, response.usage_metadata?.output_tokens ?? 0, Date.now() - started);
   const raw = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
   return raw.trim();
 }
