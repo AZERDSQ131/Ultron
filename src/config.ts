@@ -17,6 +17,11 @@ export const config = {
   nvidiaApiKey: required("NVIDIA_API_KEY"),
   nemotronModel: process.env.NEMOTRON_MODEL ?? "deepseek-ai/deepseek-v4-flash",
   nemotronBaseUrl: process.env.NEMOTRON_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
+  // Separate vision-capable model for meal/exercise photo analysis (see
+  // src/core/health/visionAnalyzer.ts) — the main chat model
+  // (nemotronModel) is text-only, so photos go to NVIDIA's own
+  // Nemotron-branded VL model instead of a non-NVIDIA provider.
+  visionModel: process.env.HEALTH_VISION_MODEL ?? "nvidia/nemotron-nano-12b-v2-vl",
   // Only required to run the Telegram interface (src/interfaces/telegram) —
   // not validated with required() since every other entry point (CLI, web,
   // scheduled tasks) must keep working without it.

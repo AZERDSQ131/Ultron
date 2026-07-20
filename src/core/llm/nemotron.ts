@@ -48,3 +48,21 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
   model.getNumTokens = async (content) => Math.ceil(toPlainText(content).length / 4);
   return model;
 }
+
+// Separate from createNemotronModel: the main chat model (config.nemotronModel)
+// is text-only, so meal/exercise photo analysis (visionAnalyzer.ts) goes
+// through NVIDIA's own vision-capable model instead. No thinking/streaming
+// knobs — this is a single non-streamed structured-output call, same
+// shape as narrator.ts/goalJudge.ts's "low" text calls.
+export function createVisionModel(): ChatOpenAI {
+  const model = new ChatOpenAI({
+    model: config.visionModel,
+    apiKey: config.nvidiaApiKey,
+    temperature: 0.2,
+    configuration: {
+      baseURL: config.nemotronBaseUrl,
+    },
+  });
+  model.getNumTokens = async (content) => Math.ceil(toPlainText(content).length / 4);
+  return model;
+}
