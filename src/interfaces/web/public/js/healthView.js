@@ -1,9 +1,13 @@
-// Health dashboard folded into the main app shell as a view — previously
-// public/health.html was a fully separate page (own <body>, own script, not
-// linked from index.html at all). Reuses the same GET /api/health-data/summary
-// endpoint and the same hand-rolled SVG charts (see the removed health.js),
-// just rendered into a container inside the SPA instead of a standalone
-// document, so the sidebar/header/chat list stay put while it's open.
+// Health dashboard folded into the main app shell as a view — swapped in
+// for #thread/footer (see openHealthView/closeHealthView below) so the
+// sidebar/header stay put while it's open. Organized into named sections
+// (Overview, Today, Activity, Heart & Recovery, Sleep, Records, Meals,
+// Exercises) instead of one flat card grid, and surfaces every metric
+// HealthRegistry actually extracts (see src/core/memory/health.ts's
+// HealthDay) as either a mini chart or a stat, not just a subset —
+// distance, exercise minutes, flights climbed, workout count and
+// respiratory rate previously only appeared in the "today" list, with no
+// 30-day trend at all.
 import { api } from "./api.js";
 
 const thread = document.getElementById("thread");
@@ -25,7 +29,7 @@ function el(tag, attrs = {}, children = []) {
     if (key === "class") node.className = value;
     else node.setAttribute(key, value);
   }
-  for (const child of children) node.append(child);
+  for (const child of children) if (child !== undefined) node.append(child);
   return node;
 }
 
@@ -35,30 +39,24 @@ function svgEl(tag, attrs = {}) {
   return node;
 }
 
-function scoreLineChart(days) {
-  const width = 600;
-  const height = 120;
-  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
-  const points = (key, color) => {
-    const step = width / Math.max(1, days.length - 1);
-    const coords = days.map((d, i) => `${i * step},${height - (d[key] / 100) * height}`).join(" ");
-    return svgEl("polyline", { points: coords, fill: "none", stroke: color, "stroke-width": "2" });
-  };
-  svg.append(points("recovery", "var(--good)"));
-  svg.append(points("activity", "var(--accent)"));
-  return svg;
+function text(s) {
+  return document.createTextNode(s);
 }
 
-function sleepBarChart(days) {
-  return metricBarChart(days, (d) => (d.sleepDurationSec === null ? null : d.sleepDurationSec / 3600), "var(--link)", 8);
+// ---- chart primitives ----
+
+function scoreLineChart(days) {
+  return metricLineChart(days, [
+    { valueOf: (d) => d.recovery, color: "var(--good)" },
+    { valueOf: (d) => d.activity, color: "var(--accent)" },
+  ]);
 }
 
 // Generic bar chart over `days` for any metric extracted by `valueOf`
-// (returns null to skip a day) — sleep/steps/active-energy charts all
-// share this instead of three near-identical copies.
+// (returns null to skip a day).
 function metricBarChart(days, valueOf, color, minMax = 1) {
   const width = 600;
-  const height = 120;
+  const height = 100;
   const values = days.map(valueOf).filter((v) => v !== null && v !== undefined);
   const maxValue = Math.max(minMax, ...values);
   const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none" });
@@ -66,7 +64,7 @@ function metricBarChart(days, valueOf, color, minMax = 1) {
   days.forEach((d, i) => {
     const value = valueOf(d);
     if (value === null || value === undefined) return;
-    const barHeight = (value / maxValue) * height;
+    const barHeight = Math.max(1, (value / maxValue) * height);
     svg.append(
       svgEl("rect", {
         x: i * barWidth + barWidth * 0.15,
@@ -81,11 +79,11 @@ function metricBarChart(days, valueOf, color, minMax = 1) {
   return svg;
 }
 
-// Generic multi-series line chart — used for heart rate (resting vs
-// walking) and HRV, alongside the existing recovery/activity chart.
+// Generic multi-series line chart — heart rate (resting vs walking), HRV,
+// respiratory rate and the recovery/activity trend all share this.
 function metricLineChart(days, series) {
   const width = 600;
-  const height = 120;
+  const height = 100;
   const allValues = series.flatMap(({ valueOf }) => days.map(valueOf).filter((v) => v !== null && v !== undefined));
   if (!allValues.length) return svgEl("svg", { viewBox: `0 0 ${width} ${height}` });
   const min = Math.min(...allValues);
@@ -101,7 +99,7 @@ function metricLineChart(days, series) {
       })
       .filter((p) => p !== null)
       .join(" ");
-    svg.append(svgEl("polyline", { points: coords, fill: "none", stroke: color, "stroke-width": "2" }));
+    if (coords) svg.append(svgEl("polyline", { points: coords, fill: "none", stroke: color, "stroke-width": "2" }));
   }
   return svg;
 }
@@ -127,16 +125,57 @@ function sleepStageTimeline(rawJson) {
   }
 }
 
-function bioAgeGauge(bioAge) {
-  const size = 100;
-  const svg = svgEl("svg", { viewBox: `0 0 ${size} ${size}`, width: size, height: size });
-  svg.append(svgEl("circle", { cx: size / 2, cy: size / 2, r: 40, fill: "none", stroke: "var(--line)", "stroke-width": "8" }));
-  const label = el("div", { class: "stat-big" }, [document.createTextNode(bioAge.age)]);
-  return el("div", { class: "gauge-wrap" }, [svg, label]);
+// ---- layout helpers ----
+
+function section(title, children) {
+  return el("section", { class: "health-section" }, [el("h3", { class: "health-section-title" }, [text(title)]), ...children]);
 }
 
-function card(title, children) {
-  return el("div", { class: "card" }, [el("h2", {}, [document.createTextNode(title)]), ...children]);
+function card(title, children, extraClass = "") {
+  return el("div", { class: `card${extraClass ? ` ${extraClass}` : ""}` }, [el("h2", {}, [text(title)]), ...children]);
+}
+
+function avgOf(days, valueOf) {
+  const values = days.map(valueOf).filter((v) => v !== null && v !== undefined);
+  if (!values.length) return undefined;
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+function statLine(days, valueOf, { decimals = 0, unit = "" } = {}) {
+  const values = days.map(valueOf).filter((v) => v !== null && v !== undefined);
+  if (!values.length) return "no data in range";
+  const avg = avgOf(days, valueOf);
+  return `avg ${avg.toFixed(decimals)}${unit} · ${values.length}/${days.length} day(s) logged`;
+}
+
+// A mini chart card for the Activity / Heart & Recovery grids: title, a
+// one-line average/coverage stat (so a glance at the header alone still
+// says something even with the chart collapsed on a narrow screen), then
+// the chart itself.
+function chartCard(title, days, valueOf, color, { decimals = 0, unit = "", minMax = 1 } = {}) {
+  return card(
+    title,
+    [el("div", { class: "chart-stat" }, [text(statLine(days, valueOf, { decimals, unit }))]), metricBarChart(days, valueOf, color, minMax)],
+    "chart-card mini",
+  );
+}
+
+function lineChartCard(title, days, series, legend) {
+  return card(
+    title,
+    [legend ? el("div", { class: "chart-stat" }, [text(legend)]) : undefined, metricLineChart(days, series)].filter((n) => n !== undefined),
+    "chart-card mini",
+  );
+}
+
+// ---- hero tiles (Overview section) ----
+
+function heroTile(label, big, sub, extraClass = "") {
+  return el("div", { class: `hero-tile${extraClass ? ` ${extraClass}` : ""}` }, [
+    el("div", { class: "hero-label" }, [text(label)]),
+    el("div", { class: "stat-big" }, [text(big)]),
+    sub ? el("div", { class: "stat-sub" }, [text(sub)]) : undefined,
+  ].filter((n) => n !== undefined));
 }
 
 async function render() {
@@ -145,14 +184,14 @@ async function render() {
     data = await api.healthSummary();
   } catch {
     view.innerHTML = "";
-    view.append(el("div", { class: "empty-hint" }, [document.createTextNode("Could not load health data.")]));
+    view.append(el("div", { class: "empty-hint" }, [text("Could not load health data.")]));
     return;
   }
 
   view.innerHTML = "";
   const backRow = el("div", { class: "health-back-row" }, [
     (() => {
-      const btn = el("button", { class: "rail-btn", type: "button" }, [document.createTextNode("← Back to chat")]);
+      const btn = el("button", { class: "rail-btn", type: "button" }, [text("← Back to chat")]);
       btn.addEventListener("click", closeHealthView);
       return btn;
     })(),
@@ -160,102 +199,135 @@ async function render() {
   view.append(backRow);
 
   if (!data.hasData) {
-    view.append(el("div", { class: "empty-hint" }, [document.createTextNode("No health data ingested yet.")]));
+    view.append(el("div", { class: "empty-hint" }, [text("No health data ingested yet.")]));
     return;
   }
 
-  const grid = el("div", { class: "health-grid" });
+  const { days, latestScores: latest } = data;
 
-  const latest = data.latestScores;
-  const scoreCard = card(`${latest.date} — recovery`, [
-    el("div", { class: "stat-big" }, [document.createTextNode(`${latest.recovery}/100`)]),
-    el("div", { class: "stat-sub" }, [document.createTextNode(`activity ${latest.activity}/100`)]),
-  ]);
-  if (data.anomalies?.length) {
-    scoreCard.append(el("div", { class: "anomaly-line" }, [document.createTextNode(`⚠ ${data.anomalies[0].message}`)]));
-  }
-  grid.append(scoreCard);
-
+  // ---- Overview: hero row + the headline recovery/activity trend ----
+  const heroRow = el("div", { class: "hero-row" });
+  heroRow.append(heroTile("Recovery", `${latest.recovery}`, `/100 · ${latest.date}`, "hero-good"));
+  heroRow.append(heroTile("Activity", `${latest.activity}`, "/100", "hero-accent"));
   if (data.bioAge) {
-    grid.append(card("Biological age (wellness estimate)", [bioAgeGauge(data.bioAge)]));
+    heroRow.append(heroTile("Biological age", `${data.bioAge.age}`, "wellness estimate", "hero-link"));
   }
+  heroRow.append(heroTile("Sleep debt (7d)", `${data.sleepDebt.deficitHours.toFixed(1)}h`, `${data.sleepDebt.daysCounted} night(s) recorded`, "hero-warn"));
+  const overviewChildren = [heroRow];
+  if (data.anomalies?.length) {
+    overviewChildren.push(el("div", { class: "anomaly-banner" }, data.anomalies.map((a) => el("div", { class: "anomaly-line" }, [text(`⚠ ${a.message}`)]))));
+  }
+  overviewChildren.push(card("Recovery (green) vs activity (red) — 30 days", [scoreLineChart(days)], "chart-card wide"));
+  view.append(section("Overview", overviewChildren));
 
-  grid.append(
-    card("Sleep debt (7 days)", [
-      el("div", { class: "stat-big" }, [document.createTextNode(`${data.sleepDebt.deficitHours.toFixed(1)}h`)]),
-      el("div", { class: "stat-sub" }, [document.createTextNode(`across ${data.sleepDebt.daysCounted} recorded night(s)`)]),
-    ]),
-  );
-
-  const todayDay = data.days.find((d) => d.date === latest.date);
+  // ---- Today: every metric extracted for the most recent day with data ----
+  const todayDay = days.find((d) => d.date === latest.date);
   if (todayDay) {
     const stat = (label, value, unit = "") =>
       value === null || value === undefined
         ? undefined
-        : el("li", {}, [document.createTextNode(`${label}: `), el("strong", {}, [document.createTextNode(`${value}${unit}`)])]);
-    const statsList = el(
-      "ul",
-      { class: "records-list" },
-      [
-        stat("Steps", todayDay.steps),
-        stat("Distance", todayDay.distanceKm?.toFixed(2), " km"),
-        stat("Active energy", todayDay.activeEnergyKcal?.toFixed(0), " kcal"),
-        stat("Exercise", todayDay.exerciseMinutes, " min"),
-        stat("Flights climbed", todayDay.flightsClimbed),
-        stat("Workouts", todayDay.workoutCount),
-        stat("Resting HR", todayDay.restingHR, " bpm"),
-        stat("Walking HR", todayDay.walkingHR, " bpm"),
-        stat("HRV", todayDay.hrvAvg?.toFixed(1), " ms"),
-        stat("Respiratory rate", todayDay.respiratoryRateAvg?.toFixed(1), " brpm"),
-        stat("Sleep", todayDay.sleepAsleepSec !== null && todayDay.sleepAsleepSec !== undefined ? (todayDay.sleepAsleepSec / 3600).toFixed(1) : undefined, "h asleep"),
-      ].filter((n) => n !== undefined),
-    );
-    grid.append(card(`${todayDay.date} — today's metrics`, [statsList]));
+        : el("div", { class: "stat-chip" }, [el("span", { class: "stat-chip-label" }, [text(label)]), el("span", { class: "stat-chip-value" }, [text(`${value}${unit}`)])]);
+    const chips = [
+      stat("Steps", todayDay.steps),
+      stat("Distance", todayDay.distanceKm?.toFixed(2), " km"),
+      stat("Active energy", todayDay.activeEnergyKcal?.toFixed(0), " kcal"),
+      stat("Exercise", todayDay.exerciseMinutes, " min"),
+      stat("Flights climbed", todayDay.flightsClimbed),
+      stat("Workouts", todayDay.workoutCount),
+      stat("Resting HR", todayDay.restingHR, " bpm"),
+      stat("Walking HR", todayDay.walkingHR, " bpm"),
+      stat("HRV", todayDay.hrvAvg?.toFixed(1), " ms"),
+      stat("Respiratory rate", todayDay.respiratoryRateAvg?.toFixed(1), " brpm"),
+      stat("Time asleep", todayDay.sleepAsleepSec !== null && todayDay.sleepAsleepSec !== undefined ? (todayDay.sleepAsleepSec / 3600).toFixed(1) : undefined, "h"),
+      stat("Time in bed", todayDay.sleepDurationSec !== null && todayDay.sleepDurationSec !== undefined ? (todayDay.sleepDurationSec / 3600).toFixed(1) : undefined, "h"),
+    ].filter((n) => n !== undefined);
+    view.append(section(`Today — ${todayDay.date}`, [card("All metrics for the most recent day with data", [el("div", { class: "stat-chip-grid" }, chips)])]));
   }
 
-  const recordsList = el("ul", { class: "records-list" });
+  // ---- Activity: every activity metric HealthRegistry extracts ----
+  view.append(
+    section("Activity — 30 days", [
+      el("div", { class: "chart-grid" }, [
+        chartCard("Steps", days, (d) => d.steps, "var(--accent)", { unit: " steps" }),
+        chartCard("Active energy", days, (d) => d.activeEnergyKcal, "var(--warn)", { unit: " kcal" }),
+        chartCard("Distance", days, (d) => d.distanceKm, "var(--link)", { decimals: 1, unit: " km" }),
+        chartCard("Exercise minutes", days, (d) => d.exerciseMinutes, "var(--good)", { unit: " min" }),
+        chartCard("Flights climbed", days, (d) => d.flightsClimbed, "var(--accent-dim)", { unit: " flights" }),
+        chartCard("Workouts", days, (d) => d.workoutCount, "var(--text-dim)", { decimals: 1, unit: "" }),
+      ]),
+    ]),
+  );
+
+  // ---- Heart & Recovery ----
+  view.append(
+    section("Heart & Recovery — 30 days", [
+      el("div", { class: "chart-grid" }, [
+        lineChartCard(
+          "Heart rate — resting (green) / walking (red)",
+          days,
+          [
+            { valueOf: (d) => d.restingHR, color: "var(--good)" },
+            { valueOf: (d) => d.walkingHR, color: "var(--accent)" },
+          ],
+          `resting avg ${avgOf(days, (d) => d.restingHR)?.toFixed(0) ?? "—"} bpm · walking avg ${avgOf(days, (d) => d.walkingHR)?.toFixed(0) ?? "—"} bpm`,
+        ),
+        lineChartCard("Heart rate variability (HRV)", days, [{ valueOf: (d) => d.hrvAvg, color: "var(--link)" }], statLine(days, (d) => d.hrvAvg, { decimals: 1, unit: " ms" })),
+        lineChartCard(
+          "Respiratory rate",
+          days,
+          [{ valueOf: (d) => d.respiratoryRateAvg, color: "var(--warn)" }],
+          statLine(days, (d) => d.respiratoryRateAvg, { decimals: 1, unit: " brpm" }),
+        ),
+      ]),
+    ]),
+  );
+
+  // ---- Sleep ----
+  const sleepChildren = [
+    el("div", { class: "chart-grid" }, [
+      lineChartCard(
+        "Time asleep vs. time in bed (hours)",
+        days,
+        [
+          { valueOf: (d) => (d.sleepAsleepSec === null ? null : d.sleepAsleepSec / 3600), color: "var(--link)" },
+          { valueOf: (d) => (d.sleepDurationSec === null ? null : d.sleepDurationSec / 3600), color: "var(--text-dimmer)" },
+        ],
+        `asleep avg ${statLine(days, (d) => (d.sleepAsleepSec === null ? null : d.sleepAsleepSec / 3600), { decimals: 1, unit: "h" })}`,
+      ),
+    ]),
+  ];
+  const stageTimeline = sleepStageTimeline(data.latestRawJson);
+  if (stageTimeline) sleepChildren.push(card("Last night's sleep stages", [stageTimeline], "chart-card wide"));
+  view.append(section("Sleep — 30 days", sleepChildren));
+
+  // ---- Records ----
+  const recordsList = el("div", { class: "stat-chip-grid" });
   if (data.records.bestSleepNight) {
     recordsList.append(
-      el("li", {}, [document.createTextNode("Best sleep: "), el("strong", {}, [document.createTextNode(`${(data.records.bestSleepNight.durationSec / 3600).toFixed(1)}h`)]), document.createTextNode(` (${data.records.bestSleepNight.date})`)]),
+      el("div", { class: "stat-chip" }, [
+        el("span", { class: "stat-chip-label" }, [text(`Best sleep (${data.records.bestSleepNight.date})`)]),
+        el("span", { class: "stat-chip-value" }, [text(`${(data.records.bestSleepNight.durationSec / 3600).toFixed(1)}h`)]),
+      ]),
     );
   }
   if (data.records.lowestRestingHR) {
     recordsList.append(
-      el("li", {}, [document.createTextNode("Lowest resting HR: "), el("strong", {}, [document.createTextNode(`${data.records.lowestRestingHR.value}`)]), document.createTextNode(` (${data.records.lowestRestingHR.date})`)]),
+      el("div", { class: "stat-chip" }, [
+        el("span", { class: "stat-chip-label" }, [text(`Lowest resting HR (${data.records.lowestRestingHR.date})`)]),
+        el("span", { class: "stat-chip-value" }, [text(`${data.records.lowestRestingHR.value} bpm`)]),
+      ]),
     );
   }
-  recordsList.append(el("li", {}, [document.createTextNode(`Activity streak: `), el("strong", {}, [document.createTextNode(`${data.records.currentActivityStreakDays} day(s)`)])]));
-  grid.append(card("Records", [recordsList]));
-
-  grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Recovery (green) / Activity (red) — 30 days")]), scoreLineChart(data.days)]));
-  grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Sleep duration — 30 days")]), sleepBarChart(data.days)]));
-  grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Steps — 30 days")]), metricBarChart(data.days, (d) => d.steps, "var(--accent)")]));
-  grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Active energy (kcal) — 30 days")]), metricBarChart(data.days, (d) => d.activeEnergyKcal, "var(--warn)")]));
-  grid.append(
-    el("div", { class: "card chart-card" }, [
-      el("h2", {}, [document.createTextNode("Heart rate — resting (green) / walking (red) — 30 days")]),
-      metricLineChart(data.days, [
-        { valueOf: (d) => d.restingHR, color: "var(--good)" },
-        { valueOf: (d) => d.walkingHR, color: "var(--accent)" },
-      ]),
-    ]),
+  recordsList.append(
+    el("div", { class: "stat-chip" }, [el("span", { class: "stat-chip-label" }, [text("Activity streak")]), el("span", { class: "stat-chip-value" }, [text(`${data.records.currentActivityStreakDays} day(s)`)])]),
   );
-  grid.append(
-    el("div", { class: "card chart-card" }, [
-      el("h2", {}, [document.createTextNode("HRV (ms) — 30 days")]),
-      metricLineChart(data.days, [{ valueOf: (d) => d.hrvAvg, color: "var(--link)" }]),
-    ]),
-  );
+  view.append(section("Records", [card("Personal bests & streaks", [recordsList])]));
 
-  const stageTimeline = sleepStageTimeline(data.latestRawJson);
-  if (stageTimeline) {
-    grid.append(el("div", { class: "card chart-card" }, [el("h2", {}, [document.createTextNode("Last night's sleep stages")]), stageTimeline]));
-  }
-
-  view.append(grid);
-
-  if (data.meals?.length) view.append(logTimeline("Meals", data.meals, mealSubtitle));
-  if (data.exercises?.length) view.append(logTimeline("Exercises", data.exercises, exerciseSubtitle));
+  // ---- Meals & Exercises ----
+  const logsRow = el("div", { class: "logs-row" });
+  if (data.meals?.length) logsRow.append(logTimeline("Meals", data.meals, mealSubtitle));
+  if (data.exercises?.length) logsRow.append(logTimeline("Exercises", data.exercises, exerciseSubtitle));
+  if (logsRow.children.length) view.append(section("Logged meals & exercises", [logsRow]));
 }
 
 function mealSubtitle(m) {
@@ -289,16 +361,16 @@ function logTimeline(title, entries, subtitleOf) {
         el("div", { class: "log-entry" }, [
           entry.photoUrl
             ? el("img", { src: entry.photoUrl, alt: entry.description, loading: "lazy" })
-            : el("div", { class: "log-entry-noimg" }, [document.createTextNode("✎")]),
+            : el("div", { class: "log-entry-noimg" }, [text("✎")]),
           el("div", { class: "log-entry-body" }, [
-            el("div", { class: "log-entry-date" }, [document.createTextNode(entry.date)]),
-            el("div", { class: "log-entry-desc" }, [document.createTextNode(entry.description)]),
-            subtitle ? el("div", { class: "log-entry-sub" }, [document.createTextNode(subtitle)]) : undefined,
+            el("div", { class: "log-entry-date" }, [text(entry.date)]),
+            el("div", { class: "log-entry-desc" }, [text(entry.description)]),
+            subtitle ? el("div", { class: "log-entry-sub" }, [text(subtitle)]) : undefined,
           ].filter((n) => n !== undefined)),
         ]),
       );
     });
-  return el("div", { class: "card" }, [el("h2", {}, [document.createTextNode(title)]), list]);
+  return el("div", { class: "card logs-col" }, [el("h2", {}, [text(title)]), list]);
 }
 
 export function openHealthView() {
