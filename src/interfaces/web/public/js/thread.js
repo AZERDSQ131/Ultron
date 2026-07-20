@@ -271,12 +271,15 @@ export function beginToolGroup(anchorBody, { live = true } = {}) {
   let interval;
   const setLabel = (text) => { summary.textContent = text; };
 
+  const formatDuration = (seconds) => (seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`);
+  let startedAt;
+
   if (live) {
-    const startedAt = Date.now();
-    const tick = () => {
-      const seconds = Math.round((Date.now() - startedAt) / 1000);
-      setLabel(`Worked for ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`}`);
-    };
+    startedAt = Date.now();
+    // "Working" while still in progress — present tense, since it's still
+    // happening — switches to the past-tense "Worked for Xm Ys" only once
+    // finish() is called (the turn actually ended).
+    const tick = () => setLabel(`Working — ${formatDuration(Math.round((Date.now() - startedAt) / 1000))}`);
     tick();
     interval = setInterval(tick, 1000);
   } else {
@@ -292,6 +295,7 @@ export function beginToolGroup(anchorBody, { live = true } = {}) {
     },
     finish() {
       if (interval) clearInterval(interval);
+      if (live) setLabel(`Worked for ${formatDuration(Math.round((Date.now() - startedAt) / 1000))}`);
     },
   };
 }
