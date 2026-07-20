@@ -12,6 +12,7 @@ import { memoryWrite } from "./memory.js";
 import { skillRead } from "./skills.js";
 import { openApp, runAppleScript } from "./macos.js";
 import { healthIngest, healthQuery, healthSetProfile, healthReport, healthExport, logMealOrExercise } from "./health.js";
+import { financeAddAccount, financeRecordBalance, financeAddTransaction, financeQuery } from "./finance.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -44,6 +45,10 @@ export const tools: StructuredToolInterface[] = [
   healthReport,
   healthExport,
   logMealOrExercise,
+  financeAddAccount,
+  financeRecordBalance,
+  financeAddTransaction,
+  financeQuery,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -94,4 +99,10 @@ export const toolScopes: Record<string, ToolScope> = {
   health_report: "read",
   health_export: "write",
   log_meal_or_exercise: "write",
+  // Manual entry only for now (no bank sync provider wired up) — same
+  // scope reasoning as the health tools above.
+  finance_add_account: "write",
+  finance_record_balance: "write",
+  finance_add_transaction: "write",
+  finance_query: "read",
 };

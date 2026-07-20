@@ -24,6 +24,9 @@
     <button type="button" id="usage-nav-btn" class="rail-btn">
       <span class="icon">◈</span> Tokens
     </button>
+    <button type="button" id="finance-nav-btn" class="rail-btn">
+      <span class="icon">💶</span> Finance
+    </button>
     <div id="chat-list" aria-label="Chats"></div>
     <section id="automation-panel" aria-label="Agents and schedules">
       <div class="panel-heading"><span>Agents</span><button type="button" id="new-agent-btn" class="icon-btn" title="New agent">+</button></div>
@@ -64,6 +67,11 @@
          src/core/memory/usage.ts), same swapped-in-view pattern as
          health-view above (usageView.js). -->
     <section id="usage-view" class="health-view" hidden></section>
+
+    <!-- Finance dashboard — manual-entry accounts/balances/transactions
+         (no bank sync provider wired up yet, see financeView.js), same
+         swapped-in-view pattern as health-view/usage-view above. -->
+    <section id="finance-view" class="health-view" hidden></section>
 
     <footer>
       <div id="command-menu" class="command-menu" hidden></div>

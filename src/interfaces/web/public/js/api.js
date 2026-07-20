@@ -96,4 +96,12 @@ export const api = {
   memoryForget: (id) => fetch(`/api/memory/${encodeURIComponent(id)}`, { method: "DELETE" }).then(json),
   healthSummary: () => fetch("/api/health-data/summary").then(json),
   usageSummary: (days = 30) => fetch(`/api/usage/summary?days=${encodeURIComponent(days)}`).then(json),
+  financeSummary: (days = 30) => fetch(`/api/finance/summary?days=${encodeURIComponent(days)}`).then(json),
+  financeCreateAccount: (name, type, currency) =>
+    fetch("/api/finance/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, type, currency }) }).then(json),
+  financeDeleteAccount: (id) => fetch(`/api/finance/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }).then(json),
+  financeRecordBalance: (id, balance, date) =>
+    fetch(`/api/finance/accounts/${encodeURIComponent(id)}/balance`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ balance, date }) }).then(json),
+  financeAddTransaction: (id, description, amount, date, category) =>
+    fetch(`/api/finance/accounts/${encodeURIComponent(id)}/transactions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description, amount, date, category }) }).then(json),
 };

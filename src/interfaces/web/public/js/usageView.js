@@ -5,18 +5,13 @@
 // visionAnalyzer.ts). Same swapped-in-view pattern as healthView.js, not a
 // separate page, so the sidebar/header stay put.
 import { api } from "./api.js";
+import { closeOtherViews } from "./viewSwitcher.js";
 
 const thread = document.getElementById("thread");
 const footer = document.querySelector("footer");
 const view = document.getElementById("usage-view");
 const navBtn = document.getElementById("usage-nav-btn");
 const activeChatTitle = document.getElementById("active-chat-title");
-// Not imported from healthView.js to avoid a circular import (healthView
-// would need the mirror image of this to close the usage view) — both
-// views instead reach into each other's DOM directly to stay mutually
-// exclusive, same trick used for the health-view/#thread swap itself.
-const otherView = document.getElementById("health-view");
-const otherNavBtn = document.getElementById("health-nav-btn");
 
 const KIND_LABELS = {
   chat: "Chat turn",
@@ -217,8 +212,7 @@ async function render() {
 }
 
 export function openUsageView() {
-  otherView.hidden = true;
-  otherNavBtn.classList.remove("active");
+  closeOtherViews("usage-view");
   thread.hidden = true;
   footer.hidden = true;
   view.hidden = false;

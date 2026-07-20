@@ -2319,6 +2319,75 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Finance view (financeView.js) — manual account/balance/transaction
+   forms on top of the shared .health-view/.hero-row/.chart-grid/
+   .usage-table scaffolding. */
+.finance-account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.finance-add-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100px;
+}
+.finance-add-account-btn {
+  width: auto;
+  padding: 10px 18px;
+}
+.finance-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.finance-inline-form input,
+.finance-inline-form select {
+  flex: 1 1 100px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.finance-inline-form .rail-btn {
+  width: auto;
+  padding: 7px 12px;
+}
+.finance-currency-input {
+  max-width: 64px;
+  text-transform: uppercase;
+}
+.finance-add-form {
+  flex-direction: column;
+  align-items: stretch;
+}
+.finance-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.rail-btn.danger {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+.rail-btn.danger:hover {
+  background: var(--accent-soft);
+}
+.finance-amount-positive {
+  color: var(--good);
+  font-family: var(--mono);
+}
+.finance-amount-negative {
+  color: var(--accent);
+  font-family: var(--mono);
+}
 .log-timeline {
   display: flex;
   flex-direction: column;

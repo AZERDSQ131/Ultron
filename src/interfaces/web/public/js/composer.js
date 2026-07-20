@@ -20,6 +20,7 @@ import { refreshTodos } from "./todos.js";
 import { setTheme } from "./theme.js";
 import { openHealthView } from "./healthView.js";
 import { openUsageView } from "./usageView.js";
+import { openFinanceView } from "./financeView.js";
 
 // Any tool result from either of these means the panel is stale — refresh
 // it. Kept as a set so a future todo tool only needs adding here once,
@@ -100,6 +101,7 @@ export const COMMANDS = [
   { name: "/memory", desc: "list, clear, or forget auto-accumulated observations about you" },
   { name: "/health", desc: "open the health dashboard" },
   { name: "/tokens", desc: "open the token usage dashboard" },
+  { name: "/finance", desc: "open the finance dashboard" },
   { name: "/export", desc: "live-export this chat to a file: [path|on|off]" },
   { name: "/clear", desc: "clear this chat view" },
   { name: "/quit", desc: "about closing this interface" },
@@ -682,7 +684,7 @@ async function runCommand(raw) {
       "[ultron] commands: /status · /context · /stop · /retry · /compact · /archive · /resume · " +
         "/main · /delete · /think on|low|off · /task none|todo|plan|goal · /security bypass|accept_edit|manual · " +
         "/permissions · /provider [nvidia|deepseek|groq] · /model · /theme system|dark|light · /verbose on|off · /memory [clear|forget <id>] · " +
-        "/health · /tokens · /export [path|on|off] · /clear · /quit",
+        "/health · /tokens · /finance · /export [path|on|off] · /clear · /quit",
     );
     return;
   }
@@ -902,6 +904,11 @@ async function runCommand(raw) {
 
   if (command === "/tokens") {
     openUsageView();
+    return;
+  }
+
+  if (command === "/finance") {
+    openFinanceView();
     return;
   }
 

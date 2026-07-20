@@ -6,6 +6,7 @@ import { loadStatus } from "./statusBar.js";
 import { attachToRunningChat, setGenerating, syncSecurityMode } from "./composer.js";
 import { closeHealthView } from "./healthView.js";
 import { closeUsageView } from "./usageView.js";
+import { closeFinanceView } from "./financeView.js";
 
 const sidebar = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebar-toggle");
@@ -219,6 +220,7 @@ export function getChat(id) {
 export async function selectChat(id) {
   closeHealthView();
   closeUsageView();
+  closeFinanceView();
   state.activeChatId = id;
   window.dispatchEvent(new Event("chat:selected"));
   renderChatList();

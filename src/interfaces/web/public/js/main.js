@@ -10,6 +10,7 @@ import { initTodos } from "./todos.js";
 import { initArchivePanel } from "./archivePanel.js";
 import { initHealthView } from "./healthView.js";
 import { initUsageView } from "./usageView.js";
+import { initFinanceView } from "./financeView.js";
 import { initGoalWidget } from "./goalWidget.js";
 
 initThread({ onEditLast: editLast, onRegenerateLast: regenerateLast });
@@ -23,6 +24,7 @@ initTodos();
 initArchivePanel();
 initHealthView();
 initUsageView();
+initFinanceView();
 initGoalWidget();
 
 (async () => {

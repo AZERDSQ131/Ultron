@@ -44,6 +44,7 @@ import { withThreadLock } from "../../core/threadLock.js";
 import { log } from "../../core/logger.js";
 import { saveUpload } from "../../core/uploads.js";
 import { getUsageRegistry } from "../../core/memory/usage.js";
+import { getFinanceRegistry, type AccountType } from "../../core/memory/finance.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
@@ -655,6 +656,80 @@ async function handleUsageSummary(req: IncomingMessage, res: ServerResponse): Pr
   sendJson(res, 200, { hasData: true, ...usage.summary(days > 0 ? days : undefined) });
 }
 
+// Data for the "Finance" view (public/js/financeView.js) — manual-entry
+// accounts/balances/transactions (src/core/memory/finance.ts), no bank
+// sync provider wired up yet. `days` mirrors the health/usage range picker.
+async function handleFinanceSummary(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const finance = getFinanceRegistry(config.databasePath);
+  if (!finance.hasData()) {
+    sendJson(res, 200, { hasData: false });
+    return;
+  }
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const days = Number(url.searchParams.get("days") ?? 30);
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - Math.max(1, days) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  sendJson(res, 200, {
+    hasData: true,
+    netWorth: finance.netWorth(),
+    accounts: finance.listAccountsWithBalance(),
+    netWorthHistory: finance.getNetWorthHistory(from, to),
+    transactions: finance.listTransactions(50),
+  });
+}
+
+async function handleFinanceCreateAccount(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ name?: string; type?: string; currency?: string }>(req);
+  const name = payload?.name?.trim();
+  const type = payload?.type;
+  if (!name || !["checking", "savings", "investment", "crypto", "loan", "other"].includes(type ?? "")) {
+    sendJson(res, 400, { error: "name and a valid type are required" });
+    return;
+  }
+  const finance = getFinanceRegistry(config.databasePath);
+  if (finance.findAccountByName(name)) {
+    sendJson(res, 400, { error: `an account named "${name}" already exists` });
+    return;
+  }
+  const account = finance.createAccount(name, type as AccountType, payload?.currency?.trim() || "EUR");
+  sendJson(res, 200, { account });
+}
+
+async function handleFinanceDeleteAccount(res: ServerResponse, id: string): Promise<void> {
+  const finance = getFinanceRegistry(config.databasePath);
+  sendJson(res, 200, { deleted: finance.deleteAccount(id) });
+}
+
+async function handleFinanceRecordBalance(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
+  const finance = getFinanceRegistry(config.databasePath);
+  if (!finance.getAccount(id)) {
+    sendJson(res, 404, { error: "unknown account" });
+    return;
+  }
+  const payload = await readJson<{ balance?: number; date?: string }>(req);
+  if (typeof payload?.balance !== "number") {
+    sendJson(res, 400, { error: "balance (number) is required" });
+    return;
+  }
+  const snapshot = finance.recordBalance(id, payload.balance, payload.date);
+  sendJson(res, 200, { snapshot });
+}
+
+async function handleFinanceAddTransaction(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
+  const finance = getFinanceRegistry(config.databasePath);
+  if (!finance.getAccount(id)) {
+    sendJson(res, 404, { error: "unknown account" });
+    return;
+  }
+  const payload = await readJson<{ description?: string; amount?: number; date?: string; category?: string }>(req);
+  if (!payload?.description?.trim() || typeof payload.amount !== "number") {
+    sendJson(res, 400, { error: "description and amount (number) are required" });
+    return;
+  }
+  const transaction = finance.addTransaction(id, payload.description.trim(), payload.amount, payload.date, payload.category?.trim() || null);
+  sendJson(res, 200, { transaction });
+}
+
 // Read-only data for the health dashboard view (public/js/healthView.js,
 // folded into the main app shell rather than a separate page). Computes
 // per-day recovery/activity scores against the CURRENT baseline for every
@@ -1106,6 +1181,27 @@ const server = createServer((req, res) => {
   }
   if (req.method === "GET" && path === "/api/usage/summary") {
     handleUsageSummary(req, res).catch((err) => console.error("[ultron-web] usage summary failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/finance/summary") {
+    handleFinanceSummary(req, res).catch((err) => console.error("[ultron-web] finance summary failed:", err));
+    return;
+  }
+  if (req.method === "POST" && path === "/api/finance/accounts") {
+    handleFinanceCreateAccount(req, res).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  const financeAccountMatch = path.match(/^\/api\/finance\/accounts\/([^/]+)(\/balance|\/transactions)?$/);
+  if (financeAccountMatch && !financeAccountMatch[2] && req.method === "DELETE") {
+    handleFinanceDeleteAccount(res, decodeURIComponent(financeAccountMatch[1])).catch((err) => console.error("[ultron-web] finance delete account failed:", err));
+    return;
+  }
+  if (financeAccountMatch && financeAccountMatch[2] === "/balance" && req.method === "POST") {
+    handleFinanceRecordBalance(req, res, decodeURIComponent(financeAccountMatch[1])).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  if (financeAccountMatch && financeAccountMatch[2] === "/transactions" && req.method === "POST") {
+    handleFinanceAddTransaction(req, res, decodeURIComponent(financeAccountMatch[1])).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
   if (req.method === "GET" && path === "/api/memory") {
