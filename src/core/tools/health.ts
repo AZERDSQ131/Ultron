@@ -7,8 +7,11 @@ import { detectAnomalies } from "../health/trends.js";
 import { estimateBiologicalAge } from "../health/bioAge.js";
 import { narrateHealth } from "../health/narrator.js";
 import { exportHealthHistory } from "../health/export.js";
+import { getMealExerciseLogRegistry } from "../memory/mealExerciseLog.js";
+import type { RunnableConfig } from "@langchain/core/runnables";
 
 const health = getHealthRegistry(config.databasePath);
+const mealExerciseLog = getMealExerciseLogRegistry(config.databasePath);
 
 const METRICS: HealthMetric[] = [
   "steps",
@@ -243,5 +246,85 @@ export const healthExport = tool(
     name: "health_export",
     description: "Export the full health history to a Markdown file (e.g. to share with a doctor). Only call when explicitly asked.",
     schema: z.object({ path: z.string().optional().describe("Relative or absolute path; defaults to health-history.md next to the database.") }),
+  },
+);
+
+// Text-only counterpart to the Telegram photo path (visionAnalyzer.ts +
+// bot.on("message:photo") in src/interfaces/telegram/index.ts) — when the
+// user just describes a meal or exercise in a normal message instead of
+// sending a photo, this writes to the same meal_log/exercise_log tables
+// with photoPath left null. No separate model call needed here: the main
+// chat model is already reading the description, so it fills in the
+// estimate itself as tool arguments, same as any other structured call.
+export const logMealOrExercise = tool(
+  async (
+    input: {
+      kind: "meal" | "exercise";
+      description: string;
+      estimatedCalories?: number | null;
+      proteinG?: number | null;
+      carbsG?: number | null;
+      fatG?: number | null;
+      exerciseType?: string | null;
+      durationMinutes?: number | null;
+      intensity?: "low" | "moderate" | "high" | null;
+      estimatedCaloriesBurned?: number | null;
+    },
+    runConfig?: RunnableConfig,
+  ) => {
+    const chatId = runConfig?.configurable?.thread_id;
+    if (typeof chatId !== "string") return "error: no active chat to attach this log entry to";
+    const date = new Date().toISOString().slice(0, 10);
+    const timestamp = new Date().toISOString();
+    if (input.kind === "meal") {
+      mealExerciseLog.addMeal({
+        date,
+        timestamp,
+        photoPath: null,
+        caption: null,
+        description: input.description,
+        estimatedCalories: input.estimatedCalories ?? null,
+        proteinG: input.proteinG ?? null,
+        carbsG: input.carbsG ?? null,
+        fatG: input.fatG ?? null,
+        sourceChatId: chatId,
+      });
+      return `Meal logged: ${input.description}`;
+    }
+    mealExerciseLog.addExercise({
+      date,
+      timestamp,
+      photoPath: null,
+      caption: null,
+      description: input.description,
+      exerciseType: input.exerciseType ?? null,
+      durationMinutes: input.durationMinutes ?? null,
+      intensity: input.intensity ?? null,
+      estimatedCaloriesBurned: input.estimatedCaloriesBurned ?? null,
+      sourceChatId: chatId,
+    });
+    return `Exercise logged: ${input.description}`;
+  },
+  {
+    name: "log_meal_or_exercise",
+    description:
+      "Log a meal or exercise the user just described in plain text (no photo) — writes to the same health " +
+      "journal a Telegram photo would. Call this whenever the user mentions eating something or doing a workout/" +
+      "exercise, even briefly ('had eggs for breakfast', 'ran 5k this morning'), not just when explicitly asked to " +
+      "log it. Estimate the numeric fields yourself from the description (rough visual/typical-serving guesses are " +
+      "fine); use null for anything you can't reasonably estimate. Fill only the fields relevant to the kind — " +
+      "leave meal fields null for an exercise entry and vice versa.",
+    schema: z.object({
+      kind: z.enum(["meal", "exercise"]),
+      description: z.string().describe("One short sentence summarizing what was logged."),
+      estimatedCalories: z.number().nullable().optional().describe("Meal only: rough calorie estimate."),
+      proteinG: z.number().nullable().optional().describe("Meal only."),
+      carbsG: z.number().nullable().optional().describe("Meal only."),
+      fatG: z.number().nullable().optional().describe("Meal only."),
+      exerciseType: z.string().nullable().optional().describe("Exercise only, e.g. 'running', 'weights'."),
+      durationMinutes: z.number().nullable().optional().describe("Exercise only."),
+      intensity: z.enum(["low", "moderate", "high"]).nullable().optional().describe("Exercise only."),
+      estimatedCaloriesBurned: z.number().nullable().optional().describe("Exercise only."),
+    }),
   },
 );

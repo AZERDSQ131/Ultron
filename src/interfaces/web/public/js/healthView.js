@@ -287,7 +287,9 @@ function logTimeline(title, entries, subtitleOf) {
       const subtitle = subtitleOf(entry);
       list.append(
         el("div", { class: "log-entry" }, [
-          el("img", { src: entry.photoUrl, alt: entry.description, loading: "lazy" }),
+          entry.photoUrl
+            ? el("img", { src: entry.photoUrl, alt: entry.description, loading: "lazy" })
+            : el("div", { class: "log-entry-noimg" }, [document.createTextNode("✎")]),
           el("div", { class: "log-entry-body" }, [
             el("div", { class: "log-entry-date" }, [document.createTextNode(entry.date)]),
             el("div", { class: "log-entry-desc" }, [document.createTextNode(entry.description)]),

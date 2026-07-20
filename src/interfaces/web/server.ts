@@ -678,7 +678,7 @@ async function handleHealthSummary(res: ServerResponse): Promise<void> {
     proteinG: m.proteinG,
     carbsG: m.carbsG,
     fatG: m.fatG,
-    photoUrl: `/api/health-data/photo/${encodeURIComponent(m.photoPath)}`,
+    photoUrl: m.photoPath ? `/api/health-data/photo/${encodeURIComponent(m.photoPath)}` : null,
   }));
   const exercises = mealExerciseLog.getExercises(from, to).map((e) => ({
     id: e.id,
@@ -689,7 +689,7 @@ async function handleHealthSummary(res: ServerResponse): Promise<void> {
     durationMinutes: e.durationMinutes,
     intensity: e.intensity,
     estimatedCaloriesBurned: e.estimatedCaloriesBurned,
-    photoUrl: `/api/health-data/photo/${encodeURIComponent(e.photoPath)}`,
+    photoUrl: e.photoPath ? `/api/health-data/photo/${encodeURIComponent(e.photoPath)}` : null,
   }));
 
   const latestScores = { date: latest.date, recovery: latestRecovery, activity: latestActivity };

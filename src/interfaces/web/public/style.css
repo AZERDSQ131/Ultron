@@ -2062,6 +2062,18 @@ kbd {
   flex: none;
   background: var(--bg-raised);
 }
+.log-entry-noimg {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  flex: none;
+  background: var(--bg-raised);
+  color: var(--text-dimmer);
+  font-size: var(--fs-lg);
+}
 .log-entry-body {
   min-width: 0;
 }

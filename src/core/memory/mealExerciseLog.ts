@@ -1,18 +1,20 @@
 import { DatabaseSync } from "node:sqlite";
 
-// Meal/exercise photo logging — the user sends a photo (primarily via
-// Telegram, the natural "snap a photo" channel) and a vision model
-// (src/core/health/visionAnalyzer.ts) estimates the content; this table
-// stores the result plus a path to the photo on disk (see photoStorage.ts —
-// images are never stored as SQLite blobs). Global like HealthRegistry's
-// health_days: one person, one timeline, not scoped per chat, though the
-// originating chat is kept for reference.
+// Meal/exercise logging — two entry paths write into the same tables:
+// a photo sent on Telegram (src/core/health/visionAnalyzer.ts estimates
+// the content, photoPath always set) or a plain text description in any
+// conversation (the log_meal_or_exercise tool, src/core/tools/health.ts —
+// the main chat model estimates the content itself, photoPath is null).
+// Photos are never stored as SQLite blobs, only a disk path
+// (photoStorage.ts). Global like HealthRegistry's health_days: one
+// person, one timeline, not scoped per chat, though the originating chat
+// is kept for reference.
 
 export interface MealLogEntry {
   id: number;
   date: string;
   timestamp: string;
-  photoPath: string;
+  photoPath: string | null;
   caption: string | null;
   description: string;
   estimatedCalories: number | null;
@@ -26,7 +28,7 @@ export interface ExerciseLogEntry {
   id: number;
   date: string;
   timestamp: string;
-  photoPath: string;
+  photoPath: string | null;
   caption: string | null;
   description: string;
   exerciseType: string | null;
@@ -40,7 +42,7 @@ interface MealRow {
   id: number;
   date: string;
   timestamp: string;
-  photo_path: string;
+  photo_path: string | null;
   caption: string | null;
   description: string;
   estimated_calories: number | null;
@@ -54,7 +56,7 @@ interface ExerciseRow {
   id: number;
   date: string;
   timestamp: string;
-  photo_path: string;
+  photo_path: string | null;
   caption: string | null;
   description: string;
   exercise_type: string | null;
@@ -107,7 +109,7 @@ export class MealExerciseLogRegistry {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
         timestamp TEXT NOT NULL,
-        photo_path TEXT NOT NULL,
+        photo_path TEXT,
         caption TEXT,
         description TEXT NOT NULL,
         estimated_calories REAL,
@@ -122,7 +124,7 @@ export class MealExerciseLogRegistry {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
         timestamp TEXT NOT NULL,
-        photo_path TEXT NOT NULL,
+        photo_path TEXT,
         caption TEXT,
         description TEXT NOT NULL,
         exercise_type TEXT,

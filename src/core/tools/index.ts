@@ -11,7 +11,7 @@ import { planPropose } from "./plan.js";
 import { memoryWrite } from "./memory.js";
 import { skillRead } from "./skills.js";
 import { openApp, runAppleScript } from "./macos.js";
-import { healthIngest, healthQuery, healthSetProfile, healthReport, healthExport } from "./health.js";
+import { healthIngest, healthQuery, healthSetProfile, healthReport, healthExport, logMealOrExercise } from "./health.js";
 
 export type ToolScope = "read" | "write" | "destructive";
 
@@ -43,6 +43,7 @@ export const tools: StructuredToolInterface[] = [
   healthSetProfile,
   healthReport,
   healthExport,
+  logMealOrExercise,
 ];
 
 // Declared for clarity per CLAUDE.md Phase 3 — confirmation gates are off
@@ -92,4 +93,5 @@ export const toolScopes: Record<string, ToolScope> = {
   health_set_profile: "write",
   health_report: "read",
   health_export: "write",
+  log_meal_or_exercise: "write",
 };
