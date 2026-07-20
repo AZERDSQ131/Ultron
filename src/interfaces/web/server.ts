@@ -30,6 +30,8 @@ import { getHealthRegistry, pickLatestWithData, type HealthExportPayload, type H
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
 import { detectAnomalies } from "../../core/health/trends.js";
 import { estimateBiologicalAge } from "../../core/health/bioAge.js";
+import { getMealExerciseLogRegistry } from "../../core/memory/mealExerciseLog.js";
+import { resolvePhotoPath } from "../../core/health/photoStorage.js";
 import { getChatEventRegistry, type ChatEventSource } from "../../core/memory/chatEvents.js";
 import { buildContinuationPrompt, gatherCodeContext, gatherHealthContext, judgeGoal } from "../../core/goalJudge.js";
 import { listSkills, readSkill } from "../../core/skills.js";
@@ -78,6 +80,10 @@ const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
 };
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -662,8 +668,53 @@ async function handleHealthSummary(res: ServerResponse): Promise<void> {
       })
     : undefined;
 
+  const mealExerciseLog = getMealExerciseLogRegistry(config.databasePath);
+  const meals = mealExerciseLog.getMeals(from, to).map((m) => ({
+    id: m.id,
+    date: m.date,
+    timestamp: m.timestamp,
+    description: m.description,
+    estimatedCalories: m.estimatedCalories,
+    proteinG: m.proteinG,
+    carbsG: m.carbsG,
+    fatG: m.fatG,
+    photoUrl: `/api/health-data/photo/${encodeURIComponent(m.photoPath)}`,
+  }));
+  const exercises = mealExerciseLog.getExercises(from, to).map((e) => ({
+    id: e.id,
+    date: e.date,
+    timestamp: e.timestamp,
+    description: e.description,
+    exerciseType: e.exerciseType,
+    durationMinutes: e.durationMinutes,
+    intensity: e.intensity,
+    estimatedCaloriesBurned: e.estimatedCaloriesBurned,
+    photoUrl: `/api/health-data/photo/${encodeURIComponent(e.photoPath)}`,
+  }));
+
   const latestScores = { date: latest.date, recovery: latestRecovery, activity: latestActivity };
-  sendJson(res, 200, { hasData: true, from, to, days, records, sleepDebt, anomalies, bioAge, latestScores, latestRawJson: latest.rawJson });
+  sendJson(res, 200, { hasData: true, from, to, days, records, sleepDebt, anomalies, bioAge, latestScores, latestRawJson: latest.rawJson, meals, exercises });
+}
+
+// Serves meal/exercise photos from disk (see photoStorage.ts) — not under
+// PUBLIC_DIR/serveStatic since these live outside the app's static assets,
+// next to the SQLite file. Same normalize+startsWith traversal guard as
+// serveStatic. Unauthenticated like the rest of the browser-facing routes
+// (only /api/health-data/ingest requires a token — see handleHealthIngest);
+// this server is only meant to be reachable over the user's own Tailscale
+// network, not the public internet.
+function serveHealthPhoto(req: IncomingMessage, res: ServerResponse): boolean {
+  const prefix = "/api/health-data/photo/";
+  const url = req.url ?? "";
+  if (!url.startsWith(prefix)) return false;
+  const relativePath = decodeURIComponent(url.slice(prefix.length).split("?")[0]);
+  const safePath = normalize(relativePath).replace(/^(\.\.[/\\])+/, "");
+  const filePath = resolvePhotoPath(safePath);
+  if (!filePath.startsWith(resolvePhotoPath("")) || !existsSync(filePath)) return false;
+  const type = MIME_TYPES[extname(filePath)] ?? "application/octet-stream";
+  res.writeHead(200, { "Content-Type": type });
+  createReadStream(filePath).pipe(res);
+  return true;
 }
 
 // Web-UI parity for the CLI/Telegram /memory command (passive user-model
@@ -999,6 +1050,7 @@ const server = createServer((req, res) => {
     handleStatus(res, url.searchParams.get("chatId") ?? undefined).catch((err) => console.error("[ultron-web] status handler failed:", err));
     return;
   }
+  if (req.method === "GET" && serveHealthPhoto(req, res)) return;
   if (req.method === "GET" && serveStatic(req, res)) return;
 
   sendJson(res, 404, { error: "not found" });

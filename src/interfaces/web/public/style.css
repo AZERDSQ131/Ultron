@@ -2042,6 +2042,44 @@ kbd {
 .health-view .records-list li {
   padding: 3px 0;
 }
+.log-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.log-entry {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.log-entry img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex: none;
+  background: var(--bg-raised);
+}
+.log-entry-body {
+  min-width: 0;
+}
+.log-entry-date {
+  font-size: var(--fs-2xs);
+  color: var(--text-dimmer);
+}
+.log-entry-desc {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-entry-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
 .health-view .records-list strong {
   color: var(--text);
 }

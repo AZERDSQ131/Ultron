@@ -253,6 +253,50 @@ async function render() {
   }
 
   view.append(grid);
+
+  if (data.meals?.length) view.append(logTimeline("Meals", data.meals, mealSubtitle));
+  if (data.exercises?.length) view.append(logTimeline("Exercises", data.exercises, exerciseSubtitle));
+}
+
+function mealSubtitle(m) {
+  return [
+    m.estimatedCalories !== null ? `~${m.estimatedCalories} kcal` : undefined,
+    m.proteinG !== null ? `${m.proteinG}g P` : undefined,
+    m.carbsG !== null ? `${m.carbsG}g C` : undefined,
+    m.fatG !== null ? `${m.fatG}g F` : undefined,
+  ].filter((x) => x !== undefined).join(" · ");
+}
+
+function exerciseSubtitle(e) {
+  return [
+    e.exerciseType ?? undefined,
+    e.durationMinutes !== null ? `${e.durationMinutes} min` : undefined,
+    e.intensity ?? undefined,
+    e.estimatedCaloriesBurned !== null ? `~${e.estimatedCaloriesBurned} kcal` : undefined,
+  ].filter((x) => x !== undefined).join(" · ");
+}
+
+// Photo-log timeline shared by the meal and exercise sections — most
+// recent entry first, thumbnail + one-line description + subtitle stats.
+function logTimeline(title, entries, subtitleOf) {
+  const list = el("div", { class: "log-timeline" });
+  entries
+    .slice()
+    .reverse()
+    .forEach((entry) => {
+      const subtitle = subtitleOf(entry);
+      list.append(
+        el("div", { class: "log-entry" }, [
+          el("img", { src: entry.photoUrl, alt: entry.description, loading: "lazy" }),
+          el("div", { class: "log-entry-body" }, [
+            el("div", { class: "log-entry-date" }, [document.createTextNode(entry.date)]),
+            el("div", { class: "log-entry-desc" }, [document.createTextNode(entry.description)]),
+            subtitle ? el("div", { class: "log-entry-sub" }, [document.createTextNode(subtitle)]) : undefined,
+          ].filter((n) => n !== undefined)),
+        ]),
+      );
+    });
+  return el("div", { class: "card" }, [el("h2", {}, [document.createTextNode(title)]), list]);
 }
 
 export function openHealthView() {
