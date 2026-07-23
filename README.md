@@ -31,12 +31,12 @@ the same and shares the same memory no matter which one you're on:
                          │  └──────────┘   └────────────┘ │
                          └───────────────┬────────────────┘
                                          │ Tailscale (HTTP/SSE)
-                    ┌────────────────────┼────────────────────┐
-                    │                    │                    │
-             ┌──────▼──────┐     ┌───────▼──────┐     ┌───────▼──────┐
-             │  Browser     │     │  `ultron` CLI │     │  Telegram    │
-             │  (any device)│     │  (laptop/Mac) │     │  app (phone) │
-             └──────────────┘     └───────────────┘     └──────────────┘
+              ┌───────────────┬──────────┼──────────┬───────────────┐
+              │               │          │          │               │
+       ┌──────▼──────┐ ┌──────▼──────┐ ┌─▼────────┐ ┌▼──────────────┐
+       │  Browser     │ │ `ultron` CLI│ │ Telegram │ │  iOS app      │
+       │  (any device)│ │(laptop/Mac) │ │(phone)   │ │  (SwiftUI)    │
+       └──────────────┘ └─────────────┘ └──────────┘ └───────────────┘
 ```
 
 Two ways to run the CLI, both `src/interfaces/cli/`:
@@ -151,6 +151,17 @@ The web UI also has:
   the live tool list with its scopes;
 - a small set of global keyboard shortcuts (new chat, search, settings,
   toggle sidebar…) — the full list is in the Shortcuts tab of that panel.
+
+A native iOS app (`ios/`, SwiftUI, iOS 17+, zero external dependency) is a
+fourth client, in the same shape as the remote CLI: pure HTTP/SSE against the
+web server over Tailscale, no auth beyond that, no bank/database of its own.
+Its menu mirrors the web sidebar's chat list (grouped by day, agent-owned
+chats excluded) plus five modules — Finance, Health, Tokens, Skills, Memory —
+each backed by the same REST endpoints the web dashboards already use. The
+conversation screen streams the same SSE turn events (`text`/`tool_call`/
+`tool_result`/`approval_required`/`done`) as every other interface, with a
+native tool-approval card and a composer bar mirroring the web's model/task-
+mode/permission pickers. See `ios/README.md`.
 
 Mail and calendar integrations are still pending because they require OAuth.
 The separate Codex-style coding app is explicitly deferred.
@@ -291,6 +302,10 @@ src/interfaces/                      presentation layers — import from core, n
     js/markdown.js                   the same lightweight Markdown renderer as the CLI
   telegram/index.ts                  Telegram bot (grammY, long polling)
 src/config.ts                        shared configuration (env vars, paths)
+ios/                                  native iOS app (SwiftUI) — HTTP/SSE client, no backend code
+  project.yml                        XcodeGen spec (source of truth for ULTRON.xcodeproj)
+  ULTRON/Networking/ULTRONClient.swift  HTTP/SSE client mirroring cli/remote.ts's API usage
+  ULTRON/Screens/                    Menu, Chat, Finance, Health, Tokens, Skills, Memory
 MEMORY.md                            durable human-readable memory loaded each turn
 AGENT.md                             operational rules injected into the prompt
 SOUL.md                              personality rules injected into the prompt

@@ -159,6 +159,32 @@ interface at a time.
 - Still to come: mail, calendar (both need OAuth setup — bigger lift than the filesystem/shell tools)
 - Background scheduled tasks (cron-style) once the core loop is trusted
 
+## iOS app (v1 done)
+
+Native SwiftUI app (`ios/`, iOS 17+, zero external dependency), a fourth client on the same
+Tailscale HTTP/SSE model as `cli/remote.ts` — no new backend routes, no auth beyond Tailscale
+reaching the server (`ULTRONClient.swift` mirrors `remote.ts`'s API usage: chats, turn/approve
+SSE streams, models/provider, tools/skills, finance/health/usage/memory). Built with XcodeGen
+(`ios/project.yml` is the source of truth for `ULTRON.xcodeproj`, committed for direct Xcode
+opening).
+
+- Menu screen mirrors the web sidebar: modules (Finance, Health, Tokens, Skills, Memory) plus
+  a date-grouped chat list, agent-owned chats excluded (parity with `chatList.js`'s filter — no
+  Agents panel on mobile yet).
+- Chat screen: streamed text bubbles, collapsible tool-call groups with scope badges, a native
+  tool-approval card (`interrupt`/`Command`/`/api/approve`, same mechanism as CLI/web), and a
+  composer bar with model/task-mode/permission pickers. No collapsible "Thinking" block in v1 —
+  the server has no separate reasoning SSE event to consume (`streamGraphTurn` puts everything
+  in one `text` event); would need a server-side change to add one.
+- Verified manually: builds clean (`xcodebuild`, Swift 6 strict concurrency — `ULTRONClient` is
+  `@MainActor` to avoid "sending across isolation domains" errors), launched on an iOS 17
+  simulator against a live local `pnpm web` server — menu loads real chats and renders all five
+  modules. Full tap-through of every screen wasn't automated (no reliable simulator UI-automation
+  tool in this environment); the user should click through the golden path once on a real device
+  or simulator.
+- Deferred, same as everywhere else: Agents/Schedules panel, Goal mode (CLI-only today), file/photo
+  upload from mobile, push notifications.
+
 ## Jetson deployment + Mac access (in progress)
 
 Target architecture (see `docs/agent-ia-personnel.md`'s follow-up discussion, not yet written back into that file): ULTRON's process — web server, Telegram bot, database — lives permanently on a Jetson Orin Nano, reachable over Tailscale; the Mac is a client plus a remote-controllable target, not where the graph runs.

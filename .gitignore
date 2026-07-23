@@ -6,3 +6,10 @@ memory/daily/
 *.log
 .DS_Store
 ultron-state.sqlite3*
+
+# iOS (ios/)
+ios/**/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/
+ios/*.xcodeproj/xcshareddata/
+ios/DerivedData/
+*.xcuserstate

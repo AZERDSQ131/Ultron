@@ -1,0 +1,472 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0B03CA8BC058FDBFFD1E7953 /* SkillsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83596178D98A9E33F0AF9548 /* SkillsView.swift */; };
+		17C445D2EB6412B6F8FCF291 /* ComposerPickers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFFC97450AA2A233265FE7E9 /* ComposerPickers.swift */; };
+		18AC8BF9B81C068B670B6A13 /* ServerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */; };
+		33C50FE6D8FE5AF06383C0D3 /* FinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D208BF5036689DC38E4D5D66 /* FinanceView.swift */; };
+		5665C4CF81E0522F1B769BE9 /* ApprovalCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CC5A83F5B96CA4B171D1FA4 /* ApprovalCardView.swift */; };
+		5B993B28A93DBED0954A5B2C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBBD24E385B1E6D4D6D6C33 /* Models.swift */; };
+		7FBF5E273511AEA0B5FB4132 /* ULTRONApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F692CFFA71D1A83D443C9E2 /* ULTRONApp.swift */; };
+		8219F8A79D84F70F840D7546 /* HealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72BA5E1EB207C3A2D95CFEE7 /* HealthView.swift */; };
+		826A7CE5865F5D8B94A08C41 /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BDD62C16EC7F352CFA93C80 /* MessageBubble.swift */; };
+		8AC17074B995AD0EDE0F8CAA /* ULTRONClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF3E074F58F965547A5789B1 /* ULTRONClient.swift */; };
+		985A255DBC6FD88F89D3C52B /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F1D61F79F3F60C24BC6823C /* MemoryView.swift */; };
+		A4D4E18C76BBD600119F51AE /* ToolCallGroupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFFEFE62F5DF0F546B166C85 /* ToolCallGroupView.swift */; };
+		A78DF93F9EA98781039A72F7 /* SSEParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C689B11B12F99960CC4BC8BA /* SSEParser.swift */; };
+		CABBE5EDDDCCB567C6553749 /* TokensView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54BC0F0E0693727E7B30013 /* TokensView.swift */; };
+		CC20C09B781D43567E843531 /* ComposerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21F1A36BC53D6520F9EC32D /* ComposerBar.swift */; };
+		D0DEC311CE415B15EB9545F0 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB8647223A289CCEAC3A8B9F /* ChatView.swift */; };
+		D2BFB8AFA1A9AE1C62584800 /* ChatListRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8688BB904F427BE4D29CAFE /* ChatListRow.swift */; };
+		DBAF552F5921CCFCE5FE7384 /* ChatTimelineItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CD4075F78007B0D68D2B906 /* ChatTimelineItem.swift */; };
+		DC67A7830CD58EFDD674471F /* MenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74322351DC92D86FE55DB70 /* MenuView.swift */; };
+		F9914A45D2E60B4C65368A59 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9220BBD1B70581A4BF6EEF /* RootView.swift */; };
+		FF135458A99BBEB7D9D7DEE8 /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0F1D61F79F3F60C24BC6823C /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
+		252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
+		4CD4075F78007B0D68D2B906 /* ChatTimelineItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTimelineItem.swift; sourceTree = "<group>"; };
+		6F692CFFA71D1A83D443C9E2 /* ULTRONApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONApp.swift; sourceTree = "<group>"; };
+		72BA5E1EB207C3A2D95CFEE7 /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
+		83596178D98A9E33F0AF9548 /* SkillsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsView.swift; sourceTree = "<group>"; };
+		8BDD62C16EC7F352CFA93C80 /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
+		8CC5A83F5B96CA4B171D1FA4 /* ApprovalCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalCardView.swift; sourceTree = "<group>"; };
+		92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettingsView.swift; sourceTree = "<group>"; };
+		AF3E074F58F965547A5789B1 /* ULTRONClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONClient.swift; sourceTree = "<group>"; };
+		BC9220BBD1B70581A4BF6EEF /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		C21F1A36BC53D6520F9EC32D /* ComposerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerBar.swift; sourceTree = "<group>"; };
+		C54BC0F0E0693727E7B30013 /* TokensView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokensView.swift; sourceTree = "<group>"; };
+		C689B11B12F99960CC4BC8BA /* SSEParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParser.swift; sourceTree = "<group>"; };
+		CB8647223A289CCEAC3A8B9F /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		CFFC97450AA2A233265FE7E9 /* ComposerPickers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPickers.swift; sourceTree = "<group>"; };
+		D208BF5036689DC38E4D5D66 /* FinanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceView.swift; sourceTree = "<group>"; };
+		D31CB21B015ABB8FC21CFB45 /* ULTRON.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ULTRON.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E8688BB904F427BE4D29CAFE /* ChatListRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListRow.swift; sourceTree = "<group>"; };
+		ECBBD24E385B1E6D4D6D6C33 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		EFFEFE62F5DF0F546B166C85 /* ToolCallGroupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCallGroupView.swift; sourceTree = "<group>"; };
+		F74322351DC92D86FE55DB70 /* MenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuView.swift; sourceTree = "<group>"; };
+		FA61F184ECFFCD31B8A4DA43 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0269E79AFB2FCC23FF2AD721 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				BC9220BBD1B70581A4BF6EEF /* RootView.swift */,
+				6F692CFFA71D1A83D443C9E2 /* ULTRONApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		0D9DA2EC4DBB50AF11B01771 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		0FF7300BE503EA6A2283647F /* Screens */ = {
+			isa = PBXGroup;
+			children = (
+				F2C46AA73C1D757CCD734F9B /* Chat */,
+				2017C10AD3729CAD00BD3144 /* Finance */,
+				176B8AB22742853C0D98E083 /* Health */,
+				C97D357FF868829D3D50CDFF /* Memory */,
+				4AB54670B10F151A0059BB65 /* Menu */,
+				0D9DA2EC4DBB50AF11B01771 /* Settings */,
+				6377B94E2E391FA9203C9837 /* Skills */,
+				63F8524A7C946BFECD2A54AC /* Tokens */,
+			);
+			path = Screens;
+			sourceTree = "<group>";
+		};
+		176B8AB22742853C0D98E083 /* Health */ = {
+			isa = PBXGroup;
+			children = (
+				72BA5E1EB207C3A2D95CFEE7 /* HealthView.swift */,
+			);
+			path = Health;
+			sourceTree = "<group>";
+		};
+		19105DC534378B16DB03E65A /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				FA61F184ECFFCD31B8A4DA43 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		2017C10AD3729CAD00BD3144 /* Finance */ = {
+			isa = PBXGroup;
+			children = (
+				D208BF5036689DC38E4D5D66 /* FinanceView.swift */,
+			);
+			path = Finance;
+			sourceTree = "<group>";
+		};
+		4AB54670B10F151A0059BB65 /* Menu */ = {
+			isa = PBXGroup;
+			children = (
+				E8688BB904F427BE4D29CAFE /* ChatListRow.swift */,
+				F74322351DC92D86FE55DB70 /* MenuView.swift */,
+			);
+			path = Menu;
+			sourceTree = "<group>";
+		};
+		6377B94E2E391FA9203C9837 /* Skills */ = {
+			isa = PBXGroup;
+			children = (
+				83596178D98A9E33F0AF9548 /* SkillsView.swift */,
+			);
+			path = Skills;
+			sourceTree = "<group>";
+		};
+		63F8524A7C946BFECD2A54AC /* Tokens */ = {
+			isa = PBXGroup;
+			children = (
+				C54BC0F0E0693727E7B30013 /* TokensView.swift */,
+			);
+			path = Tokens;
+			sourceTree = "<group>";
+		};
+		B09184B362BEDCB66334F5D4 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				ECBBD24E385B1E6D4D6D6C33 /* Models.swift */,
+				C689B11B12F99960CC4BC8BA /* SSEParser.swift */,
+				AF3E074F58F965547A5789B1 /* ULTRONClient.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		C3937B9D11D228C23E7DC33F = {
+			isa = PBXGroup;
+			children = (
+				E7AC8B278B6F48583A398609 /* ULTRON */,
+				CD6FE961308DCAFBBBC3B106 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C97D357FF868829D3D50CDFF /* Memory */ = {
+			isa = PBXGroup;
+			children = (
+				0F1D61F79F3F60C24BC6823C /* MemoryView.swift */,
+			);
+			path = Memory;
+			sourceTree = "<group>";
+		};
+		CA1B0F4733BCFF95BD3E320C /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		CD6FE961308DCAFBBBC3B106 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D31CB21B015ABB8FC21CFB45 /* ULTRON.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E7AC8B278B6F48583A398609 /* ULTRON */ = {
+			isa = PBXGroup;
+			children = (
+				0269E79AFB2FCC23FF2AD721 /* App */,
+				B09184B362BEDCB66334F5D4 /* Networking */,
+				19105DC534378B16DB03E65A /* Resources */,
+				0FF7300BE503EA6A2283647F /* Screens */,
+				CA1B0F4733BCFF95BD3E320C /* Support */,
+			);
+			path = ULTRON;
+			sourceTree = "<group>";
+		};
+		F2C46AA73C1D757CCD734F9B /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				8CC5A83F5B96CA4B171D1FA4 /* ApprovalCardView.swift */,
+				4CD4075F78007B0D68D2B906 /* ChatTimelineItem.swift */,
+				CB8647223A289CCEAC3A8B9F /* ChatView.swift */,
+				C21F1A36BC53D6520F9EC32D /* ComposerBar.swift */,
+				CFFC97450AA2A233265FE7E9 /* ComposerPickers.swift */,
+				8BDD62C16EC7F352CFA93C80 /* MessageBubble.swift */,
+				EFFEFE62F5DF0F546B166C85 /* ToolCallGroupView.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		3D9774150E67F6E90BA0AA71 /* ULTRON */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C4360B03E3B1BB07FF10305B /* Build configuration list for PBXNativeTarget "ULTRON" */;
+			buildPhases = (
+				3BC09A2612A436816DAD67E0 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ULTRON;
+			packageProductDependencies = (
+			);
+			productName = ULTRON;
+			productReference = D31CB21B015ABB8FC21CFB45 /* ULTRON.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F22C5EE6D3C8BFB5ACFB5F2C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = DBC0CF1854D890B49D8198F6 /* Build configuration list for PBXProject "ULTRON" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = C3937B9D11D228C23E7DC33F;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = CD6FE961308DCAFBBBC3B106 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				3D9774150E67F6E90BA0AA71 /* ULTRON */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3BC09A2612A436816DAD67E0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5665C4CF81E0522F1B769BE9 /* ApprovalCardView.swift in Sources */,
+				D2BFB8AFA1A9AE1C62584800 /* ChatListRow.swift in Sources */,
+				DBAF552F5921CCFCE5FE7384 /* ChatTimelineItem.swift in Sources */,
+				D0DEC311CE415B15EB9545F0 /* ChatView.swift in Sources */,
+				CC20C09B781D43567E843531 /* ComposerBar.swift in Sources */,
+				17C445D2EB6412B6F8FCF291 /* ComposerPickers.swift in Sources */,
+				33C50FE6D8FE5AF06383C0D3 /* FinanceView.swift in Sources */,
+				8219F8A79D84F70F840D7546 /* HealthView.swift in Sources */,
+				FF135458A99BBEB7D9D7DEE8 /* MarkdownText.swift in Sources */,
+				985A255DBC6FD88F89D3C52B /* MemoryView.swift in Sources */,
+				DC67A7830CD58EFDD674471F /* MenuView.swift in Sources */,
+				826A7CE5865F5D8B94A08C41 /* MessageBubble.swift in Sources */,
+				5B993B28A93DBED0954A5B2C /* Models.swift in Sources */,
+				F9914A45D2E60B4C65368A59 /* RootView.swift in Sources */,
+				A78DF93F9EA98781039A72F7 /* SSEParser.swift in Sources */,
+				18AC8BF9B81C068B670B6A13 /* ServerSettingsView.swift in Sources */,
+				0B03CA8BC058FDBFFD1E7953 /* SkillsView.swift in Sources */,
+				CABBE5EDDDCCB567C6553749 /* TokensView.swift in Sources */,
+				A4D4E18C76BBD600119F51AE /* ToolCallGroupView.swift in Sources */,
+				7FBF5E273511AEA0B5FB4132 /* ULTRONApp.swift in Sources */,
+				8AC17074B995AD0EDE0F8CAA /* ULTRONClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		075D71FCABFD80E1E890FA66 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		2B3C1CC7F58C045A2CCDB125 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = ULTRON/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ultron.mobile;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		AD61F969F603629A506385A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = ULTRON/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ultron.mobile;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		FCF05874DFD5FAE7D8853A3A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		C4360B03E3B1BB07FF10305B /* Build configuration list for PBXNativeTarget "ULTRON" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2B3C1CC7F58C045A2CCDB125 /* Debug */,
+				AD61F969F603629A506385A9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DBC0CF1854D890B49D8198F6 /* Build configuration list for PBXProject "ULTRON" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				075D71FCABFD80E1E890FA66 /* Debug */,
+				FCF05874DFD5FAE7D8853A3A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = F22C5EE6D3C8BFB5ACFB5F2C /* Project object */;
+}
