@@ -92,8 +92,12 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
       : {}),
     // The ChatGPT-account-scoped backend speaks OpenAI's Responses API
     // shape, not chat-completions — see src/core/llm/openaiAuth.ts's header
-    // comment for the verified endpoint/token details.
-    ...(provider === "openai" ? { useResponsesApi: true } : {}),
+    // comment for the verified endpoint/token details. It also rejects any
+    // request that doesn't explicitly disable server-side storage
+    // (confirmed live: {"detail":"Store must be set to false"}) — the
+    // Codex CLI never asks it to retain responses since it keeps its own
+    // conversation state locally, same as ULTRON's own checkpointer does.
+    ...(provider === "openai" ? { useResponsesApi: true, modelKwargs: { store: false } } : {}),
     configuration: {
       baseURL,
       ...(provider === "openai" ? { fetch: openaiOAuthFetch() } : {}),
