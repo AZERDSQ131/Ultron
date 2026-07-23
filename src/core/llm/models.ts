@@ -1,6 +1,6 @@
 import { config, PROVIDER_CYCLE, type LlmProvider } from "../../config.js";
 import { getOpenAIAuthRegistry } from "../memory/openaiAuth.js";
-import { getValidAccessToken, CHATGPT_CODEX_BASE_URL } from "./openaiAuth.js";
+import { getValidAuth, codexAuthHeaders, CHATGPT_CODEX_BASE_URL } from "./openaiAuth.js";
 
 // Shared by the local CLI (src/interfaces/cli/index.ts), the web server
 // (src/interfaces/web/server.ts, which the remote CLI and Telegram's /model
@@ -87,9 +87,9 @@ async function fetchGroqModels(): Promise<ModelInfo[]> {
 // shape as NVIDIA/Groq rather than a hardcoded list like DeepSeek's two
 // fixed models.
 async function fetchOpenAIModels(): Promise<ModelInfo[]> {
-  const token = await getValidAccessToken(getOpenAIAuthRegistry(config.databasePath));
+  const { accessToken, accountId } = await getValidAuth(getOpenAIAuthRegistry(config.databasePath));
   const response = await fetch(`${CHATGPT_CODEX_BASE_URL}/models`, {
-    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    headers: { Accept: "application/json", ...codexAuthHeaders(accessToken, accountId) },
   });
   if (!response.ok) throw new Error(`ChatGPT Codex backend returned HTTP ${response.status}`);
   const payload = (await response.json()) as { data?: { id?: unknown; context_window?: unknown }[] } | { models?: { id?: unknown; context_window?: unknown }[] };

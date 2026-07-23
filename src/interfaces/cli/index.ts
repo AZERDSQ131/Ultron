@@ -21,7 +21,7 @@ import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { autoTitleChat } from "../../core/chatTitler.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getOpenAIAuthRegistry } from "../../core/memory/openaiAuth.js";
-import { requestDeviceCode, pollAndExchange, decodeAccountEmail } from "../../core/llm/openaiAuth.js";
+import { requestDeviceCode, pollAndExchange, decodeAccountEmail, decodeAccountId } from "../../core/llm/openaiAuth.js";
 import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
 import { detectAnomalies } from "../../core/health/trends.js";
@@ -203,11 +203,13 @@ async function main() {
       flushRender();
       const tokens = await pollAndExchange(session);
       const accountEmail = tokens.idToken ? decodeAccountEmail(tokens.idToken) : null;
+      const accountId = tokens.idToken ? decodeAccountId(tokens.idToken) : null;
       getOpenAIAuthRegistry(config.databasePath).save({
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         idToken: tokens.idToken,
         accountEmail,
+        accountId,
       });
       appendTranscript(uiDim(`[ultron] connected to ChatGPT${accountEmail ? ` as ${accountEmail}` : ""}. Try /provider openai.\n\n`));
     } catch (error) {

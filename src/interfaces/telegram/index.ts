@@ -37,7 +37,7 @@ import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { withThreadLock } from "../../core/threadLock.js";
 import { log } from "../../core/logger.js";
 import { getOpenAIAuthRegistry } from "../../core/memory/openaiAuth.js";
-import { requestDeviceCode, pollAndExchange, decodeAccountEmail } from "../../core/llm/openaiAuth.js";
+import { requestDeviceCode, pollAndExchange, decodeAccountEmail, decodeAccountId } from "../../core/llm/openaiAuth.js";
 
 // Third entry point alongside the CLI and the web UI (see CLAUDE.md's
 // "Interface" decision) — same buildGraph(), same shared SQLite file, so a
@@ -758,11 +758,13 @@ bot.command("login", async (ctx) => {
     pollAndExchange(session)
       .then((tokens) => {
         const accountEmail = tokens.idToken ? decodeAccountEmail(tokens.idToken) : null;
+        const accountId = tokens.idToken ? decodeAccountId(tokens.idToken) : null;
         getOpenAIAuthRegistry(config.databasePath).save({
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           idToken: tokens.idToken,
           accountEmail,
+          accountId,
         });
         void send(ctx.chat.id, `[ultron] connected to ChatGPT${accountEmail ? ` as ${accountEmail}` : ""}. Try /provider openai.`);
       })

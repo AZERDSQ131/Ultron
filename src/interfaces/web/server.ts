@@ -47,7 +47,7 @@ import { saveUpload } from "../../core/uploads.js";
 import { getUsageRegistry } from "../../core/memory/usage.js";
 import { getFinanceRegistry, type AccountType } from "../../core/memory/finance.js";
 import { getOpenAIAuthRegistry } from "../../core/memory/openaiAuth.js";
-import { requestDeviceCode, pollAndExchange, decodeAccountEmail, revoke as revokeOpenAI, type DeviceCodeSession } from "../../core/llm/openaiAuth.js";
+import { requestDeviceCode, pollAndExchange, decodeAccountEmail, decodeAccountId, revoke as revokeOpenAI, type DeviceCodeSession } from "../../core/llm/openaiAuth.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
@@ -635,7 +635,8 @@ async function handleOpenAILoginStart(res: ServerResponse): Promise<void> {
   void pollAndExchange(session)
     .then((tokens) => {
       const accountEmail = tokens.idToken ? decodeAccountEmail(tokens.idToken) : null;
-      openaiAuth.save({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, idToken: tokens.idToken, accountEmail });
+      const accountId = tokens.idToken ? decodeAccountId(tokens.idToken) : null;
+      openaiAuth.save({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, idToken: tokens.idToken, accountEmail, accountId });
       openaiLogins.set(loginId, { status: "complete" });
     })
     .catch((err) => {

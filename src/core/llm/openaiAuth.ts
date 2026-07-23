@@ -52,6 +52,27 @@ export function decodeAccountEmail(idToken: string): string | null {
   return typeof email === "string" ? email : null;
 }
 
+// The Codex backend rejects requests with no `ChatGPT-Account-ID` header
+// (400) — confirmed against openai/codex's model-provider/src/auth.rs,
+// where every ChatGPT-auth request adds this header from the account id
+// carried in the `https://api.openai.com/auth` id_token claim.
+export function decodeAccountId(idToken: string): string | null {
+  const claims = decodeJwtPayload(idToken);
+  const auth = claims["https://api.openai.com/auth"] as Record<string, unknown> | undefined;
+  const accountId = auth?.chatgpt_account_id;
+  return typeof accountId === "string" ? accountId : null;
+}
+
+// Every authenticated Codex backend request needs both headers below, not
+// just the bearer token — see decodeAccountId's comment.
+export function codexAuthHeaders(accessToken: string, accountId: string | null): Record<string, string> {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    ...(accountId ? { "ChatGPT-Account-ID": accountId } : {}),
+    "OAI-Product-Sku": "codex",
+  };
+}
+
 function accessTokenExpirySeconds(accessToken: string): number | undefined {
   const claims = decodeJwtPayload(accessToken);
   return typeof claims.exp === "number" ? claims.exp : undefined;
@@ -155,22 +176,34 @@ const REFRESH_MARGIN_SECONDS = 60;
 // usable right now, refreshing proactively if the stored one is expired or
 // about to be. Throws a clear, actionable error if never logged in.
 export async function getValidAccessToken(registry: OpenAIAuthRegistry): Promise<string> {
+  const { accessToken } = await getValidAuth(registry);
+  return accessToken;
+}
+
+// Same as getValidAccessToken, but also returns the account id every Codex
+// backend request must send alongside the bearer token (see
+// decodeAccountId's comment) — use codexAuthHeaders(accessToken, accountId)
+// to build the actual request headers.
+export async function getValidAuth(registry: OpenAIAuthRegistry): Promise<{ accessToken: string; accountId: string | null }> {
   const stored = registry.get();
   if (!stored) throw new Error('Not connected to ChatGPT — run "/login openai" first.');
 
   const expiry = accessTokenExpirySeconds(stored.accessToken);
   const nowSeconds = Date.now() / 1000;
   if (expiry !== undefined && expiry - nowSeconds > REFRESH_MARGIN_SECONDS) {
-    return stored.accessToken;
+    return { accessToken: stored.accessToken, accountId: stored.accountId ?? decodeAccountId(stored.idToken) };
   }
 
   const refreshed = await refreshTokens(stored.refreshToken);
+  const idToken = refreshed.idToken || stored.idToken;
   const accountEmail = refreshed.idToken ? decodeAccountEmail(refreshed.idToken) : stored.accountEmail;
+  const accountId = decodeAccountId(idToken) ?? stored.accountId;
   registry.save({
     accessToken: refreshed.accessToken || stored.accessToken,
     refreshToken: refreshed.refreshToken || stored.refreshToken,
-    idToken: refreshed.idToken || stored.idToken,
+    idToken,
     accountEmail,
+    accountId,
   });
-  return refreshed.accessToken || stored.accessToken;
+  return { accessToken: refreshed.accessToken || stored.accessToken, accountId };
 }

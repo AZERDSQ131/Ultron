@@ -2,7 +2,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import type { MessageContent } from "@langchain/core/messages";
 import { config } from "../../config.js";
 import { getOpenAIAuthRegistry } from "../memory/openaiAuth.js";
-import { getValidAccessToken, CHATGPT_CODEX_BASE_URL } from "./openaiAuth.js";
+import { getValidAuth, codexAuthHeaders, CHATGPT_CODEX_BASE_URL } from "./openaiAuth.js";
 
 export type ThinkingMode = "off" | "low" | "full";
 
@@ -38,9 +38,9 @@ type OpenAIClientConfiguration = NonNullable<ConstructorParameters<typeof ChatOp
 
 function openaiOAuthFetch(): NonNullable<OpenAIClientConfiguration>["fetch"] {
   return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-    const token = await getValidAccessToken(getOpenAIAuthRegistry(config.databasePath));
+    const { accessToken, accountId } = await getValidAuth(getOpenAIAuthRegistry(config.databasePath));
     const headers = new Headers(init?.headers);
-    headers.set("Authorization", `Bearer ${token}`);
+    for (const [name, value] of Object.entries(codexAuthHeaders(accessToken, accountId))) headers.set(name, value);
     return fetch(input, { ...init, headers });
   }) as unknown as NonNullable<OpenAIClientConfiguration>["fetch"];
 }
