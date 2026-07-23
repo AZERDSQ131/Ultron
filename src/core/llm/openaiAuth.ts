@@ -20,6 +20,13 @@ const DEVICE_REDIRECT_URI = `${AUTH_BASE_URL}/deviceauth/callback`;
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 
 export const CHATGPT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
+// The Codex backend's /models endpoint 400s without a client_version query
+// param (confirmed live: "[{'type': 'missing', 'loc': ('query',
+// 'client_version') ...}]") — codex-rs/codex-api/src/endpoint/models.rs
+// appends it from the CLI's own package version. Matches the currently
+// published `@openai/codex` npm version; only /models needs this — the
+// Responses endpoint (actual chat calls) doesn't take it.
+export const CODEX_CLIENT_VERSION = "0.145.0";
 
 export interface DeviceCodeSession {
   deviceAuthId: string;

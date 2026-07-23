@@ -1,6 +1,6 @@
 import { config, PROVIDER_CYCLE, type LlmProvider } from "../../config.js";
 import { getOpenAIAuthRegistry } from "../memory/openaiAuth.js";
-import { getValidAuth, codexAuthHeaders, CHATGPT_CODEX_BASE_URL } from "./openaiAuth.js";
+import { getValidAuth, codexAuthHeaders, CHATGPT_CODEX_BASE_URL, CODEX_CLIENT_VERSION } from "./openaiAuth.js";
 
 // Shared by the local CLI (src/interfaces/cli/index.ts), the web server
 // (src/interfaces/web/server.ts, which the remote CLI and Telegram's /model
@@ -88,17 +88,18 @@ async function fetchGroqModels(): Promise<ModelInfo[]> {
 // fixed models.
 async function fetchOpenAIModels(): Promise<ModelInfo[]> {
   const { accessToken, accountId } = await getValidAuth(getOpenAIAuthRegistry(config.databasePath));
-  const response = await fetch(`${CHATGPT_CODEX_BASE_URL}/models`, {
+  const response = await fetch(`${CHATGPT_CODEX_BASE_URL}/models?client_version=${CODEX_CLIENT_VERSION}`, {
     headers: { Accept: "application/json", ...codexAuthHeaders(accessToken, accountId) },
   });
   if (!response.ok) throw new Error(`ChatGPT Codex backend returned HTTP ${response.status}`);
-  const payload = (await response.json()) as { data?: { id?: unknown; context_window?: unknown }[] } | { models?: { id?: unknown; context_window?: unknown }[] };
-  const list = "data" in payload ? payload.data : "models" in payload ? payload.models : undefined;
-  return (list ?? [])
+  // Real payload shape is `{ models: [{ slug, context_window, ... }] }` —
+  // not the OpenAI-compatible `{ data: [{ id }] }` shape NVIDIA/Groq use.
+  const payload = (await response.json()) as { models?: { slug?: unknown; context_window?: unknown }[] };
+  return (payload.models ?? [])
     .map((model) => {
-      if (typeof model.id !== "string" || !model.id) return undefined;
+      if (typeof model.slug !== "string" || !model.slug) return undefined;
       return {
-        id: model.id,
+        id: model.slug,
         ...(typeof model.context_window === "number" && model.context_window > 0 ? { contextWindowTokens: model.context_window } : {}),
       };
     })
