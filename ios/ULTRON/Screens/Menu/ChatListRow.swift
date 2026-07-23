@@ -24,12 +24,28 @@ struct ChatListRow: View {
     @ViewBuilder
     private var originBadge: some View {
         if let origin = chat.origin {
-            Text(origin == "telegram" ? "Telegram" : "CLI")
+            Text(label(for: origin))
                 .font(.caption2.weight(.semibold))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(Capsule().fill((origin == "telegram" ? Color.blue : Color.gray).opacity(0.15)))
-                .foregroundStyle(origin == "telegram" ? .blue : .secondary)
+                .background(Capsule().fill(color(for: origin).opacity(0.15)))
+                .foregroundStyle(color(for: origin))
+        }
+    }
+
+    private func label(for origin: String) -> String {
+        switch origin {
+        case "telegram": return "Telegram"
+        case "app": return "App"
+        default: return "CLI"
+        }
+    }
+
+    private func color(for origin: String) -> Color {
+        switch origin {
+        case "telegram": return .blue
+        case "app": return .purple
+        default: return .secondary
         }
     }
 

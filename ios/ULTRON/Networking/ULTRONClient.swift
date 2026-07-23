@@ -104,10 +104,10 @@ final class ULTRONClient {
         return response.chats
     }
 
-    struct CreateChatBody: Encodable { let title: String?; let agentId: String? }
+    struct CreateChatBody: Encodable { let title: String?; let agentId: String?; let origin: String }
     struct ChatResponse: Codable { let chat: Chat }
     func createChat(title: String? = nil) async throws -> Chat {
-        let response: ChatResponse = try await request("POST", "/api/chats", body: CreateChatBody(title: title, agentId: nil))
+        let response: ChatResponse = try await request("POST", "/api/chats", body: CreateChatBody(title: title, agentId: nil, origin: "app"))
         return response.chat
     }
 

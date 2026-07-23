@@ -31,6 +31,15 @@ const DEFAULT_SECURITY_MODE: SecurityMode = "bypass";
 export const LEGACY_CHAT_ID = "ultron-main";
 export const CLI_CHAT_SCOPE = "cli";
 
+// Which client created a chat — stamped once at creation time (the `chats`
+// row's `created_via` column) rather than inferred from message history,
+// since a brand-new chat with zero messages yet has no chat_events row to
+// infer from at all (that gap is exactly what made a freshly created mobile
+// chat show up mislabeled "CLI"). Distinct from ChatEventSource
+// ("cli"/"telegram", chatEvents.ts), which tags each individual message,
+// not the conversation as a whole.
+export type ChatOrigin = "cli" | "telegram" | "app";
+
 export interface Chat {
   id: string;
   title: string;
@@ -94,6 +103,7 @@ export class ChatRegistry {
     try { this.db.exec("ALTER TABLE chats ADD COLUMN security_mode TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN archived_at TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN export_path TEXT"); } catch { /* already migrated */ }
+    try { this.db.exec("ALTER TABLE chats ADD COLUMN created_via TEXT"); } catch { /* already migrated */ }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS chat_focus (
         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -140,10 +150,18 @@ export class ChatRegistry {
   }
 
   // Public so callers outside listResumable (e.g. the web server's
-  // GET /api/chats, for the mobile app's CLI/Telegram origin badge) can
-  // label a chat without duplicating this lookup.
-  getOrigin(id: string): "CLI" | "Tel" {
+  // GET /api/chats, for the mobile app's CLI/Telegram/App origin badge) can
+  // label a chat without duplicating this lookup. Prefers the stamped
+  // created_via column (authoritative, set once at creation — see create()/
+  // ensure()) so a brand-new chat with zero messages yet is labeled
+  // correctly right away, instead of falling through to the message-history
+  // guess below (which used to default every unused chat to "CLI").
+  getOrigin(id: string): "CLI" | "Tel" | "App" {
     try {
+      const row = this.db.prepare("SELECT created_via FROM chats WHERE id = ?").get(id) as { created_via?: string | null } | undefined;
+      if (row?.created_via === "app") return "App";
+      if (row?.created_via === "telegram") return "Tel";
+      if (row?.created_via === "cli") return "CLI";
       const event = this.db.prepare("SELECT source FROM chat_events WHERE chat_id = ? ORDER BY id ASC LIMIT 1").get(id) as { source?: string } | undefined;
       if (event?.source === "telegram") return "Tel";
       if (event?.source === "cli") return "CLI";
@@ -167,26 +185,26 @@ export class ChatRegistry {
     return row ? toChat(row) : undefined;
   }
 
-  create(title: string = DEFAULT_CHAT_TITLE, agentId: string | null = null, scheduleId: string | null = null): Chat {
+  create(title: string = DEFAULT_CHAT_TITLE, agentId: string | null = null, scheduleId: string | null = null, createdVia: ChatOrigin | null = null): Chat {
     const now = new Date().toISOString();
     const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId, scheduleId, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
     this.db
-      .prepare("INSERT INTO chats (id, title, created_at, updated_at, agent_id, schedule_id) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.agentId, chat.scheduleId);
+      .prepare("INSERT INTO chats (id, title, created_at, updated_at, agent_id, schedule_id, created_via) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.agentId, chat.scheduleId, createdVia);
     return chat;
   }
 
   // Registers a thread_id that may already have checkpoint history (e.g.
   // the legacy "ultron-main" thread from before chats existed) without
   // overwriting it if it's already registered.
-  ensure(id: string, title: string = DEFAULT_CHAT_TITLE): Chat {
+  ensure(id: string, title: string = DEFAULT_CHAT_TITLE, createdVia: ChatOrigin | null = null): Chat {
     const existing = this.get(id);
     if (existing) return existing;
     const now = new Date().toISOString();
     const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
     this.db
-      .prepare("INSERT INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
-      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt);
+      .prepare("INSERT INTO chats (id, title, created_at, updated_at, created_via) VALUES (?, ?, ?, ?, ?)")
+      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, createdVia);
     return chat;
   }
 
@@ -202,7 +220,7 @@ export class ChatRegistry {
   ensureLegacyMigration(): void {
     const done = this.db.prepare("SELECT 1 FROM chat_meta WHERE key = 'legacy_migrated'").get();
     if (done) return;
-    this.ensure(LEGACY_CHAT_ID);
+    this.ensure(LEGACY_CHAT_ID, DEFAULT_CHAT_TITLE, "cli");
     this.db.prepare("INSERT INTO chat_meta (key, value) VALUES ('legacy_migrated', '1') ON CONFLICT(key) DO NOTHING").run();
   }
 
@@ -226,7 +244,7 @@ export class ChatRegistry {
     // the CLI is starting up) — never as an immediate side effect of
     // deleting the previous one, which used to make a deleted "main" chat
     // reappear instantly in any client polling the chat list.
-    const main = scope === CLI_CHAT_SCOPE ? this.ensure(LEGACY_CHAT_ID) : this.create();
+    const main = scope === CLI_CHAT_SCOPE ? this.ensure(LEGACY_CHAT_ID, DEFAULT_CHAT_TITLE, "cli") : this.create(DEFAULT_CHAT_TITLE, null, null, "telegram");
     this.setMain(main.id, scope);
     this.setFocus(main.id, scope);
     return main;
@@ -269,7 +287,7 @@ export class ChatRegistry {
   archiveAndCreate(id: string, title?: string): { archived: Chat | undefined; fresh: Chat } {
     const wasMain = this.getMain().id === id;
     const archived = this.archive(id, title);
-    const fresh = this.create();
+    const fresh = this.create(DEFAULT_CHAT_TITLE, null, null, "cli");
     if (wasMain) this.setMain(fresh.id);
     this.setFocus(fresh.id);
     return { archived, fresh };

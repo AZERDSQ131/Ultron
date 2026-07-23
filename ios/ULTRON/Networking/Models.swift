@@ -11,7 +11,7 @@ struct Chat: Codable, Identifiable, Equatable {
     var securityMode: String
     let archivedAt: String?
     var exportPath: String?
-    // "cli" | "telegram" — which interface this conversation originated
+    // "cli" | "telegram" | "app" — which interface this conversation originated
     // from, computed server-side (ChatRegistry.getOrigin). Only present on
     // GET /api/chats today.
     let origin: String?

@@ -213,12 +213,17 @@ local CLI, the remote CLI, and Telegram. `ChatEventSource` stays two-valued by c
   existed purely to feed the remote CLI's follow-along poll; without a reader, it was actively
   harmful (any HTTP client opening an old chat silently relocated where the terminal CLI would
   resume next time).
-- New: `GET /api/chats` now attaches `origin: "cli" | "telegram"` per chat, computed by
-  `ChatRegistry.getOrigin` (made public — same lookup `listResumable` already used, not
-  duplicated) — the mobile app renders it as a small badge (`ChatListRow.swift`) next to each
-  conversation. The web UI's own sidebar/archive panel is completely untouched: same routes
-  (`/api/chats/:id/archive`, `/api/chats/:id/resume`, `/api/chats/archived`, `POST /api/main`),
-  same behavior.
+- New: `GET /api/chats` attaches `origin: "cli" | "telegram" | "app"` per chat, computed by
+  `ChatRegistry.getOrigin` (made public) — the mobile app renders it as a small badge
+  (`ChatListRow.swift`) next to each conversation. The web UI's own sidebar/archive panel is
+  completely untouched: same routes (`/api/chats/:id/archive`, `/api/chats/:id/resume`,
+  `/api/chats/archived`, `POST /api/main`), same behavior. Follow-up fix: a brand-new chat
+  created from the mobile app showed up mislabeled "CLI" because `getOrigin` only ever inferred
+  origin from message history, and a just-created empty chat has none yet — fixed by stamping a
+  new `chats.created_via` column at creation time (`"cli"`/`"telegram"`/`"app"`, distinct from
+  `chat_events.source` which tags individual messages, not the conversation) and having
+  `getOrigin` read that first, falling back to the old history-based guess only for chats that
+  predate the column. `POST /api/chats` now accepts an `origin` field for this.
 - **Accepted limitation**: since `ChatEventSource` stays two-valued, the local CLI still can't
   distinguish "my own turn" from "a turn the mobile app just sent on this same chat" (both are
   `"cli"`) — a mobile-authored message into the CLI's anchor chat won't appear live in an

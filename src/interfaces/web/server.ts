@@ -23,7 +23,7 @@ import { formatTurnStats, recordUsage } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { autoTitleChat } from "../../core/chatTitler.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
-import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
+import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type ChatOrigin, type SecurityMode } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { AgentRegistry } from "../../core/memory/agents.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -142,24 +142,36 @@ function requireChat(res: ServerResponse, chatId: unknown): chatId is string {
   return true;
 }
 
+function originLabel(raw: "CLI" | "Tel" | "App"): ChatOrigin {
+  if (raw === "Tel") return "telegram";
+  if (raw === "App") return "app";
+  return "cli";
+}
+
 async function handleListChats(res: ServerResponse): Promise<void> {
-  // origin: "cli" | "telegram" — lets a client (the mobile app) show which
-  // interface a conversation came from without duplicating getOrigin's logic.
+  // origin: "cli" | "telegram" | "app" — lets a client (the mobile app) show
+  // which interface a conversation came from without duplicating getOrigin's
+  // logic.
   const withOrigin = chats.list().map((chat) => ({
     ...chat,
-    origin: chats.getOrigin(chat.id) === "Tel" ? "telegram" : "cli",
+    origin: originLabel(chats.getOrigin(chat.id)),
   }));
   sendJson(res, 200, { chats: withOrigin });
 }
 
 async function handleCreateChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ title?: string; agentId?: string | null }>(req);
+  const payload = await readJson<{ title?: string; agentId?: string | null; origin?: ChatOrigin }>(req);
   if (!payload) {
     sendJson(res, 400, { error: "invalid JSON body" });
     return;
   }
   if (payload.agentId && !agents.getAgent(payload.agentId)) { sendJson(res, 404, { error: "unknown agent" }); return; }
-  const chat = chats.create(payload.title?.trim() || undefined, payload.agentId ?? null);
+  // origin defaults to "cli" — every existing caller (the web UI's own "new
+  // chat" button, the remote CLI) predates this field and didn't send it;
+  // only the mobile app now explicitly sends "app" so its own new chats
+  // aren't mislabeled "CLI" before their first message.
+  const origin: ChatOrigin = payload.origin === "app" || payload.origin === "telegram" ? payload.origin : "cli";
+  const chat = chats.create(payload.title?.trim() || undefined, payload.agentId ?? null, null, origin);
   sendJson(res, 200, { chat });
 }
 
