@@ -1,6 +1,8 @@
 import { ChatOpenAI } from "@langchain/openai";
 import type { MessageContent } from "@langchain/core/messages";
 import { config } from "../../config.js";
+import { getOpenAIAuthRegistry } from "../memory/openaiAuth.js";
+import { getValidAccessToken, CHATGPT_CODEX_BASE_URL } from "./openaiAuth.js";
 
 export type ThinkingMode = "off" | "low" | "full";
 
@@ -20,6 +22,29 @@ function toPlainText(content: MessageContent): string {
   return content.map((part) => (part.type === "text" && "text" in part ? part.text : "")).join("");
 }
 
+// A custom fetch that resolves (and transparently refreshes) a ChatGPT OAuth
+// access token right before each actual HTTP request, instead of baking a
+// possibly-stale token into the client at construction time. This is what
+// lets createNemotronModel stay synchronous — the only genuinely async step
+// (a network refresh call) is deferred to request time, which was already
+// async (.invoke()/.stream()), rather than forcing buildGraph() and every
+// one of its many call sites (CLI, web, Telegram, every cheap separate call
+// in goalJudge.ts/userModelExtractor.ts/chatTitler.ts/narrator.ts) to await
+// model construction too.
+// Loosely typed (the `openai` SDK's own Fetch type uses a bespoke URLLike
+// interface incompatible with lib.dom's URL/Request) — cast at the call site
+// instead of fighting that mismatch here.
+type OpenAIClientConfiguration = NonNullable<ConstructorParameters<typeof ChatOpenAI>[0]>["configuration"];
+
+function openaiOAuthFetch(): NonNullable<OpenAIClientConfiguration>["fetch"] {
+  return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const token = await getValidAccessToken(getOpenAIAuthRegistry(config.databasePath));
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    return fetch(input, { ...init, headers });
+  }) as unknown as NonNullable<OpenAIClientConfiguration>["fetch"];
+}
+
 export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOpenAI {
   const thinking = thinkingMode !== "off";
   const provider = config.provider;
@@ -30,17 +55,31 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
     throw new Error("GROQ_API_KEY is not set — cannot use the Groq provider (see .env.example).");
   }
 
-  const apiKey = provider === "deepseek" ? config.deepseekApiKey : provider === "groq" ? config.groqApiKey : config.nvidiaApiKey;
-  const baseURL = provider === "deepseek" ? config.deepseekBaseUrl : provider === "groq" ? config.groqBaseUrl : config.nemotronBaseUrl;
+  const apiKey =
+    provider === "deepseek"
+      ? config.deepseekApiKey
+      : provider === "groq"
+        ? config.groqApiKey
+        : provider === "openai"
+          ? "unused-overridden-per-request-by-openaiOAuthFetch"
+          : config.nvidiaApiKey;
+  const baseURL =
+    provider === "deepseek"
+      ? config.deepseekBaseUrl
+      : provider === "groq"
+        ? config.groqBaseUrl
+        : provider === "openai"
+          ? CHATGPT_CODEX_BASE_URL
+          : config.nemotronBaseUrl;
 
   const model = new ChatOpenAI({
     model: config.nemotronModel,
     apiKey,
     temperature: 1.0,
     topP: 0.95,
-    // Neither DeepSeek's nor Groq's API has an equivalent to NVIDIA NIM's
-    // chat_template_kwargs knob — thinkingMode only shapes reasoning depth
-    // on NVIDIA-hosted models for now.
+    // Neither DeepSeek's nor Groq's nor the ChatGPT-account-scoped Responses
+    // API has an equivalent to NVIDIA NIM's chat_template_kwargs knob —
+    // thinkingMode only shapes reasoning depth on NVIDIA-hosted models.
     ...(provider === "nvidia"
       ? {
           modelKwargs: {
@@ -51,8 +90,13 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
           },
         }
       : {}),
+    // The ChatGPT-account-scoped backend speaks OpenAI's Responses API
+    // shape, not chat-completions — see src/core/llm/openaiAuth.ts's header
+    // comment for the verified endpoint/token details.
+    ...(provider === "openai" ? { useResponsesApi: true } : {}),
     configuration: {
       baseURL,
+      ...(provider === "openai" ? { fetch: openaiOAuthFetch() } : {}),
     },
     streaming: true,
     // Verified against the live NVIDIA endpoint: it does return real usage

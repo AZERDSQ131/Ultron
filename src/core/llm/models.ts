@@ -1,4 +1,6 @@
 import { config, PROVIDER_CYCLE, type LlmProvider } from "../../config.js";
+import { getOpenAIAuthRegistry } from "../memory/openaiAuth.js";
+import { getValidAccessToken, CHATGPT_CODEX_BASE_URL } from "./openaiAuth.js";
 
 // Shared by the local CLI (src/interfaces/cli/index.ts), the web server
 // (src/interfaces/web/server.ts, which the remote CLI and Telegram's /model
@@ -80,9 +82,34 @@ async function fetchGroqModels(): Promise<ModelInfo[]> {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+// The ChatGPT-account-scoped Codex backend exposes its own /models list
+// (confirmed against openai/codex's own test fixtures), same live-discovery
+// shape as NVIDIA/Groq rather than a hardcoded list like DeepSeek's two
+// fixed models.
+async function fetchOpenAIModels(): Promise<ModelInfo[]> {
+  const token = await getValidAccessToken(getOpenAIAuthRegistry(config.databasePath));
+  const response = await fetch(`${CHATGPT_CODEX_BASE_URL}/models`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(`ChatGPT Codex backend returned HTTP ${response.status}`);
+  const payload = (await response.json()) as { data?: { id?: unknown; context_window?: unknown }[] } | { models?: { id?: unknown; context_window?: unknown }[] };
+  const list = "data" in payload ? payload.data : "models" in payload ? payload.models : undefined;
+  return (list ?? [])
+    .map((model) => {
+      if (typeof model.id !== "string" || !model.id) return undefined;
+      return {
+        id: model.id,
+        ...(typeof model.context_window === "number" && model.context_window > 0 ? { contextWindowTokens: model.context_window } : {}),
+      };
+    })
+    .filter((model): model is ModelInfo => Boolean(model))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 async function fetchProviderModels(provider: LlmProvider): Promise<ModelInfo[]> {
   if (provider === "deepseek") return deepseekModels();
   if (provider === "groq") return fetchGroqModels();
+  if (provider === "openai") return fetchOpenAIModels();
   return fetchNvidiaModels();
 }
 
@@ -98,16 +125,17 @@ export interface GroupedModels {
   models: ModelInfo[];
 }
 
-// All three providers' catalogs, tagged and grouped in a fixed order — what
+// All four providers' catalogs, tagged and grouped in a fixed order — what
 // /model actually shows now, so switching providers is a side effect of
 // picking a model rather than a separate step. A provider with no API key
-// configured (deepseek/groq are optional) contributes an empty group
-// instead of failing the whole listing.
+// configured (deepseek/groq) or no ChatGPT login yet (openai) contributes an
+// empty group instead of failing the whole listing.
 export async function listModelsByProvider(): Promise<GroupedModels[]> {
   return Promise.all(
     PROVIDER_CYCLE.map(async (provider): Promise<GroupedModels> => {
       if (provider === "deepseek" && !config.deepseekApiKey) return { provider, models: [] };
       if (provider === "groq" && !config.groqApiKey) return { provider, models: [] };
+      if (provider === "openai" && !getOpenAIAuthRegistry(config.databasePath).isAuthenticated()) return { provider, models: [] };
       try {
         const models = await fetchProviderModels(provider);
         return { provider, models: models.map((model) => ({ ...model, provider })) };

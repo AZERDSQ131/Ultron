@@ -20,6 +20,8 @@ import { listAvailableModels, listModelsByProvider, resolveModelContext } from "
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { autoTitleChat } from "../../core/chatTitler.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
+import { getOpenAIAuthRegistry } from "../../core/memory/openaiAuth.js";
+import { requestDeviceCode, pollAndExchange, decodeAccountEmail } from "../../core/llm/openaiAuth.js";
 import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
 import { detectAnomalies } from "../../core/health/trends.js";
@@ -169,7 +171,8 @@ async function main() {
   const changeProvider = async (contextLine: string, explicit?: LlmProvider): Promise<void> => {
     const next = explicit ?? nextConfiguredProvider(config.provider);
     if (!hasProviderCredentials(next)) {
-      appendTranscript(chalk.red(`[ultron] ${next.toUpperCase()}_API_KEY is not set — cannot switch to ${next} (see .env.example).\n\n`));
+      const hint = next === "openai" ? 'not connected — run "/login openai" first' : `${next.toUpperCase()}_API_KEY is not set (see .env.example)`;
+      appendTranscript(chalk.red(`[ultron] ${hint} — cannot switch to ${next}.\n\n`));
       return;
     }
     setActiveProvider(next);
@@ -183,6 +186,33 @@ async function main() {
     }
     printBanner(config.nemotronModel);
     appendTranscript(uiDim(`[ultron] provider set to ${next} (model: ${config.nemotronModel}).\n\n`));
+  };
+
+  // /login openai — device-code OAuth against a ChatGPT Plus/Pro/Team
+  // account (see core/llm/openaiAuth.ts's header comment for the verified
+  // flow this mirrors from openai/codex's own source). A login is global
+  // (one ULTRON install, one ChatGPT account), so this is a one-time thing
+  // regardless of which interface runs it.
+  const loginOpenAI = async (): Promise<void> => {
+    try {
+      const session = await requestDeviceCode();
+      appendTranscript(
+        uiDim(`[ultron] open ${chalk.cyanBright(session.verificationUrl)} and enter code ${chalk.cyanBright(session.userCode)} (expires in 15 min)…\n\n`),
+      );
+      renderScreen("", 0, "");
+      flushRender();
+      const tokens = await pollAndExchange(session);
+      const accountEmail = tokens.idToken ? decodeAccountEmail(tokens.idToken) : null;
+      getOpenAIAuthRegistry(config.databasePath).save({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        idToken: tokens.idToken,
+        accountEmail,
+      });
+      appendTranscript(uiDim(`[ultron] connected to ChatGPT${accountEmail ? ` as ${accountEmail}` : ""}. Try /provider openai.\n\n`));
+    } catch (error) {
+      appendTranscript(chalk.red(`[ultron] ChatGPT login failed: ${error instanceof Error ? error.message : String(error)}\n\n`));
+    }
   };
 
   // Use the served model's advertised limit for the initial context gauge as
@@ -612,11 +642,15 @@ async function main() {
             }
             if (command.startsWith("/provider ")) {
               const requested = command.slice("/provider ".length).trim();
-              if (requested !== "nvidia" && requested !== "deepseek" && requested !== "groq") {
-                appendTranscript(chalk.yellow("[ultron] use /provider nvidia, /provider deepseek or /provider groq.\n\n"));
+              if (requested !== "nvidia" && requested !== "deepseek" && requested !== "groq" && requested !== "openai") {
+                appendTranscript(chalk.yellow("[ultron] use /provider nvidia, /provider deepseek, /provider groq or /provider openai.\n\n"));
                 continue;
               }
               await changeProvider(contextLine, requested);
+              continue;
+            }
+            if (command === "/login openai") {
+              await loginOpenAI();
               continue;
             }
             if (command === "/theme") {

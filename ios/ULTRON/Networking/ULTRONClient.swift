@@ -174,6 +174,23 @@ final class ULTRONClient {
         try await request("PATCH", "/api/provider", body: SetProviderBody(provider: provider))
     }
 
+    // MARK: - OpenAI ChatGPT device-code login
+
+    struct OpenAILoginStartResponse: Codable { let loginId: String; let verificationUrl: String; let userCode: String }
+    func openAILoginStart() async throws -> OpenAILoginStartResponse {
+        try await request("POST", "/api/openai/login/start", body: EmptyBody())
+    }
+
+    struct OpenAILoginStatusResponse: Codable { let status: String; let error: String? }
+    func openAILoginStatus(loginId: String) async throws -> OpenAILoginStatusResponse {
+        try await requestNoBody("GET", "/api/openai/login/status?loginId=\(loginId)")
+    }
+
+    struct OpenAIStatusResponse: Codable { let authenticated: Bool; let accountEmail: String? }
+    func openAIStatus() async throws -> OpenAIStatusResponse {
+        try await requestNoBody("GET", "/api/openai/status")
+    }
+
     // MARK: - Tools / Skills
 
     struct ToolsResponse: Codable { let tools: [Tool] }

@@ -197,7 +197,7 @@ async function main() {
     }
   };
 
-  const PROVIDER_ORDER: LlmProvider[] = ["nvidia", "deepseek", "groq"];
+  const PROVIDER_ORDER: LlmProvider[] = ["nvidia", "deepseek", "groq", "openai"];
 
   const changeProvider = async (contextLine: string, explicit?: LlmProvider): Promise<void> => {
     try {
@@ -205,7 +205,8 @@ async function main() {
       const configured: LlmProvider[] = data.configured ?? ["nvidia"];
       let next: LlmProvider | undefined = explicit;
       if (next && !configured.includes(next)) {
-        appendTranscript(chalk.red(`[ultron] ${next.toUpperCase()}_API_KEY is not set on the server — cannot switch to ${next}.\n\n`));
+        const hint = next === "openai" ? 'not connected on the server — run "/login openai" first' : `${next.toUpperCase()}_API_KEY is not set on the server`;
+        appendTranscript(chalk.red(`[ultron] ${hint} — cannot switch to ${next}.\n\n`));
         renderScreen("", 0, contextLine);
         return;
       }
@@ -226,6 +227,34 @@ async function main() {
       appendTranscript(uiDim(`[ultron] provider set to ${next} (model: ${modelName}).\n\n`));
     } catch (error) {
       appendTranscript(chalk.red(`[ultron] could not switch provider: ${error instanceof Error ? error.message : String(error)}\n\n`));
+    }
+  };
+
+  // /login openai — kicks off the server's device-code OAuth flow (see
+  // core/llm/openaiAuth.ts's header comment for the verified flow) and
+  // polls its status; the server does the actual polling/exchange, this
+  // just waits for the outcome. A login is global, not per-interface.
+  const loginOpenAI = async (contextLine: string): Promise<void> => {
+    try {
+      const start = await apiPost("/api/openai/login/start");
+      appendTranscript(
+        uiDim(`[ultron] open ${chalk.cyanBright(start.verificationUrl)} and enter code ${chalk.cyanBright(start.userCode)} (expires in 15 min)…\n\n`),
+      );
+      renderScreen("", 0, contextLine);
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const status = await apiGet(`/api/openai/login/status?loginId=${encodeURIComponent(start.loginId)}`);
+        if (status.status === "complete") {
+          appendTranscript(uiDim("[ultron] connected to ChatGPT. Try /provider openai.\n\n"));
+          return;
+        }
+        if (status.status === "error") {
+          appendTranscript(chalk.red(`[ultron] ChatGPT login failed: ${status.error}\n\n`));
+          return;
+        }
+      }
+    } catch (error) {
+      appendTranscript(chalk.red(`[ultron] ChatGPT login failed: ${error instanceof Error ? error.message : String(error)}\n\n`));
     }
     renderScreen("", 0, contextLine);
   };
@@ -490,11 +519,15 @@ async function main() {
             }
             if (command.startsWith("/provider ")) {
               const requested = command.slice("/provider ".length).trim();
-              if (requested !== "nvidia" && requested !== "deepseek" && requested !== "groq") {
-                appendTranscript(chalk.yellow("[ultron] use /provider nvidia, /provider deepseek or /provider groq.\n\n"));
+              if (requested !== "nvidia" && requested !== "deepseek" && requested !== "groq" && requested !== "openai") {
+                appendTranscript(chalk.yellow("[ultron] use /provider nvidia, /provider deepseek, /provider groq or /provider openai.\n\n"));
                 continue;
               }
               await changeProvider(contextLine, requested);
+              continue;
+            }
+            if (command === "/login openai") {
+              await loginOpenAI(contextLine);
               continue;
             }
             if (command === "/theme") {

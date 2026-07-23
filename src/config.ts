@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getOpenAIAuthRegistry } from "./core/memory/openaiAuth.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, "..");
@@ -16,14 +17,16 @@ function required(name: string): string {
 // The active chat-completion provider (CLI /provider, web PATCH /api/provider,
 // Telegram /provider). Independent of visionModel below, which always stays
 // on NVIDIA regardless of this setting — photo analysis has no DeepSeek/Groq
-// equivalent wired up.
-export type LlmProvider = "nvidia" | "deepseek" | "groq";
+// equivalent wired up. "openai" is unlike the other three: no API key, it
+// authenticates via ChatGPT device-code OAuth (see src/core/llm/openaiAuth.ts)
+// and calls the ChatGPT-account-scoped Responses API, not api.openai.com.
+export type LlmProvider = "nvidia" | "deepseek" | "groq" | "openai";
 
 // Fixed cycle order for the bare (argument-less) /provider command.
-export const PROVIDER_CYCLE: LlmProvider[] = ["nvidia", "deepseek", "groq"];
+export const PROVIDER_CYCLE: LlmProvider[] = ["nvidia", "deepseek", "groq", "openai"];
 
 function initialProvider(): LlmProvider {
-  return process.env.LLM_PROVIDER === "deepseek" || process.env.LLM_PROVIDER === "groq"
+  return process.env.LLM_PROVIDER === "deepseek" || process.env.LLM_PROVIDER === "groq" || process.env.LLM_PROVIDER === "openai"
     ? process.env.LLM_PROVIDER
     : "nvidia";
 }
@@ -36,6 +39,7 @@ const providerModels: Record<LlmProvider, string> = {
   nvidia: process.env.NEMOTRON_MODEL ?? "deepseek-ai/deepseek-v4-flash",
   deepseek: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
   groq: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
+  openai: process.env.OPENAI_CODEX_MODEL ?? "gpt-5.6-sol",
 };
 
 const startingProvider = initialProvider();
@@ -122,16 +126,25 @@ export function setActiveModel(modelId: string): void {
   providerModels[config.provider] = modelId;
 }
 
+function isOpenAIAuthenticated(): boolean {
+  try {
+    return getOpenAIAuthRegistry(config.databasePath).isAuthenticated();
+  } catch {
+    return false;
+  }
+}
+
 export function hasProviderCredentials(provider: LlmProvider): boolean {
   if (provider === "nvidia") return true;
   if (provider === "deepseek") return Boolean(config.deepseekApiKey);
-  return Boolean(config.groqApiKey);
+  if (provider === "groq") return Boolean(config.groqApiKey);
+  return isOpenAIAuthenticated();
 }
 
-// Next provider in the fixed nvidia → deepseek → groq → nvidia cycle that
-// actually has credentials configured — the bare /provider command (CLI,
-// web, Telegram) skips over providers with no API key set instead of
-// switching to one that would just fail on the next turn.
+// Next provider in the fixed nvidia → deepseek → groq → openai → nvidia
+// cycle that actually has credentials configured — the bare /provider
+// command (CLI, web, Telegram) skips over providers with no API key/login
+// set instead of switching to one that would just fail on the next turn.
 export function nextConfiguredProvider(current: LlmProvider): LlmProvider {
   const startIndex = PROVIDER_CYCLE.indexOf(current);
   for (let step = 1; step <= PROVIDER_CYCLE.length; step++) {

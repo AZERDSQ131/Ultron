@@ -10,6 +10,7 @@
 		0B03CA8BC058FDBFFD1E7953 /* SkillsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83596178D98A9E33F0AF9548 /* SkillsView.swift */; };
 		17C445D2EB6412B6F8FCF291 /* ComposerPickers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFFC97450AA2A233265FE7E9 /* ComposerPickers.swift */; };
 		18AC8BF9B81C068B670B6A13 /* ServerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */; };
+		30253060622F786A541A7CFE /* OpenAILoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A11F30FD0AC57BB7234030 /* OpenAILoginSheet.swift */; };
 		33C50FE6D8FE5AF06383C0D3 /* FinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D208BF5036689DC38E4D5D66 /* FinanceView.swift */; };
 		5665C4CF81E0522F1B769BE9 /* ApprovalCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CC5A83F5B96CA4B171D1FA4 /* ApprovalCardView.swift */; };
 		5B993B28A93DBED0954A5B2C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBBD24E385B1E6D4D6D6C33 /* Models.swift */; };
@@ -50,6 +51,7 @@
 		D208BF5036689DC38E4D5D66 /* FinanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceView.swift; sourceTree = "<group>"; };
 		D31CB21B015ABB8FC21CFB45 /* ULTRON.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ULTRON.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E8688BB904F427BE4D29CAFE /* ChatListRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListRow.swift; sourceTree = "<group>"; };
+		E8A11F30FD0AC57BB7234030 /* OpenAILoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAILoginSheet.swift; sourceTree = "<group>"; };
 		ECBBD24E385B1E6D4D6D6C33 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		EFFEFE62F5DF0F546B166C85 /* ToolCallGroupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCallGroupView.swift; sourceTree = "<group>"; };
 		F74322351DC92D86FE55DB70 /* MenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuView.swift; sourceTree = "<group>"; };
@@ -201,6 +203,7 @@
 				C21F1A36BC53D6520F9EC32D /* ComposerBar.swift */,
 				CFFC97450AA2A233265FE7E9 /* ComposerPickers.swift */,
 				8BDD62C16EC7F352CFA93C80 /* MessageBubble.swift */,
+				E8A11F30FD0AC57BB7234030 /* OpenAILoginSheet.swift */,
 				EFFEFE62F5DF0F546B166C85 /* ToolCallGroupView.swift */,
 			);
 			path = Chat;
@@ -274,6 +277,7 @@
 				DC67A7830CD58EFDD674471F /* MenuView.swift in Sources */,
 				826A7CE5865F5D8B94A08C41 /* MessageBubble.swift in Sources */,
 				5B993B28A93DBED0954A5B2C /* Models.swift in Sources */,
+				30253060622F786A541A7CFE /* OpenAILoginSheet.swift in Sources */,
 				F9914A45D2E60B4C65368A59 /* RootView.swift in Sources */,
 				A78DF93F9EA98781039A72F7 /* SSEParser.swift in Sources */,
 				18AC8BF9B81C068B670B6A13 /* ServerSettingsView.swift in Sources */,

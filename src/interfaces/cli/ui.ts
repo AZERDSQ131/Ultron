@@ -28,7 +28,7 @@ import { listHubSkills, installHubSkill, type HubSkill } from "../../core/skills
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const CONTEXT_BAR_WIDTH = 20;
 export const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-export const LOCAL_COMMANDS = ["/help", "/model", "/status", "/context", "/stop", "/retry", "/compact", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
+export const LOCAL_COMMANDS = ["/help", "/model", "/login", "/status", "/context", "/stop", "/retry", "/compact", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
 
 // A lone plan_propose call gets rendered as a numbered plan, so callers need
 // this shape rather than the fuller LangGraph-native PendingToolCall from
@@ -542,7 +542,7 @@ export interface ModelChoice {
   provider: LlmProvider;
 }
 
-const PROVIDER_LABELS: Record<LlmProvider, string> = { nvidia: "NVIDIA", deepseek: "DeepSeek", groq: "Groq" };
+const PROVIDER_LABELS: Record<LlmProvider, string> = { nvidia: "NVIDIA", deepseek: "DeepSeek", groq: "Groq", openai: "OpenAI" };
 
 export function pickModel(
   contextLine: string,
@@ -949,7 +949,7 @@ export function initResizeHandler(getModelName: () => string): void {
 
 export function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/provider")} [nvidia|deepseek|groq] cycle or set the chat-completion provider\n  ${chalk.cyanBright("/model")}    search and select a model across NVIDIA, DeepSeek and Groq\n  ${chalk.cyanBright("/status")}   show provider, model, memory and tool status\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/health")}   show the last 7 days of ingested health data\n  ${chalk.cyanBright("/export")}   [path|on|off] live-export this chat to a file, updated after every turn\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/provider")} [nvidia|deepseek|groq|openai] cycle or set the chat-completion provider\n  ${chalk.cyanBright("/login")}   openai — connect a ChatGPT account via device-code OAuth\n  ${chalk.cyanBright("/model")}    search and select a model across NVIDIA, DeepSeek, Groq and OpenAI\n  ${chalk.cyanBright("/status")}   show provider, model, memory and tool status\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/health")}   show the last 7 days of ingested health data\n  ${chalk.cyanBright("/export")}   [path|on|off] live-export this chat to a file, updated after every turn\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
 }
 

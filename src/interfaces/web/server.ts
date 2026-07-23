@@ -46,6 +46,8 @@ import { log } from "../../core/logger.js";
 import { saveUpload } from "../../core/uploads.js";
 import { getUsageRegistry } from "../../core/memory/usage.js";
 import { getFinanceRegistry, type AccountType } from "../../core/memory/finance.js";
+import { getOpenAIAuthRegistry } from "../../core/memory/openaiAuth.js";
+import { requestDeviceCode, pollAndExchange, decodeAccountEmail, revoke as revokeOpenAI, type DeviceCodeSession } from "../../core/llm/openaiAuth.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
@@ -60,6 +62,7 @@ const agents = new AgentRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
 const goals = getGoalRegistry(config.databasePath);
 const chatEvents = getChatEventRegistry(config.databasePath);
+const openaiAuth = getOpenAIAuthRegistry(config.databasePath);
 // Migrates the CLI's original hardcoded thread ("ultron-main", used before
 // chats existed) into the registry on first run, so pre-existing history
 // shows up as a chat instead of being orphaned. Runs at most once ever
@@ -607,6 +610,61 @@ async function handleMainChat(res: ServerResponse): Promise<void> {
   sendJson(res, 200, { chat: chats.activateMain(CLI_CHAT_SCOPE) });
 }
 
+// ChatGPT device-code OAuth login (see src/core/llm/openaiAuth.ts's header
+// comment for the verified flow) — same start/background-loop/status shape
+// already used for spawn_agent's background runs (src/core/runs.ts), reused
+// here rather than inventing a new pattern. A login is global (one ULTRON
+// install, one ChatGPT account), not per-chat, so every interface (CLI,
+// web, Telegram, mobile) hitting these same routes shares one outcome.
+interface OpenAILoginState {
+  status: "pending" | "complete" | "error";
+  error?: string;
+}
+const openaiLogins = new Map<string, OpenAILoginState>();
+
+async function handleOpenAILoginStart(res: ServerResponse): Promise<void> {
+  let session: DeviceCodeSession;
+  try {
+    session = await requestDeviceCode();
+  } catch (err) {
+    sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
+    return;
+  }
+  const loginId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  openaiLogins.set(loginId, { status: "pending" });
+  void pollAndExchange(session)
+    .then((tokens) => {
+      const accountEmail = tokens.idToken ? decodeAccountEmail(tokens.idToken) : null;
+      openaiAuth.save({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, idToken: tokens.idToken, accountEmail });
+      openaiLogins.set(loginId, { status: "complete" });
+    })
+    .catch((err) => {
+      openaiLogins.set(loginId, { status: "error", error: err instanceof Error ? err.message : String(err) });
+    });
+  sendJson(res, 200, { loginId, verificationUrl: session.verificationUrl, userCode: session.userCode });
+}
+
+async function handleOpenAILoginStatus(res: ServerResponse, loginId: string | null): Promise<void> {
+  const state = loginId ? openaiLogins.get(loginId) : undefined;
+  if (!state) {
+    sendJson(res, 404, { error: "unknown or expired login attempt" });
+    return;
+  }
+  sendJson(res, 200, state);
+}
+
+async function handleOpenAIStatus(res: ServerResponse): Promise<void> {
+  const stored = openaiAuth.get();
+  sendJson(res, 200, { authenticated: Boolean(stored), accountEmail: stored?.accountEmail ?? null });
+}
+
+async function handleOpenAILogout(res: ServerResponse): Promise<void> {
+  const stored = openaiAuth.get();
+  if (stored) await revokeOpenAI(stored.accessToken);
+  openaiAuth.clear();
+  sendJson(res, 200, { loggedOut: true });
+}
+
 // Lightweight liveness probe — a real (cheap) DB query but no LLM call — so
 // anything that needs to know the process is up and the shared SQLite file
 // is reachable (a future Telegram bot, a supervisor script) doesn't have to
@@ -950,8 +1008,11 @@ async function handleProvider(res: ServerResponse): Promise<void> {
 async function handleSetProvider(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const payload = await readJson<{ provider?: string }>(req);
   const provider = payload?.provider;
-  if (provider !== "nvidia" && provider !== "deepseek" && provider !== "groq") { sendJson(res, 400, { error: "provider must be nvidia, deepseek or groq" }); return; }
-  if (!hasProviderCredentials(provider)) { sendJson(res, 400, { error: `${provider.toUpperCase()}_API_KEY is not set` }); return; }
+  if (provider !== "nvidia" && provider !== "deepseek" && provider !== "groq" && provider !== "openai") { sendJson(res, 400, { error: "provider must be nvidia, deepseek, groq or openai" }); return; }
+  if (!hasProviderCredentials(provider)) {
+    sendJson(res, 400, { error: provider === "openai" ? 'not connected — POST /api/openai/login/start first' : `${provider.toUpperCase()}_API_KEY is not set` });
+    return;
+  }
   setActiveProvider(provider);
   const models = await listAvailableModels();
   const currentModel = models.find((m) => m.id === config.nemotronModel);
@@ -1047,6 +1108,22 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/main") {
     handleMainChat(res).catch((err) => console.error("[ultron-web] activate main chat failed:", err));
+    return;
+  }
+  if (req.method === "POST" && path === "/api/openai/login/start") {
+    handleOpenAILoginStart(res).catch((err) => console.error("[ultron-web] openai login start failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/openai/login/status") {
+    handleOpenAILoginStatus(res, url.searchParams.get("loginId")).catch((err) => console.error("[ultron-web] openai login status failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/openai/status") {
+    handleOpenAIStatus(res).catch((err) => console.error("[ultron-web] openai status failed:", err));
+    return;
+  }
+  if (req.method === "POST" && path === "/api/openai/logout") {
+    handleOpenAILogout(res).catch((err) => console.error("[ultron-web] openai logout failed:", err));
     return;
   }
   if (chatMatch && chatMatch[2] === "/archive" && req.method === "POST") {

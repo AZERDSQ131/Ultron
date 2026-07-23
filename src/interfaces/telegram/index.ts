@@ -36,6 +36,8 @@ import { tools } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { withThreadLock } from "../../core/threadLock.js";
 import { log } from "../../core/logger.js";
+import { getOpenAIAuthRegistry } from "../../core/memory/openaiAuth.js";
+import { requestDeviceCode, pollAndExchange, decodeAccountEmail } from "../../core/llm/openaiAuth.js";
 
 // Third entry point alongside the CLI and the web UI (see CLAUDE.md's
 // "Interface" decision) — same buildGraph(), same shared SQLite file, so a
@@ -429,7 +431,8 @@ const modelPickerCache = new Map<number, { id: string; provider: LlmProvider }[]
 
 const HELP_TEXT = `local commands
 /help — show this help
-/provider [nvidia|deepseek|groq] — switch chat-completion provider (bare cycles)
+/provider [nvidia|deepseek|groq|openai] — switch chat-completion provider (bare cycles)
+/login openai — connect a ChatGPT account via device-code OAuth
 /model [query] — search and select a model across NVIDIA, DeepSeek and Groq
 /status — show provider, model, memory, tool and runtime status
 /context — show current context usage
@@ -722,21 +725,53 @@ bot.command("model", async (ctx) => {
 bot.command("provider", async (ctx) => {
   const requested = ctx.match?.trim().toLowerCase();
   let next: LlmProvider;
-  if (requested === "nvidia" || requested === "deepseek" || requested === "groq") {
+  if (requested === "nvidia" || requested === "deepseek" || requested === "groq" || requested === "openai") {
     next = requested;
   } else if (requested) {
-    await send(ctx.chat.id, "[ultron] use /provider nvidia, /provider deepseek or /provider groq.");
+    await send(ctx.chat.id, "[ultron] use /provider nvidia, /provider deepseek, /provider groq or /provider openai.");
     return;
   } else {
     next = nextConfiguredProvider(config.provider);
   }
   if (!hasProviderCredentials(next)) {
-    await send(ctx.chat.id, `[ultron] ${next.toUpperCase()}_API_KEY is not set — cannot switch to ${next} (see .env.example).`);
+    const hint = next === "openai" ? 'not connected — run "/login openai" first' : `${next.toUpperCase()}_API_KEY is not set (see .env.example)`;
+    await send(ctx.chat.id, `[ultron] ${hint} — cannot switch to ${next}.`);
     return;
   }
   setActiveProvider(next);
   graph = buildGraph();
   await send(ctx.chat.id, `[ultron] provider set to ${next} (model: ${config.nemotronModel}).`);
+});
+
+// /login openai — device-code OAuth against a ChatGPT account (see
+// core/llm/openaiAuth.ts's header comment for the verified flow). A login
+// is global (one ULTRON install, one ChatGPT account), not per-chat.
+bot.command("login", async (ctx) => {
+  const requested = ctx.match?.trim().toLowerCase();
+  if (requested !== "openai") {
+    await send(ctx.chat.id, "[ultron] use /login openai.");
+    return;
+  }
+  try {
+    const session = await requestDeviceCode();
+    await send(ctx.chat.id, `[ultron] open ${session.verificationUrl} and enter code ${session.userCode} (expires in 15 min)…`);
+    pollAndExchange(session)
+      .then((tokens) => {
+        const accountEmail = tokens.idToken ? decodeAccountEmail(tokens.idToken) : null;
+        getOpenAIAuthRegistry(config.databasePath).save({
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          idToken: tokens.idToken,
+          accountEmail,
+        });
+        void send(ctx.chat.id, `[ultron] connected to ChatGPT${accountEmail ? ` as ${accountEmail}` : ""}. Try /provider openai.`);
+      })
+      .catch((err) => {
+        void send(ctx.chat.id, `[ultron] ChatGPT login failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  } catch (error) {
+    await send(ctx.chat.id, `[ultron] ChatGPT login failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 });
 
 bot.command("quit", async (ctx) => {

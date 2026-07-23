@@ -95,7 +95,8 @@ export const COMMANDS = [
   { name: "/security", desc: "set tool approval: bypass, accept_edit or manual" },
   { name: "/permissions", desc: "open the tool-approval mode menu" },
   { name: "/model", desc: "open the model picker" },
-  { name: "/provider", desc: "cycle or set chat-completion provider: nvidia, deepseek or groq" },
+  { name: "/provider", desc: "cycle or set chat-completion provider: nvidia, deepseek, groq or openai" },
+  { name: "/login", desc: "openai — connect a ChatGPT account via device-code OAuth" },
   { name: "/theme", desc: "set theme: system, dark or light" },
   { name: "/verbose", desc: "toggle timing and token metrics" },
   { name: "/memory", desc: "list, clear, or forget auto-accumulated observations about you" },
@@ -683,7 +684,7 @@ async function runCommand(raw) {
     addSystemNote(
       "[ultron] commands: /status · /context · /stop · /retry · /compact · /archive · /resume · " +
         "/main · /delete · /think on|low|off · /task none|todo|plan|goal · /security bypass|accept_edit|manual · " +
-        "/permissions · /provider [nvidia|deepseek|groq] · /model · /theme system|dark|light · /verbose on|off · /memory [clear|forget <id>] · " +
+        "/permissions · /provider [nvidia|deepseek|groq|openai] · /login openai · /model · /theme system|dark|light · /verbose on|off · /memory [clear|forget <id>] · " +
         "/health · /tokens · /finance · /export [path|on|off] · /clear · /quit",
     );
     return;
@@ -854,8 +855,8 @@ async function runCommand(raw) {
 
   if (command === "/provider") {
     const target = arg.trim().toLowerCase();
-    if (target && !["nvidia", "deepseek", "groq"].includes(target)) {
-      addSystemNote("[ultron] use /provider nvidia, /provider deepseek or /provider groq.", true);
+    if (target && !["nvidia", "deepseek", "groq", "openai"].includes(target)) {
+      addSystemNote("[ultron] use /provider nvidia, /provider deepseek, /provider groq or /provider openai.", true);
       return;
     }
     try {
@@ -863,7 +864,7 @@ async function runCommand(raw) {
       const configured = current.configured ?? ["nvidia"];
       let next = target;
       if (!next) {
-        const order = ["nvidia", "deepseek", "groq"];
+        const order = ["nvidia", "deepseek", "groq", "openai"];
         const start = order.indexOf(current.current);
         for (let step = 1; step <= order.length; step++) {
           const candidate = order[(start + step) % order.length];
@@ -871,7 +872,8 @@ async function runCommand(raw) {
         }
       }
       if (target && !configured.includes(target)) {
-        addSystemNote(`[ultron] ${target.toUpperCase()}_API_KEY is not set on the server — cannot switch to ${target}.`, true);
+        const hint = target === "openai" ? 'not connected — run "/login openai" first' : `${target.toUpperCase()}_API_KEY is not set on the server`;
+        addSystemNote(`[ultron] ${hint} — cannot switch to ${target}.`, true);
         return;
       }
       if (next === current.current) {
@@ -883,6 +885,28 @@ async function runCommand(raw) {
       addSystemNote(`[ultron] provider set to ${data.provider} (model: ${data.model}).`);
     } catch (err) {
       addSystemNote(`[ultron] could not switch provider: ${err.message ?? err}`, true);
+    }
+    return;
+  }
+
+  if (command === "/login") {
+    const target = arg.trim().toLowerCase();
+    if (target !== "openai") {
+      addSystemNote("[ultron] use /login openai.", true);
+      return;
+    }
+    try {
+      const start = await api.openaiLoginStart();
+      addSystemNote(`[ultron] open ${start.verificationUrl} and enter code ${start.userCode} (expires in 15 min)…`);
+      const poll = async () => {
+        const status = await api.openaiLoginStatus(start.loginId);
+        if (status.status === "pending") { setTimeout(poll, 2000); return; }
+        if (status.status === "complete") { addSystemNote("[ultron] connected to ChatGPT. Try /provider openai."); return; }
+        addSystemNote(`[ultron] ChatGPT login failed: ${status.error}`, true);
+      };
+      setTimeout(poll, 2000);
+    } catch (err) {
+      addSystemNote(`[ultron] ChatGPT login failed: ${err.message ?? err}`, true);
     }
     return;
   }

@@ -9,6 +9,7 @@ struct ModelPickerSheet: View {
     @State private var current = ""
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var showOpenAILogin = false
 
     var body: some View {
         NavigationStack {
@@ -18,6 +19,13 @@ struct ModelPickerSheet: View {
                 }
                 ForEach(groups, id: \.provider) { group in
                     Section(group.provider.uppercased()) {
+                        if group.provider == "openai" && group.models.isEmpty {
+                            Button {
+                                showOpenAILogin = true
+                            } label: {
+                                Label("Se connecter à ChatGPT…", systemImage: "bubble.left.and.bubble.right")
+                            }
+                        }
                         ForEach(group.models) { model in
                             Button {
                                 onPicked(group.provider, model.id)
@@ -41,6 +49,16 @@ struct ModelPickerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Fermer") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showOpenAILogin) {
+                OpenAILoginSheet {
+                    Task {
+                        if let response = try? await client.groupedModels() {
+                            groups = response.groups
+                            current = response.current
+                        }
+                    }
                 }
             }
             .task {

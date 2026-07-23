@@ -264,6 +264,48 @@ Fix, on explicit request ("retire la notion de Main"):
   real LLM call hit a provider rate limit during testing and fell back to the placeholder exactly
   as designed — the fallback path itself is proof the error handling works).
 
+## OpenAI as a 4th provider — ChatGPT device-code OAuth (done)
+
+Requested as "OpenAI OAuth" — initially pushed back since `api.openai.com` has no consumer OAuth,
+but the user pointed at a real precedent (OpenClaw) using the exact mechanism OpenAI's own
+open-source `codex` CLI uses: sign in with a ChatGPT Plus/Pro/Team account, use its included model
+quota (GPT-5.6 family) instead of a metered API key. Verified directly against `openai/codex`'s
+Rust source on GitHub (not blog posts) before writing any code — every endpoint, param name and
+the client_id below is exactly what that implementation uses.
+
+- **Device-code flow** (`src/core/llm/openaiAuth.ts`) — headless-friendly, no local browser
+  callback needed on the machine running ULTRON: `POST
+  https://auth.openai.com/api/accounts/deviceauth/usercode` → `user_code` + verification URL
+  (`https://auth.openai.com/codex/device`); poll `POST .../deviceauth/token` until approved →
+  authorization code + PKCE pair; exchange at `POST https://auth.openai.com/oauth/token` →
+  `{id_token, access_token, refresh_token}`. Public PKCE client id
+  `app_EMoamEEZ73f0CkXaXp7hrann` (safe to hardcode — no client_secret for a PKCE public client).
+  Refresh/revoke hit the same `/oauth/token`/`/oauth/revoke` endpoints.
+- `OpenAIAuthRegistry` (`src/core/memory/openaiAuth.ts`) persists the token set globally (one row,
+  like `UserModelRegistry`) — plaintext, consistent with the project's already-documented minimal
+  security posture. `getValidAccessToken` decodes the access token's JWT `exp` claim and refreshes
+  proactively ~60s before expiry.
+- Model calls go through `https://chatgpt.com/backend-api/codex` using OpenAI's Responses API
+  shape — `@langchain/openai@0.4.9`'s `ChatOpenAI` supports this via `useResponsesApi: true`, no
+  custom HTTP client needed. **`createNemotronModel` stays synchronous** despite refresh being an
+  async network call: a custom `configuration.fetch` override resolves/refreshes the token right
+  before each actual HTTP request instead of at construction time, so `buildGraph()` and its many
+  callers didn't need to become async too.
+- Model catalog: `GET https://chatgpt.com/backend-api/codex/models`, same live-discovery shape as
+  NVIDIA/Groq in `src/core/llm/models.ts`.
+- Server endpoints (`src/interfaces/web/server.ts`), same start/background-loop/status shape
+  already used for `spawn_agent`'s background runs: `POST /api/openai/login/start`, `GET
+  /api/openai/login/status?loginId=`, `GET /api/openai/status`, `POST /api/openai/logout`. A login
+  is global (one ULTRON install, one ChatGPT account) — connecting from any one interface makes
+  `openai` available on all of them.
+- Login UX added to all four interfaces per explicit request: `/login openai` on local CLI, remote
+  CLI, and Telegram; the web command palette's `/login openai`; `OpenAILoginSheet.swift` on mobile
+  (surfaced from the model picker's empty "OPENAI" group).
+- Verified live: `POST /api/openai/login/start` against the real `auth.openai.com` returned a
+  genuine device code + verification URL, confirming the endpoint/client_id/request-shape chain is
+  correct end-to-end (didn't complete a full login — that needs real ChatGPT credentials — but a
+  real server accepting the request and returning a real code is strong structural proof).
+
 ## Jetson deployment + Mac access (in progress)
 
 Target architecture (see `docs/agent-ia-personnel.md`'s follow-up discussion, not yet written back into that file): ULTRON's process — web server, Telegram bot, database — lives permanently on a Jetson Orin Nano, reachable over Tailscale; the Mac is a client plus a remote-controllable target, not where the graph runs.
