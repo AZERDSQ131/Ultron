@@ -16,6 +16,7 @@ import { markdownToTelegramHtml } from "./format.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { formatTurnStats, recordUsage } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
+import { autoTitleChat } from "../../core/chatTitler.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
@@ -902,7 +903,7 @@ bot.on("message:text", async (ctx) => {
   const session = getSession(ultronChatId);
   chats.setFocus(ultronChatId, `telegram:${ctx.chat.id}`);
   chatEvents.append(ultronChatId, "human", "telegram", text);
-  chats.maybeAutoTitle(ultronChatId, text);
+  autoTitleChat(chats, ultronChatId, text);
   chats.touch(ultronChatId);
 
   // Same as the CLI/web: selecting "goal" mode just arms it, and the next

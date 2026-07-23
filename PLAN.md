@@ -201,7 +201,7 @@ continue any conversation** — `/resume`, `/main` and `/delete` were removed en
 local CLI, the remote CLI, and Telegram. `ChatEventSource` stays two-valued by choice (no third
 "web"/"mobile" category).
 
-- Local/remote CLI: startup now always resolves to the shared `CLI_CHAT_SCOPE` Main
+- Local/remote CLI: startup now always resolves to the shared `CLI_CHAT_SCOPE` anchor chat
   (`chats.activateMain(CLI_CHAT_SCOPE)` locally, `POST /api/main` remotely) and never moves again
   — no more `getFocus`/`/api/focus` lookup, no more "switched to X from the other interface" live
   poll (`syncFocusedChat` in `remote.ts`, deleted along with the now-unused `GET /api/focus` route
@@ -221,8 +221,43 @@ local CLI, the remote CLI, and Telegram. `ChatEventSource` stays two-valued by c
   same behavior.
 - **Accepted limitation**: since `ChatEventSource` stays two-valued, the local CLI still can't
   distinguish "my own turn" from "a turn the mobile app just sent on this same chat" (both are
-  `"cli"`) — a mobile-authored message into the CLI's Main won't appear live in an already-open
-  terminal (it's there on the next history reload; nothing is lost in SQLite).
+  `"cli"`) — a mobile-authored message into the CLI's anchor chat won't appear live in an
+  already-open terminal (it's there on the next history reload; nothing is lost in SQLite).
+
+## No more "Main" chat + real per-conversation titles (done)
+
+Follow-up bug found while using the fix above: deleting the CLI's anchor conversation from the
+mobile app made it reappear instantly. Root cause: `ChatRegistry.delete()` (`src/core/memory/
+chats.ts`) special-cased "was this the scope's current main/focus chat?" and, if so, immediately
+created and adopted a fresh replacement titled the literal string `"Main"` *before* deleting the
+old row — so any client polling the chat list saw it resurrect in real time. `activateMain` also
+forced that same literal `"Main"` rename whenever the anchor still had the placeholder title.
+
+Fix, on explicit request ("retire la notion de Main"):
+- `delete(id)` is now an unconditional row delete, no `scope` parameter, no special-casing, no
+  recreation of anything. A scope's anchor chat is created lazily by `getMain` only the next time
+  that scope genuinely needs one (e.g. the CLI actually starting up) — never as an instantaneous
+  side effect of some other client's delete call. `archiveAndCreate` (the web UI's own `/archive`)
+  also stopped special-casing "Main" the same way; a rotated-in chat is just an ordinary
+  `DEFAULT_CHAT_TITLE` row now.
+- No chat is ever titled the literal string `"Main"` again — every chat, including a CLI/Telegram
+  anchor, starts as `DEFAULT_CHAT_TITLE` ("New chat") and gets a real title the same way every
+  other chat does (next point).
+- **Every chat now gets an actual agent-generated title**, not just `deriveTitle`'s plain
+  truncation of the first message. New `src/core/chatTitler.ts`: `autoTitleChat(chats, chatId,
+  text)` sets the old deterministic placeholder instantly (so the list never sits on "New chat"
+  for long), then fires `generateChatTitle` — a separate, cheap LLM call (`createNemotronModel
+  ("low")`, same fire-and-forget shape as `judgeGoal`/`recordUserModelObservation`, logged under
+  a new `"chat_title"` usage kind in `UsageKind`) — in the background, overwriting the placeholder
+  once it resolves. Never blocks the turn; never clobbers a title the user already changed; falls
+  back silently to the placeholder on any failure. Wired into all three call sites that used to
+  call the now-removed `ChatRegistry.maybeAutoTitle` (`server.ts`'s `handleTurn`, the local CLI,
+  Telegram).
+- Verified live against a local `pnpm web`: created a chat, confirmed it starts as "New chat" (no
+  "Main" anywhere), deleted the CLI's anchor chat (`ultron-main`) and confirmed it does **not**
+  reappear in `GET /api/chats`, and confirmed the placeholder-then-real-title flow engages (the
+  real LLM call hit a provider rate limit during testing and fell back to the placeholder exactly
+  as designed — the fallback path itself is proof the error handling works).
 
 ## Jetson deployment + Mac access (in progress)
 

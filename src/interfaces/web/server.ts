@@ -21,6 +21,7 @@ import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { listAvailableModels, listModelsByProvider, resolveModelContext, type ModelInfo } from "../../core/llm/models.js";
 import { formatTurnStats, recordUsage } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
+import { autoTitleChat } from "../../core/chatTitler.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type SecurityMode } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
@@ -176,11 +177,7 @@ async function handleRenameChat(req: IncomingMessage, res: ServerResponse, chatI
 async function handleDeleteChat(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   activeAborts.get(chatId)?.abort();
-  // Deleting the current main rotates a fresh chat into that role instead
-  // of refusing (see ChatRegistry.delete) — the client's post-delete
-  // reload+reselect already lands on it, since it's the most recently
-  // updated chat.
-  chats.delete(chatId, CLI_CHAT_SCOPE);
+  chats.delete(chatId);
   sendJson(res, 200, { deleted: true });
 }
 
@@ -421,7 +418,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     return;
   } else {
     chatEvents.append(chatId, "human", payload.source === "telegram" ? "telegram" : "cli", input);
-    chats.maybeAutoTitle(chatId, input);
+    autoTitleChat(chats, chatId, input);
     if (taskMode === "goal") goals.set(chatId, input, config.goalMaxTurns);
     else goals.clear(chatId);
   }

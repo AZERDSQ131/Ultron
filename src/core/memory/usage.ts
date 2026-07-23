@@ -2,13 +2,14 @@ import { DatabaseSync } from "node:sqlite";
 
 // Every LLM call ULTRON makes, across every interface and every provider —
 // the main chat turn (CLI/web/Telegram) as well as the cheap separate calls
-// (narrator.ts, goalJudge.ts, userModelExtractor.ts, visionAnalyzer.ts) —
-// logged here so the web UI's "Tokens" page (see usageView.js) can answer
-// "how much am I actually using, on what, and on which provider" instead of
-// only ever showing the current turn's stats line and then forgetting it.
-// Global like UserModelRegistry/HealthRegistry, never purged.
+// (narrator.ts, goalJudge.ts, userModelExtractor.ts, visionAnalyzer.ts,
+// chatTitler.ts) — logged here so the web UI's "Tokens" page (see
+// usageView.js) can answer "how much am I actually using, on what, and on
+// which provider" instead of only ever showing the current turn's stats
+// line and then forgetting it. Global like UserModelRegistry/HealthRegistry,
+// never purged.
 
-export type UsageKind = "chat" | "narrator" | "goal_judge" | "user_model" | "vision";
+export type UsageKind = "chat" | "narrator" | "goal_judge" | "user_model" | "vision" | "chat_title";
 
 export interface UsageEntry {
   provider: string;

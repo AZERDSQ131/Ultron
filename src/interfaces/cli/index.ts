@@ -18,6 +18,7 @@ import { config, setActiveModel, setActiveProvider, nextConfiguredProvider, hasP
 import { formatTurnStats, recordUsage } from "../../core/llm/usage.js";
 import { listAvailableModels, listModelsByProvider, resolveModelContext } from "../../core/llm/models.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
+import { autoTitleChat } from "../../core/chatTitler.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
@@ -741,7 +742,7 @@ async function main() {
         }
       }
 
-      if (command !== "/retry") chats.maybeAutoTitle(currentChatId, input);
+      if (command !== "/retry") autoTitleChat(chats, currentChatId, input);
       chats.touch(currentChatId);
 
       // The selector describes the current request, not the whole chat.

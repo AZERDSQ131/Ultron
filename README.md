@@ -132,9 +132,11 @@ web UI's sidebar and the iOS app** (`ios/`, badges each chat "CLI" or
 "Telegram" using a server-computed origin field on `GET /api/chats`). The
 local CLI, remote CLI and Telegram bot are deliberately pure chat
 terminals: each always continues its own one fixed conversation (the
-shared "cli"-scope Main for both CLIs, this Telegram chat's own linked
-thread for Telegram) and carries no `/resume`/`/main`/`/delete` commands of
-its own anymore — that capability moved entirely to the two interfaces
+shared "cli"-scope anchor chat for both CLIs, this Telegram chat's own
+linked thread for Telegram) — an ordinary chat like any other, with no
+special title or protection from deletion, auto-titled from its first
+message the same way — and carries no `/resume`/`/main`/`/delete` commands
+of its own anymore — that capability moved entirely to the two interfaces
 built for browsing a list.
 
 The web UI also has:

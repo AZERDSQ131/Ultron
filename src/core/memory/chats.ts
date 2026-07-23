@@ -206,22 +206,27 @@ export class ChatRegistry {
     this.db.prepare("INSERT INTO chat_meta (key, value) VALUES ('legacy_migrated', '1') ON CONFLICT(key) DO NOTHING").run();
   }
 
-  // The main conversation is a shared return point for the CLI and Telegram.
-  // Its chat id may rotate when the main conversation is archived; the
-  // main_chat_id pointer keeps /main separate from archived history.
+  // The scope's anchor conversation — what the local/remote CLI and a given
+  // Telegram chat always resume. Not a specially-titled or undeletable chat:
+  // it's an ordinary row like any other, auto-titled from its first message
+  // the same way (see chatTitler.ts). Its chat id may rotate (e.g. after the
+  // web UI's /archive) — the main_chat_id pointer just tracks which id that
+  // currently is.
   activateMain(scope: string = CLI_CHAT_SCOPE): Chat {
     const main = this.getMain(scope);
-    if (main.title === DEFAULT_CHAT_TITLE) this.rename(main.id, "Main");
-    const activeMain = this.get(main.id)!;
-    this.setFocus(activeMain.id, scope);
-    return activeMain;
+    this.setFocus(main.id, scope);
+    return main;
   }
 
   getMain(scope: string = CLI_CHAT_SCOPE): Chat {
     const row = this.db.prepare("SELECT main_chat_id FROM chat_focus_scoped WHERE scope = ?").get(scope) as { main_chat_id?: string | null } | undefined;
     const configured = row?.main_chat_id ? this.get(row.main_chat_id) : undefined;
     if (configured) return configured;
-    const main = scope === CLI_CHAT_SCOPE ? this.ensure(LEGACY_CHAT_ID, "Main") : this.create("Main");
+    // Lazily creates a fresh ordinary chat only when actually needed (e.g.
+    // the CLI is starting up) — never as an immediate side effect of
+    // deleting the previous one, which used to make a deleted "main" chat
+    // reappear instantly in any client polling the chat list.
+    const main = scope === CLI_CHAT_SCOPE ? this.ensure(LEGACY_CHAT_ID) : this.create();
     this.setMain(main.id, scope);
     this.setFocus(main.id, scope);
     return main;
@@ -264,7 +269,7 @@ export class ChatRegistry {
   archiveAndCreate(id: string, title?: string): { archived: Chat | undefined; fresh: Chat } {
     const wasMain = this.getMain().id === id;
     const archived = this.archive(id, title);
-    const fresh = this.create(wasMain ? "Main" : DEFAULT_CHAT_TITLE);
+    const fresh = this.create();
     if (wasMain) this.setMain(fresh.id);
     this.setFocus(fresh.id);
     return { archived, fresh };
@@ -305,31 +310,16 @@ export class ChatRegistry {
     this.db.prepare("UPDATE chats SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), id);
   }
 
-  // Called with the first human message of a chat; only takes effect while
-  // the chat still has the placeholder title, so it never clobbers a name
-  // the user picked deliberately.
-  maybeAutoTitle(id: string, text: string): void {
-    const chat = this.get(id);
-    if (!chat || chat.title !== DEFAULT_CHAT_TITLE) return;
-    this.rename(id, deriveTitle(text));
-  }
-
   // Delete the conversation from the registry only. Its LangGraph checkpoint
-  // is intentionally preserved, so this command removes it from /resume and
-  // the sidebars without destroying the underlying memory. Deleting the
-  // current main rotates a fresh chat into that role first (same pattern
-  // as archiveAndCreate) rather than refusing outright — main used to be
-  // permanently undeletable, but "just start over" is a legitimate thing
-  // to want for the one chat every interface always falls back to.
-  delete(id: string, scope: string = CLI_CHAT_SCOPE): boolean {
-    const wasMain = this.getMain(scope).id === id;
-    if (wasMain) {
-      const fresh = this.create("Main");
-      this.setMain(fresh.id, scope);
-      this.setFocus(fresh.id, scope);
-    }
+  // is intentionally preserved, so this removes it from every chat list
+  // without destroying the underlying memory. No chat is protected or
+  // auto-recreated — deleting a scope's current anchor conversation just
+  // deletes it; the next time that scope actually needs one (e.g. the CLI
+  // starting up), getMain lazily creates a fresh ordinary chat then. Doing
+  // that recreation here instead used to make a deleted "main" chat
+  // reappear instantly in any client polling the chat list.
+  delete(id: string): boolean {
     const deleted = this.db.prepare("DELETE FROM chats WHERE id = ?").run(id);
-    if (!wasMain && this.getFocus(scope)?.id === id) this.activateMain(scope);
     return Number(deleted.changes ?? 0) > 0;
   }
 }
