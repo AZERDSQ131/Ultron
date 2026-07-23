@@ -139,7 +139,10 @@ export class ChatRegistry {
     }));
   }
 
-  private getOrigin(id: string): "CLI" | "Tel" {
+  // Public so callers outside listResumable (e.g. the web server's
+  // GET /api/chats, for the mobile app's CLI/Telegram origin badge) can
+  // label a chat without duplicating this lookup.
+  getOrigin(id: string): "CLI" | "Tel" {
     try {
       const event = this.db.prepare("SELECT source FROM chat_events WHERE chat_id = ? ORDER BY id ASC LIMIT 1").get(id) as { source?: string } | undefined;
       if (event?.source === "telegram") return "Tel";

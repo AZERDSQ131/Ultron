@@ -103,19 +103,20 @@ interface at a time.
 - `src/interfaces/telegram/index.ts` (grammY, long polling — `pnpm telegram` / `start:telegram`), a
   third entry point next to the CLI and web UI: same `buildGraph()`, same shared SQLite file, so a
   Telegram conversation has the same memory, tools and personality as the other two.
-- Which ULTRON chat a Telegram chat points at is a movable pointer (`TelegramLinkRegistry`,
-  `src/core/memory/telegramLinks.ts`), not a fixed derivation — `/archive` and `/resume` both
-  repoint it, mirroring the CLI's "current chat per session" model despite Telegram having no
-  sidebar of its own. Every chat it touches is a normal row in `ChatRegistry`, visible from the web
-  sidebar too.
+- Which ULTRON chat a Telegram chat points at is set via `TelegramLinkRegistry`
+  (`src/core/memory/telegramLinks.ts`), auto-linked on first contact and fixed from then on —
+  see the "Conversation management moved to mobile" note below for why this is no longer
+  repointable from within Telegram itself. Every chat it touches is a normal row in
+  `ChatRegistry`, visible (and continuable) from the mobile app too.
 - No true token-by-token streaming: Telegram rate-limits `editMessageText`, so a single placeholder
   message is sent per turn, updated only when the active tool's name changes (a coarse "what's it
   doing" indicator) and once more with the final text.
 - Tool-approval interrupts (`accept_edit`/`manual` security mode) render as one inline-keyboard
   Approve/Deny covering the whole pending batch — not per-call like the CLI's y/n prompt or the
   web's approval block, since Telegram's UI doesn't lend itself to that level of granularity.
-- Full CLI command parity: `/help`, `/model`, `/status`, `/context`, `/stop`, `/retry`, `/compact`,
-  `/archive`, `/resume`, `/think`, `/task` (including `goal` mode's judge-then-continue
+- Full CLI command parity at the time (see "Conversation management moved to mobile" below for
+  `/resume`/`/main`/`/delete`'s later removal from both): `/help`, `/model`, `/status`, `/context`,
+  `/stop`, `/retry`, `/compact`, `/think`, `/task` (including `goal` mode's judge-then-continue
   loop, ported as a sequential loop of independent turns — see `runTurn`'s comment on why it must
   not recurse into a still-held per-chat lock, the way `server.ts`'s SSE goal continuation currently
   does), `/permissions`, `/security`, `/verbose`, `/memory`, `/clear`, `/theme`, `/quit`. Interactive
@@ -184,6 +185,44 @@ opening).
   or simulator.
 - Deferred, same as everywhere else: Agents/Schedules panel, Goal mode (CLI-only today), file/photo
   upload from mobile, push notifications.
+
+## Conversation management moved to mobile (done)
+
+Triggered by a real report: a message sent from the iOS app appeared on Telegram prefixed
+"🖥️ CLI › ...". Root cause: `ChatEventSource` (`src/core/memory/chatEvents.ts`) only has two
+values, `"cli"`/`"telegram"`, and `handleTurn` (`server.ts`) collapses any missing/other `source`
+to `"cli"` — the mobile app posts to `/api/turn` without a `source` field, exactly like the
+remote CLI and the browser web UI already did (this was a pre-existing gap, not mobile-specific).
+The chat the phone used happened to be linked to the user's Telegram conversation, so Telegram's
+cross-interface echo (`startEventSync`, `telegram/index.ts`) picked it up and relayed it.
+
+Resolution, on explicit request: **the mobile app is now the only place to browse, open, and
+continue any conversation** — `/resume`, `/main` and `/delete` were removed entirely from the
+local CLI, the remote CLI, and Telegram. `ChatEventSource` stays two-valued by choice (no third
+"web"/"mobile" category).
+
+- Local/remote CLI: startup now always resolves to the shared `CLI_CHAT_SCOPE` Main
+  (`chats.activateMain(CLI_CHAT_SCOPE)` locally, `POST /api/main` remotely) and never moves again
+  — no more `getFocus`/`/api/focus` lookup, no more "switched to X from the other interface" live
+  poll (`syncFocusedChat` in `remote.ts`, deleted along with the now-unused `GET /api/focus` route
+  and `handleChatFocus`).
+- Telegram: unaffected in practice — `currentChatId()`'s auto-link-on-first-contact and the
+  boot-time `startEventSync` restore loop never depended on the `/resume`/`/main`/`/delete`
+  commands, only their now-removed interactive triggers (inline keyboard + `resumeInto`) are gone.
+- `handleTurn` no longer calls `chats.setFocus(chatId, CLI_CHAT_SCOPE)` on every turn — that call
+  existed purely to feed the remote CLI's follow-along poll; without a reader, it was actively
+  harmful (any HTTP client opening an old chat silently relocated where the terminal CLI would
+  resume next time).
+- New: `GET /api/chats` now attaches `origin: "cli" | "telegram"` per chat, computed by
+  `ChatRegistry.getOrigin` (made public — same lookup `listResumable` already used, not
+  duplicated) — the mobile app renders it as a small badge (`ChatListRow.swift`) next to each
+  conversation. The web UI's own sidebar/archive panel is completely untouched: same routes
+  (`/api/chats/:id/archive`, `/api/chats/:id/resume`, `/api/chats/archived`, `POST /api/main`),
+  same behavior.
+- **Accepted limitation**: since `ChatEventSource` stays two-valued, the local CLI still can't
+  distinguish "my own turn" from "a turn the mobile app just sent on this same chat" (both are
+  `"cli"`) — a mobile-authored message into the CLI's Main won't appear live in an already-open
+  terminal (it's there on the next history reload; nothing is lost in SQLite).
 
 ## Jetson deployment + Mac access (in progress)
 

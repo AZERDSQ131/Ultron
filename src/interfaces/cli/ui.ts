@@ -18,7 +18,7 @@ import * as readline from "node:readline";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import type { ChatMessage, TaskMode, ToolApprovalDecision } from "../../core/graph.js";
-import type { Chat, SecurityMode } from "../../core/memory/chats.js";
+import type { SecurityMode } from "../../core/memory/chats.js";
 import type { Goal } from "../../core/memory/goals.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import type { LlmProvider } from "../../config.js";
@@ -28,7 +28,7 @@ import { listHubSkills, installHubSkill, type HubSkill } from "../../core/skills
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const CONTEXT_BAR_WIDTH = 20;
 export const INPUT_PROMPT = `${chalk.cyanBright.bold("you")} ${chalk.dim("›")} `;
-export const LOCAL_COMMANDS = ["/help", "/model", "/status", "/context", "/stop", "/retry", "/compact", "/resume", "/main", "/delete", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
+export const LOCAL_COMMANDS = ["/help", "/model", "/status", "/context", "/stop", "/retry", "/compact", "/think", "/task", "/theme", "/permissions", "/security", "/verbose", "/memory", "/quit"];
 
 // A lone plan_propose call gets rendered as a numbered plan, so callers need
 // this shape rather than the fuller LangGraph-native PendingToolCall from
@@ -536,109 +536,6 @@ export function readInput(
   });
 }
 
-// Minimal shape pickArchivedChat needs — satisfied directly by ChatRegistry
-// (local mode) and by a small REST-backed adapter (remote mode).
-export interface ArchivedChatSource {
-  listArchived(): Chat[] | Promise<Chat[]>;
-  delete(id: string): boolean | void | Promise<boolean | void>;
-}
-
-// Backs /resume: browse saved conversations, invoke one (Enter
-// and returns it as the new current chat) or delete one (Ctrl+D — purges it
-// via source.delete, keeps the picker open on the remaining list). Mirrors
-// the CLI's other arrow-key pickers (same keyboard/search/redraw behavior).
-export async function pickArchivedChat(contextLine: string, source: ArchivedChatSource): Promise<Chat | undefined> {
-  let archived = await source.listArchived();
-  if (archived.length === 0) return Promise.resolve(undefined);
-
-  return new Promise((resolve) => {
-    let query = "";
-    let selected = 0;
-    let finished = false;
-
-    const redraw = () => {
-      const matches = archived.filter((chat) => chat.title.toLowerCase().includes(query.toLowerCase()));
-      selected = Math.min(selected, Math.max(0, matches.length - 1));
-      const rows = matches.length
-        ? matches
-            .map((chat, index) => {
-              const marker = index === selected ? chalk.greenBright("›") : " ";
-              return `  ${marker} ${chat.title}`;
-            })
-            .join("\n")
-        : uiDim("  no matching archived chats");
-      const prompt = `${chalk.magentaBright.bold("resume")} ${uiDim("›")} `;
-      const content = transcript.endsWith("\n") ? transcript : `${transcript}\n`;
-      const picker = `${uiDim("Select a conversation · type to search · ↑/↓ navigate · Enter to resume · Ctrl+D to delete")}\n${rows}`;
-      const footer = `${rule()}\n${prompt}${query}\n${contextLine}\n${rule()}`;
-      const padding = Math.max(0, (stdout.rows || 24) - transcriptRows(content + `${picker}\n`) - 4);
-      stdout.write(`\x1b[2J\x1b[H${content}${picker}\n${"\n".repeat(padding)}${footer}`);
-      readline.moveCursor(stdout, 0, -2);
-      readline.cursorTo(stdout, prompt.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").length + query.length);
-    };
-
-    const finish = (chat?: Chat) => {
-      if (finished) return;
-      finished = true;
-      stdin.setRawMode?.(false);
-      stdin.removeListener("keypress", onKeypress);
-      cancelActiveInput = undefined;
-      renderScreen("", 0, contextLine);
-      flushRender();
-      resolve(chat);
-    };
-
-    const onKeypress = async (input: string, key: readline.Key) => {
-      const matches = archived.filter((chat) => chat.title.toLowerCase().includes(query.toLowerCase()));
-      if (key.ctrl && key.name === "d") {
-        const target = matches[selected];
-        if (target) {
-          await source.delete(target.id);
-          archived = archived.filter((chat) => chat.id !== target.id);
-          if (archived.length === 0) { finish(); return; }
-        }
-        redraw();
-        return;
-      }
-      if (key.name === "return" || key.name === "enter") {
-        finish(matches[selected]);
-        return;
-      }
-      if (key.name === "escape") {
-        finish();
-        return;
-      }
-      if (key.name === "up") {
-        if (matches.length) selected = (selected - 1 + matches.length) % matches.length;
-        redraw();
-        return;
-      }
-      if (key.name === "down") {
-        if (matches.length) selected = (selected + 1) % matches.length;
-        redraw();
-        return;
-      }
-      if (key.name === "backspace") {
-        query = query.slice(0, -1);
-        selected = 0;
-        redraw();
-        return;
-      }
-      if (!key.ctrl && !key.meta && input && !input.includes("\n") && !input.includes("\r")) {
-        query += input;
-        selected = 0;
-        redraw();
-      }
-    };
-
-    cancelActiveInput = () => finish();
-    readline.emitKeypressEvents(stdin);
-    stdin.setRawMode?.(true);
-    stdin.on("keypress", onKeypress);
-    redraw();
-  });
-}
-
 export interface ModelChoice {
   id: string;
   contextWindowTokens?: number;
@@ -1052,9 +949,8 @@ export function initResizeHandler(getModelName: () => string): void {
 
 export function printHelp() {
   appendTranscript(
-    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/provider")} [nvidia|deepseek|groq] cycle or set the chat-completion provider\n  ${chalk.cyanBright("/model")}    search and select a model across NVIDIA, DeepSeek and Groq\n  ${chalk.cyanBright("/status")}   show provider, model, memory and tool status\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/resume")}   browse conversations — Enter to resume, Ctrl+D to delete\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/health")}   show the last 7 days of ingested health data\n  ${chalk.cyanBright("/export")}   [path|on|off] live-export this chat to a file, updated after every turn\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
+    `${uiDim("  local commands")}\n  ${chalk.cyanBright("/help")}     show this help\n  ${chalk.cyanBright("/provider")} [nvidia|deepseek|groq] cycle or set the chat-completion provider\n  ${chalk.cyanBright("/model")}    search and select a model across NVIDIA, DeepSeek and Groq\n  ${chalk.cyanBright("/status")}   show provider, model, memory and tool status\n  ${chalk.cyanBright("/context")}  show context usage\n  ${chalk.cyanBright("/stop")}     stop the active generation\n  ${chalk.cyanBright("/retry")}    retry the last user message\n  ${chalk.cyanBright("/compact")}  summarize and compact session history\n  ${chalk.cyanBright("/think")}    set reasoning: on, low or off\n  ${chalk.cyanBright("/task")}     set task mode: none, todo, plan or goal (goal: next message sent becomes the objective)\n  ${chalk.cyanBright("/theme")}    terminal theme: auto, light or dark\n  ${chalk.cyanBright("/permissions")} choose bypass, accept_edit or manual with ↑/↓ + Enter\n  ${chalk.cyanBright("/security")} set tool approval: bypass, accept_edit or manual\n  ${chalk.cyanBright("/verbose")}  toggle timing and token metrics\n  ${chalk.cyanBright("/memory")}   list, clear, or forget auto-accumulated observations about you\n  ${chalk.cyanBright("/health")}   show the last 7 days of ingested health data\n  ${chalk.cyanBright("/export")}   [path|on|off] live-export this chat to a file, updated after every turn\n  ${chalk.cyanBright("/quit")}     stop ULTRON\n\n`,
   );
-  appendTranscript(`  ${chalk.cyanBright("/main")}     return to the main conversation\n  ${chalk.cyanBright("/delete")}   delete this conversation from the registry (memory preserved)\n\n`);
 }
 
 // Shared by /status and /task goal (bare or "status") — same one-liner

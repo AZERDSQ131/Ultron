@@ -14,9 +14,22 @@ struct ChatListRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            originBadge
             if chat.scheduleId != nil {
                 Text("⏰").font(.caption)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var originBadge: some View {
+        if let origin = chat.origin {
+            Text(origin == "telegram" ? "Telegram" : "CLI")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill((origin == "telegram" ? Color.blue : Color.gray).opacity(0.15)))
+                .foregroundStyle(origin == "telegram" ? .blue : .secondary)
         }
     }
 

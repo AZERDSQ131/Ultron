@@ -14,7 +14,7 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 - **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
 - **Memory**: local SQLite checkpoint database (`ultron-state.sqlite3`), custom `SqliteSaver` in `src/core/memory/checkpointer.ts` implementing LangGraph's `BaseCheckpointSaver` directly on Node's built-in `node:sqlite` (no `@langchain/langgraph-checkpoint-postgres`/`pg`, no `@langchain/langgraph-checkpoint-sqlite` — neither package's published versions match this project's `@langchain/core` ^0.3 / `langgraph` ^0.2 pin, and `node:sqlite` needs zero extra dependencies since Node 24 is already required).
 - **Chats**: conversations are no longer a single hardcoded thread. `src/core/memory/chats.ts` (`ChatRegistry`) tracks every chat (id, title, timestamps) in the same database file; a chat's `id` doubles as its LangGraph `thread_id`. The web UI's sidebar lists/creates/renames/deletes chats. The CLI keeps one "current chat" per process, resuming whichever chat was most recently active on either interface at startup; `/archive` finalizes the current chat and starts a fresh one rather than exiting. The legacy hardcoded thread id (`ultron-main`, exported as `LEGACY_CHAT_ID`) is migrated into the registry on first run via `chats.ensure(...)` so pre-existing history isn't orphaned.
-- **Interface**: terminal (v0.1), a local web UI (`src/interfaces/web/`), and a Telegram bot (`src/interfaces/telegram/`, grammY, long polling — `pnpm telegram`/`start:telegram`) — all three point at the same SQLite file, so they share memory, tools and personality. Which ULTRON chat a Telegram chat points at is a movable pointer (`TelegramLinkRegistry`, `src/core/memory/telegramLinks.ts`), not a fixed derivation — `/archive` and `/resume` (all three interfaces) can repoint it; every chat it touches is a normal row in `ChatRegistry`, visible in the web sidebar too. Telegram's `/clear` deliberately also wipes the thread's actual message state (`clearThreadMessages` in `graph.ts`), unlike the CLI/web's terminal-only `/clear` — Telegram has no visible scrollback reminding the user that history persists, so "just redraw" reads as a memory bug there (confirmed by a real report). Replies are converted from Markdown to Telegram's HTML parse mode (`src/interfaces/telegram/format.ts`). Archiving is a metadata flag on the `chats` row (`ChatRegistry.archive`/`unarchive`/`listArchived`, `src/core/memory/chats.ts`), not a data export — the chat's LangGraph checkpoint is untouched either way, so `/resume` reopens it with full context (tool calls included), not a lossy text reconstruction. `/chat` (a general "switch to any chat" command) was removed on explicit request in favor of `/archive`+`/resume` as the only session-switching surface across all three interfaces; `/resume`'s picker also deletes an archived chat outright (CLI: Ctrl+D in the picker; Telegram: a 🗑 button with a Yes/No confirm step; web: a delete button in the `#resume-overlay` panel).
+- **Interface**: terminal (v0.1), a local web UI (`src/interfaces/web/`), a Telegram bot (`src/interfaces/telegram/`, grammY, long polling — `pnpm telegram`/`start:telegram`), and a native iOS app (`ios/`) — all four point at the same SQLite file, so they share memory, tools and personality. **Conversation management (`/resume`, `/main`, `/delete`) was removed from the local CLI, remote CLI, and Telegram** (explicit request, following a report that the mobile app posting to a Telegram-linked chat produced a confusing "🖥️ CLI › ..." echo — the deeper reason was that `ChatEventSource` only has two values, `"cli"`/`"telegram"`, and any HTTP client that doesn't send an explicit `source` — the browser, the remote CLI, and now the mobile app — silently gets bucketed as `"cli"`). Those three interfaces are now pure chat terminals on one fixed conversation each: local/remote CLI always resume the shared `CLI_CHAT_SCOPE` Main (`chats.activateMain(CLI_CHAT_SCOPE)` at startup, never moved by a command again), Telegram always continues whatever chat is linked to that specific Telegram chat (`currentChatId()`, `telegram/index.ts` — auto-created/linked on first contact, independent of any command, see `TelegramLinkRegistry`, `src/core/memory/telegramLinks.ts`). **The mobile app (`ios/`) is now the only place to browse, open, and continue every conversation** (from either CLI or Telegram origin) — it lists every non-agent-owned chat via `GET /api/chats` (unchanged, was already unfiltered by scope) and just posts turns directly against a chat's id, no relinking API needed since `chat_id` already *is* the shared LangGraph `thread_id`. To label each row, `GET /api/chats` now attaches a computed `origin: "cli" | "telegram"` field per chat (`ChatRegistry.getOrigin`, made public, reused as-is from the logic `listResumable` already had — no duplicated lookup) — rendered as a small badge in `ChatListRow.swift`. The web UI's own sidebar/archive panel is untouched and keeps its full `/api/chats/:id/archive`, `/api/chats/:id/resume`, `/api/chats/archived`, `POST /api/main` routes exactly as before — only the CLI/Telegram *commands* that drove those flows disappeared, not the underlying web-facing routes. `handleTurn` (`server.ts`) no longer calls `chats.setFocus(chatId, CLI_CHAT_SCOPE)` on every HTTP turn — that call existed solely to feed the remote CLI's now-removed live "follow the other interface" poll (`syncFocusedChat`, deleted along with `GET /api/focus`/`handleChatFocus`, both now fully unused); without it, a mobile client freely opening an old conversation no longer silently hijacks which chat the terminal CLI is anchored to. **Known limitation, accepted as-is**: since `ChatEventSource` stays two-valued by explicit choice, the local CLI still can't tell "my own turn" apart from "a turn the mobile app just sent on this same chat" — a message sent from mobile into the CLI's Main conversation won't appear live in an already-open terminal (it's there on the next history reload; the SQLite-backed memory itself is never lost). Telegram's `/clear` deliberately still wipes the thread's actual message state (`clearThreadMessages` in `graph.ts`), unlike the CLI/web's terminal-only `/clear` — Telegram has no visible scrollback reminding the user that history persists, so "just redraw" reads as a memory bug there (confirmed by a real report). Replies are converted from Markdown to Telegram's HTML parse mode (`src/interfaces/telegram/format.ts`). Archiving is a metadata flag on the `chats` row (`ChatRegistry.archive`/`unarchive`/`listArchived`, `src/core/memory/chats.ts`), not a data export — the chat's LangGraph checkpoint is untouched either way, so reopening it (web's own resume, or the mobile app opening any chat) gets full context back (tool calls included), not a lossy text reconstruction.
 - **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [AGENT.md](AGENT.md). Do not let it default to English regardless of input language.
 - **System prompt split**: [SOUL.md](SOUL.md) is personality only (voice, tone, examples). [AGENT.md](AGENT.md) is everything else — tool-use protocol, language matching, other operational rules. Don't fold one into the other; `src/core/graph.ts` concatenates both at startup.
 - **Security intentionally minimal**: the user explicitly asked for **no Docker, no hardened secret management, full bypass of manual permissions/confirmations**. This is NOT an oversight — do not reintroduce sandboxing or confirmation gates without an explicit request.
@@ -66,7 +66,9 @@ implémentées.
 - TypeScript strict, Node.js 24+ attendu, pnpm 9.15.4.
 - LangGraph.js pour l'état et l'orchestration.
 - `@langchain/openai` contre l'endpoint OpenAI-compatible de NVIDIA.
-- API NVIDIA exclusivement, modèle par défaut `deepseek-ai/deepseek-v4-flash`.
+- NVIDIA est le provider par défaut, avec DeepSeek et Groq également supportés
+  via `LLM_PROVIDER` ou `/provider`; le modèle par défaut est
+  `deepseek-ai/deepseek-v4-flash`.
 - SQLite local (`node:sqlite`, natif à Node — aucune dépendance native
   supplémentaire) via un `SqliteSaver` écrit à la main dans
   `src/core/memory/checkpointer.ts`, partagé par le CLI et le serveur web.
@@ -296,11 +298,12 @@ indépendants.
 
 ## Qualité et tests
 
-Le compilateur TypeScript est strict et `pnpm typecheck` ainsi que `pnpm build`
-passent actuellement. Aucun test automatisé n'est présent. Les zones les plus
-importantes à couvrir seront le routage agent/outils, les retries et le
-nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
-   checkpointer SQLite.
+Le compilateur TypeScript est strict et `pnpm typecheck`, `pnpm test` (6 tests)
+ainsi que `pnpm build` passent actuellement. Il n'y a pas encore de lint ni de
+CI. La couverture est faible par rapport à la surface du projet : les zones
+les plus importantes à couvrir sont le routage agent/outils, les retries et le
+nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus, le
+serveur HTTP/SSE, les interruptions et le checkpointer SQLite.
 
 ## Risques techniques
 
@@ -322,6 +325,13 @@ nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
    attendu de `BaseCheckpointSaver` reste à la charge du projet.
 5. Le parsing HTML et la recherche DuckDuckGo sont volontairement légers et
    peuvent échouer sur des pages dynamiques ou des changements de format.
+6. `src/interfaces/web/server.ts` lit actuellement les corps HTTP sans plafond
+   et accepte les uploads base64 sans limite de taille : un client du réseau
+   Tailscale peut donc provoquer une forte consommation mémoire/disque.
+7. La continuation du mode `goal` crée un nouvel `AbortController` dans un
+   appel imbriqué sans le relier à la fermeture de la requête HTTP ; une
+   déconnexion du navigateur peut laisser la continuation consommer des tours
+   et des tokens.
 
 ## Prochaines actions recommandées
 
@@ -333,10 +343,13 @@ nettoyage des faux appels, le Ctrl+C, les outils fichiers/processus et le
    démarrer la phase vibe-coding.
 3. Concevoir les intégrations mail/calendrier et leur OAuth avant d'ajouter
    leurs outils.
-4. Définir le modèle persistant et le cycle de vie des tâches planifiées avant
-   d'implémenter les crons : exécution non interactive, reprise après arrêt,
-   prévention des chevauchements et rattachement à un chat dédié.
-5. Corriger les écarts documentaires au fur et à mesure de chaque nouveau
+4. Ajouter des limites de taille aux corps HTTP/uploads et propager
+   l'annulation de la requête aux continuations de `goal`.
+5. Ajouter des tests d'intégration du serveur HTTP/SSE et du scheduler, puis une
+   CI minimale (`typecheck`, `test`, `build`).
+6. Concevoir les intégrations mail/calendrier et leur OAuth avant d'ajouter
+   leurs outils.
+7. Corriger les écarts documentaires au fur et à mesure de chaque nouveau
    changement de code, conformément à `AGENTS.md`.
 
 ## Export en direct d'une conversation

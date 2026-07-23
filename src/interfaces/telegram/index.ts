@@ -8,7 +8,6 @@ import {
   compactThread,
   estimateContextUsage,
   getPendingApproval,
-  listChatMessages,
   prepareRetry,
   type TaskMode,
   type ToolApprovalDecision,
@@ -25,7 +24,7 @@ import { getMealExerciseLogRegistry } from "../../core/memory/mealExerciseLog.js
 import { savePhoto } from "../../core/health/photoStorage.js";
 import { analyzeHealthPhoto } from "../../core/health/visionAnalyzer.js";
 import { narrateLoggedEntry } from "../../core/health/narrator.js";
-import { getChatRegistry, type Chat } from "../../core/memory/chats.js";
+import { getChatRegistry } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry, type Goal } from "../../core/memory/goals.js";
@@ -119,17 +118,6 @@ function startEventSync(telegramChatId: number, chatId: string): void {
     }
   }, 750);
   eventSyncTimers.set(telegramChatId, timer);
-}
-
-function resetEventCursor(telegramChatId: number, chatId: string): void {
-  eventCursors.set(telegramChatId, chatEvents.latestId(chatId));
-}
-
-function restartEventSync(telegramChatId: number, chatId: string): void {
-  const timer = eventSyncTimers.get(telegramChatId);
-  if (timer) clearInterval(timer);
-  eventSyncTimers.delete(telegramChatId);
-  startEventSync(telegramChatId, chatId);
 }
 
 for (const link of links.list()) {
@@ -431,41 +419,9 @@ async function runTurn(telegramChatId: number, ultronChatId: string, input: { me
   }
 }
 
-// How many of the most recent ULTRON replies to preview right after
-// resuming — enough to remind the user where the conversation left off
-// without dumping the whole history into the chat. Only ULTRON's own
-// replies are replayed, one per Telegram message: the Bot API has no way
-// to send a message that appears as coming from the real user account, so
-// echoing the user's own past messages back through the bot would just be
-// misleading, especially for a chat that was actually typed on a different
-// interface (CLI/web) in the first place — those were never real Telegram
-// messages to begin with.
-const RESUME_PREVIEW_MESSAGES = 3;
-
-// /resume repoints this Telegram chat at an existing conversation. Its
-// LangGraph checkpoint is never copied or rewritten, so the full context is
-// restored. Unlike the CLI/web, which
-// redraw the whole thread on resume, Telegram has no persistent scrollback
-// to fall back on — without a preview here, "resumed" told the user
-// nothing about what they were actually resuming.
-async function resumeInto(telegramChatId: number, chat: Chat): Promise<void> {
-  chats.setFocus(chat.id, `telegram:${telegramChatId}`);
-  links.set(telegramChatId, chat.id);
-  restartEventSync(telegramChatId, chat.id);
-  await send(telegramChatId, `[ultron] resumed "${chat.title}".`);
-  const messages = await listChatMessages(graph, chat.id);
-  const recent = messages.filter((m) => m.role === "ai").slice(-RESUME_PREVIEW_MESSAGES);
-  // Each historical ULTRON reply is one Telegram message. Keep the reply's
-  // own paragraphs together so resume preserves the original message
-  // boundaries instead of turning one reply into a sequence of fragments.
-  for (const message of recent) await send(telegramChatId, message.content);
-  resetEventCursor(telegramChatId, chat.id);
-}
-
 // Short-lived cache so inline-keyboard callback data can stay a small index
 // instead of a full chat id (Telegram caps callback_data at 64 bytes, and
 // chat ids/titles routinely exceed that combined).
-const archivePickerCache = new Map<number, Chat[]>();
 const modelPickerCache = new Map<number, { id: string; provider: LlmProvider }[]>();
 
 // ---- commands ----
@@ -479,9 +435,6 @@ const HELP_TEXT = `local commands
 /stop — stop the active generation
 /retry — remove the previous reply and run the last message again
 /compact — summarize old messages and keep the recent turns
-/main — return to the main conversation
-/resume [query] — list saved conversations and open one with its full context
-/delete — remove this conversation from the list (memory preserved)
 /think on|low|off — set reasoning mode
 /task none|todo|plan|goal — set task mode (goal: next message becomes the objective)
 /permissions — choose bypass, accept_edit or manual
@@ -562,51 +515,6 @@ bot.command("compact", async (ctx) => {
       ? `[ultron] compacted ${result.before} messages into ${result.after} context messages.`
       : "[ultron] not enough history to compact yet.",
   );
-});
-
-bot.command("main", async (ctx) => {
-  const main = chats.activateMain(`telegram:${ctx.chat.id}`);
-  await resumeInto(ctx.chat.id, main);
-});
-
-bot.command("resume", async (ctx) => {
-  const query = ctx.match?.trim();
-  const conversations = chats.listResumable(`telegram:${ctx.chat.id}`);
-  if (!conversations.length) {
-    await send(ctx.chat.id, "[ultron] no saved conversations.");
-    return;
-  }
-  if (query) {
-    const match = conversations.find((c) => c.id === query || c.title.toLowerCase().includes(query.toLowerCase()));
-    if (!match) {
-      await send(ctx.chat.id, `[ultron] no conversation matches "${query}".`);
-      return;
-    }
-    await resumeInto(ctx.chat.id, match);
-    return;
-  }
-  const top = conversations.slice(0, 20);
-  archivePickerCache.set(ctx.chat.id, top);
-  const keyboard = new InlineKeyboard();
-  top.forEach((c, i) => {
-    keyboard.text(`▶ ${c.title.slice(0, 50) || "(untitled)"}`, `resume_open:${i}`);
-    keyboard.text("🗑", `resume_del:${i}`);
-    keyboard.row();
-  });
-  await send(ctx.chat.id, "Conversations:", { reply_markup: keyboard });
-});
-
-bot.command("delete", async (ctx) => {
-  const ultronChatId = currentChatId(ctx.chat.id);
-  const current = chats.get(ultronChatId);
-  if (!current) return;
-  // Deleting the current main rotates a fresh chat into that role instead
-  // of refusing (see ChatRegistry.delete) — activateMain below lands on it.
-  chats.delete(current.id, `telegram:${ctx.chat.id}`);
-  const next = chats.activateMain(`telegram:${ctx.chat.id}`);
-  links.set(ctx.chat.id, next.id);
-  restartEventSync(ctx.chat.id, next.id);
-  await send(ctx.chat.id, `[ultron] deleted "${current.title}". Memory preserved. Returned to main.`);
 });
 
 bot.command("think", async (ctx) => {
@@ -859,58 +767,6 @@ bot.callbackQuery(/^security:(.+):(bypass|accept_edit|manual)$/, async (ctx) => 
   await ctx.answerCallbackQuery();
   chats.setSecurityMode(ultronChatId, mode);
   await ctx.editMessageText(`[ultron] tool approval set to ${mode}.`).catch(() => {});
-});
-
-bot.callbackQuery(/^resume_open:(\d+)$/, async (ctx) => {
-  const index = Number((ctx.match as unknown as [string, string])[1]);
-  await ctx.answerCallbackQuery();
-  const list = archivePickerCache.get(ctx.chat!.id);
-  const entry = list?.[index];
-  if (!entry) {
-    await send(ctx.chat!.id, "[ultron] selection expired — run /resume again.");
-    return;
-  }
-  await ctx.editMessageText(`[ultron] resuming "${entry.title}"…`).catch(() => {});
-  await resumeInto(ctx.chat!.id, entry);
-});
-
-// Delete goes through a one-tap confirm step (editing the same message with
-// Yes/No) rather than deleting immediately — unlike resuming, this is
-// destructive and can't be undone (chats.delete purges the checkpoint too).
-bot.callbackQuery(/^resume_del:(\d+)$/, async (ctx) => {
-  const index = Number((ctx.match as unknown as [string, string])[1]);
-  await ctx.answerCallbackQuery();
-  const list = archivePickerCache.get(ctx.chat!.id);
-  const entry = list?.[index];
-  if (!entry) {
-    await send(ctx.chat!.id, "[ultron] selection expired — run /resume again.");
-    return;
-  }
-  const keyboard = new InlineKeyboard()
-    .text("Yes, delete", `resume_del_yes:${index}`)
-    .text("Cancel", `resume_del_no:${index}`);
-  await ctx.editMessageText(`Delete "${entry.title}" permanently?`, { reply_markup: keyboard }).catch(() => {});
-});
-
-bot.callbackQuery(/^resume_del_yes:(\d+)$/, async (ctx) => {
-  const index = Number((ctx.match as unknown as [string, string])[1]);
-  await ctx.answerCallbackQuery();
-  const list = archivePickerCache.get(ctx.chat!.id);
-  const entry = list?.[index];
-  if (!entry) {
-    await send(ctx.chat!.id, "[ultron] selection expired — run /resume again.");
-    return;
-  }
-  chats.delete(entry.id);
-  await ctx.editMessageText(`[ultron] deleted "${entry.title}".`).catch(() => {});
-});
-
-bot.callbackQuery(/^resume_del_no:(\d+)$/, async (ctx) => {
-  const index = Number((ctx.match as unknown as [string, string])[1]);
-  await ctx.answerCallbackQuery();
-  const list = archivePickerCache.get(ctx.chat!.id);
-  const entry = list?.[index];
-  await ctx.editMessageText(entry ? `[ultron] kept "${entry.title}".` : "[ultron] cancelled.").catch(() => {});
 });
 
 bot.callbackQuery("model:noop", async (ctx) => { await ctx.answerCallbackQuery(); });

@@ -142,7 +142,13 @@ function requireChat(res: ServerResponse, chatId: unknown): chatId is string {
 }
 
 async function handleListChats(res: ServerResponse): Promise<void> {
-  sendJson(res, 200, { chats: chats.list() });
+  // origin: "cli" | "telegram" — lets a client (the mobile app) show which
+  // interface a conversation came from without duplicating getOrigin's logic.
+  const withOrigin = chats.list().map((chat) => ({
+    ...chat,
+    origin: chats.getOrigin(chat.id) === "Tel" ? "telegram" : "cli",
+  }));
+  sendJson(res, 200, { chats: withOrigin });
 }
 
 async function handleCreateChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -414,7 +420,6 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     sendJson(res, 400, { error: "message text is required" });
     return;
   } else {
-    chats.setFocus(chatId, CLI_CHAT_SCOPE);
     chatEvents.append(chatId, "human", payload.source === "telegram" ? "telegram" : "cli", input);
     chats.maybeAutoTitle(chatId, input);
     if (taskMode === "goal") goals.set(chatId, input, config.goalMaxTurns);
@@ -591,10 +596,6 @@ async function handleResumeChat(res: ServerResponse, chatId: string): Promise<vo
 
 async function handleMainChat(res: ServerResponse): Promise<void> {
   sendJson(res, 200, { chat: chats.activateMain(CLI_CHAT_SCOPE) });
-}
-
-async function handleChatFocus(res: ServerResponse): Promise<void> {
-  sendJson(res, 200, { chat: chats.getFocus(CLI_CHAT_SCOPE) ?? chats.activateMain(CLI_CHAT_SCOPE) });
 }
 
 // Lightweight liveness probe — a real (cheap) DB query but no LLM call — so
@@ -1037,10 +1038,6 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/main") {
     handleMainChat(res).catch((err) => console.error("[ultron-web] activate main chat failed:", err));
-    return;
-  }
-  if (req.method === "GET" && path === "/api/focus") {
-    handleChatFocus(res).catch((err) => console.error("[ultron-web] get chat focus failed:", err));
     return;
   }
   if (chatMatch && chatMatch[2] === "/archive" && req.method === "POST") {

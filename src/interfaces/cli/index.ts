@@ -23,7 +23,7 @@ import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } f
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
 import { detectAnomalies } from "../../core/health/trends.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
-import { CLI_CHAT_SCOPE, getChatRegistry, type Chat } from "../../core/memory/chats.js";
+import { CLI_CHAT_SCOPE, getChatRegistry } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -44,7 +44,6 @@ import {
   initResizeHandler,
   isLightTerminal,
   markDanglingToolBlock,
-  pickArchivedChat,
   pickModel,
   pickPermission,
   printBanner,
@@ -94,9 +93,11 @@ async function main() {
   // Runs at most once ever (see ensureLegacyMigration): if the user later
   // deletes that chat, this must not resurrect it on the next restart.
   chats.ensureLegacyMigration();
-  // CLI focus is deliberately independent from Telegram focus.
-  let currentChatId = chats.getFocus(CLI_CHAT_SCOPE)?.id ?? chats.activateMain(CLI_CHAT_SCOPE).id;
-  chats.setFocus(currentChatId, CLI_CHAT_SCOPE);
+  // The local CLI is a pure chat terminal on the shared "cli" Main
+  // conversation — no /resume/main/delete here anymore, conversation
+  // management lives exclusively on the mobile app (and the web UI's own
+  // sidebar). Always the same chat, never moved by a command.
+  let currentChatId = chats.activateMain(CLI_CHAT_SCOPE).id;
   setActivePermissionLabel(chats.getSecurityMode(currentChatId));
 
   // The local CLI shares the database with Telegram directly. Keep listening
@@ -193,56 +194,6 @@ async function main() {
   } catch {
     // The model can still be used with the configured fallback window.
   }
-
-  const deleteCurrentChat = async (): Promise<void> => {
-    const current = chats.get(currentChatId);
-    if (!current) return;
-    // Deleting the current main rotates a fresh chat into that role
-    // instead of refusing (see ChatRegistry.delete) — activateMain below
-    // then lands on it.
-    chats.delete(current.id, CLI_CHAT_SCOPE);
-    const next = chats.activateMain(CLI_CHAT_SCOPE);
-    currentChatId = next.id;
-    eventCursor = chatEvents.latestId(currentChatId);
-    setActivePermissionLabel(chats.getSecurityMode(currentChatId));
-    setTranscript("");
-    printBanner(config.nemotronModel);
-    appendTranscript(uiDim(`[ultron] deleted "${current.title}". Memory preserved. Returned to main.\n\n`));
-  };
-
-  const resumeChat = async (contextLine: string, commandArgument: string): Promise<void> => {
-    let target: Chat | undefined;
-    if (!commandArgument) {
-      target = await pickArchivedChat(contextLine, { listArchived: () => chats.listResumable(CLI_CHAT_SCOPE), delete: (id) => chats.delete(id, CLI_CHAT_SCOPE) });
-    } else {
-      const query = commandArgument.toLowerCase();
-      target = chats.listResumable(CLI_CHAT_SCOPE).find((chat) => chat.id === commandArgument || chat.title.toLowerCase().includes(query));
-    }
-    if (!target) {
-      appendTranscript(chalk.yellow("[ultron] no archived chat selected.\n\n"));
-      return;
-    }
-    chats.setFocus(target.id, CLI_CHAT_SCOPE);
-    currentChatId = target.id;
-    setActivePermissionLabel(chats.getSecurityMode(currentChatId));
-    const messages = await listChatMessages(graph, currentChatId);
-    // Set the cursor after the checkpoint has been read but before drawing
-    // synchronously. This prevents an event arriving during the async
-    // history load from being displayed and then wiped by showRestoredMessages.
-    eventCursor = chatEvents.latestId(currentChatId);
-    showRestoredMessages(messages, config.nemotronModel);
-    appendTranscript(uiDim(`[ultron] resumed "${target.title}".\n\n`));
-  };
-
-  const switchToMain = async (): Promise<void> => {
-    const main = chats.activateMain(CLI_CHAT_SCOPE);
-    currentChatId = main.id;
-    setActivePermissionLabel(chats.getSecurityMode(currentChatId));
-    const messages = await listChatMessages(graph, currentChatId);
-    eventCursor = chatEvents.latestId(currentChatId);
-    showRestoredMessages(messages, config.nemotronModel);
-    appendTranscript(uiDim(`[ultron] switched to main conversation.\n\n`));
-  };
 
   process.on("SIGINT", () => {
     if (stopping) process.exit(0);
@@ -587,17 +538,6 @@ async function main() {
             );
             continue;
           }
-          case "/resume": {
-            await resumeChat(contextLine, commandArgument);
-            continue;
-          }
-          case "/main": {
-            await switchToMain();
-            continue;
-          }
-          case "/delete":
-            await deleteCurrentChat();
-            continue;
           case "/think":
             appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
@@ -629,10 +569,6 @@ async function main() {
             stopping = true;
             continue;
           default:
-            if (commandName === "/resume") {
-              await resumeChat(contextLine, commandArgument);
-              continue;
-            }
             if (command.startsWith("/think ")) {
               const mode = command.slice("/think ".length).trim();
               if (mode === "on" || mode === "full") thinkingMode = "full";
@@ -806,7 +742,6 @@ async function main() {
       }
 
       if (command !== "/retry") chats.maybeAutoTitle(currentChatId, input);
-      chats.setFocus(currentChatId, CLI_CHAT_SCOPE);
       chats.touch(currentChatId);
 
       // The selector describes the current request, not the whole chat.

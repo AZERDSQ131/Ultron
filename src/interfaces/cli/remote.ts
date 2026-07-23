@@ -30,7 +30,6 @@ import {
   initResizeHandler,
   isLightTerminal,
   markDanglingToolBlock,
-  pickArchivedChat,
   pickModel,
   pickPermission,
   printBanner,
@@ -100,13 +99,6 @@ async function apiDelete(path: string): Promise<void> {
   }
 }
 
-// Satisfies ui.ts's ArchivedChatSource — the remote equivalent of passing
-// ChatRegistry directly in the local CLI.
-const archivedChatSource = {
-  listArchived: async (): Promise<Chat[]> => (await apiGet("/api/chats/archived")).chats,
-  delete: async (id: string): Promise<void> => { await apiDelete(`/api/chats/${encodeURIComponent(id)}`); },
-};
-
 async function main() {
   try {
     await apiGet("/api/health");
@@ -115,20 +107,15 @@ async function main() {
     process.exit(1);
   }
 
+  // Pure chat terminal on the shared "cli" Main conversation — no
+  // /resume/main/delete here, conversation management lives exclusively on
+  // the mobile app (and the web UI's own sidebar). Always the same chat.
   let currentChatId: string;
   let currentChatTitle: string;
   {
-    const { chats } = await apiGet("/api/chats");
-    const focus = await apiGet("/api/focus");
-    const chat: Chat | undefined = focus.chat ?? chats[0];
-    if (chat) {
-      currentChatId = chat.id;
-      currentChatTitle = chat.title;
-    } else {
-      const created = await apiPost("/api/chats");
-      currentChatId = created.chat.id;
-      currentChatTitle = created.chat.title;
-    }
+    const { chat } = await apiPost("/api/main");
+    currentChatId = chat.id;
+    currentChatTitle = chat.title;
   }
 
   let eventCursor = 0;
@@ -144,25 +131,10 @@ async function main() {
     eventCursor = data.latestId ?? eventCursor;
   };
 
-  const syncFocusedChat = async (): Promise<boolean> => {
-    const data = await apiGet("/api/focus");
-    const focused = data.chat as Chat | undefined;
-    if (!focused || focused.id === currentChatId) return false;
-    currentChatId = focused.id;
-    currentChatTitle = focused.title;
-    await syncEventCursor();
-    setActivePermissionLabel(focused.securityMode);
-    const history = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/messages`);
-    showRestoredMessages(history.messages as ChatMessage[], modelName);
-    appendTranscript(uiDim(`[ultron] switched to "${focused.title}" from the other interface.\n\n`));
-    return true;
-  };
-
   const pollExternalEvents = async (): Promise<void> => {
     if (eventPollBusy) return;
     eventPollBusy = true;
     try {
-      if (await syncFocusedChat()) return;
       const data = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/events?after=${eventCursor}`);
       for (const event of data.events ?? []) {
         eventCursor = Math.max(eventCursor, event.id);
@@ -256,63 +228,6 @@ async function main() {
       appendTranscript(chalk.red(`[ultron] could not switch provider: ${error instanceof Error ? error.message : String(error)}\n\n`));
     }
     renderScreen("", 0, contextLine);
-  };
-
-  const deleteCurrentChat = async (): Promise<void> => {
-    const chats = (await apiGet("/api/chats")).chats as Chat[];
-    const current = chats.find((chat) => chat.id === currentChatId);
-    if (!current) {
-      appendTranscript(chalk.yellow("[ultron] current conversation is no longer registered.\n\n"));
-      return;
-    }
-    try {
-      await apiDelete(`/api/chats/${encodeURIComponent(currentChatId)}`);
-    } catch (error) {
-      appendTranscript(chalk.yellow(`[ultron] ${error instanceof Error ? error.message : String(error)}.\n\n`));
-      return;
-    }
-    await switchToMain();
-    setTranscript("");
-    printBanner(modelName);
-    appendTranscript(uiDim(`[ultron] deleted "${current.title}". Memory preserved. Returned to main.\n\n`));
-  };
-
-  const resumeChat = async (contextLine: string, commandArgument: string): Promise<void> => {
-    let target: Chat | undefined;
-    if (!commandArgument) {
-      target = await pickArchivedChat(contextLine, archivedChatSource);
-    } else {
-      const query = commandArgument.toLowerCase();
-      const archived: Chat[] = await archivedChatSource.listArchived();
-      target = archived.find((chat) => chat.id === commandArgument || chat.title.toLowerCase().includes(query));
-    }
-    if (!target) {
-      appendTranscript(chalk.yellow("[ultron] no archived chat selected.\n\n"));
-      return;
-    }
-    // Keep the server-side CLI focus aligned with this explicit selection;
-    // otherwise the background focus poll immediately sends us back to the
-    // CLI main chat and we stop receiving events from the resumed Telegram
-    // conversation.
-    await apiPost(`/api/chats/${encodeURIComponent(target.id)}/resume`);
-    currentChatId = target.id;
-    currentChatTitle = target.title;
-    await syncEventCursor();
-    setActivePermissionLabel(target.securityMode);
-    const { messages } = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/messages`);
-    showRestoredMessages(messages as ChatMessage[], modelName);
-    appendTranscript(uiDim(`[ultron] resumed "${target.title}".\n\n`));
-  };
-
-  const switchToMain = async (): Promise<void> => {
-    const data = await apiPost("/api/main");
-    currentChatId = data.chat.id;
-    currentChatTitle = data.chat.title;
-    await syncEventCursor();
-    setActivePermissionLabel(data.chat.securityMode);
-    const { messages } = await apiGet(`/api/chats/${encodeURIComponent(currentChatId)}/messages`);
-    showRestoredMessages(messages as ChatMessage[], modelName);
-    appendTranscript(uiDim("[ultron] switched to main conversation.\n\n"));
   };
 
   process.on("SIGINT", () => {
@@ -433,7 +348,6 @@ async function main() {
   }
 
   async function executeTurn(contextLine: string, body: { text?: string; retry?: boolean }): Promise<{ finalText: string; aborted: boolean; errored: boolean }> {
-    await syncFocusedChat();
     collapseDanglingToolBlock();
     abortController = new AbortController();
     const controller = abortController;
@@ -513,15 +427,6 @@ async function main() {
             );
             continue;
           }
-          case "/resume":
-            await resumeChat(contextLine, commandArgument);
-            continue;
-          case "/main":
-            await switchToMain();
-            continue;
-          case "/delete":
-            await deleteCurrentChat();
-            continue;
           case "/think":
             appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
             continue;
@@ -552,7 +457,6 @@ async function main() {
             stopping = true;
             continue;
           default:
-            if (commandName === "/resume") { await resumeChat(contextLine, commandArgument); continue; }
             if (command.startsWith("/think ")) {
               const mode = command.slice("/think ".length).trim();
               if (mode === "on" || mode === "full") thinkingMode = "full";

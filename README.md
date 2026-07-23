@@ -77,9 +77,6 @@ The current version provides a terminal conversation loop with:
   context gauge;
 - basic terminal Markdown styling, including `**bold**` text;
 - local slash commands for stopping, retrying, compacting and tuning reasoning;
-- `/resume`, `/main` and `/delete`: browse saved conversations, return to the
-  permanent main conversation, or remove a conversation from the registry
-  while preserving its LangGraph checkpoint memory;
 - over twenty tools for shell commands, files, HTTP/web requests, processes,
   schedules, macOS automation and the current date/time;
 - declared tool scopes (`read`, `write`, `destructive`) for architectural clarity;
@@ -106,35 +103,39 @@ before assuming ULTRON is up.
 A Telegram bot (`pnpm telegram`, grammY, long polling) is a third entry
 point: same `buildGraph()`, same shared SQLite file, so a Telegram chat has
 the same memory, tools and personality as the CLI and the web UI. Which
-ULTRON chat a Telegram chat currently points at is a movable pointer
-(`/archive` and `/resume` both repoint it), not a fixed mapping —
-every chat it touches is a normal row in `ChatRegistry`, visible from the
-web sidebar too. There's no true token-by-token streaming (Telegram
+ULTRON chat a given Telegram chat points at is auto-linked on first contact
+(`TelegramLinkRegistry`) and stays fixed from then on — every chat it
+touches is a normal row in `ChatRegistry`, visible (and continuable) from
+the mobile app too. There's no true token-by-token streaming (Telegram
 rate-limits message edits); a single placeholder message per turn is
 updated when the active tool changes and once more with the final text. A
 pending tool-approval interrupt (`accept_edit`/`manual` security mode)
 renders as one inline-keyboard Approve/Deny for the whole batch, not per
-call. Every CLI local command has a working equivalent — see `/help` inside
-the bot for the full list; interactive CLI pickers become inline keyboards,
-`/clear` wipes this conversation's actual message memory (`clearThreadMessages`
-in `graph.ts`) in addition to deleting what Telegram lets a bot delete of its
-own recent messages (own messages only, ~48h window) — unlike the CLI/web,
-where `/clear` only redraws the terminal and leaves the model's memory of the
-thread untouched, since there the visible scrollback is a constant reminder
-that history persists; Telegram has no such reminder, so the same "just
-redraw" behavior read as a memory bug. `/theme` is an intentional no-op
-(Telegram's own app controls that). Replies are converted from ULTRON's
-Markdown (`**bold**`, `` `code` ``, `# headers`, `~~strikethrough~~`, links)
-to Telegram's HTML parse mode (`src/interfaces/telegram/format.ts`), with a
-plain-text fallback if a reply's formatting somehow fails to parse. Requires
-`TELEGRAM_BOT_TOKEN` in `.env` (see `.env.example`).
+call. `/clear` wipes this conversation's actual message memory
+(`clearThreadMessages` in `graph.ts`) in addition to deleting what Telegram
+lets a bot delete of its own recent messages (own messages only, ~48h
+window) — unlike the CLI/web, where `/clear` only redraws the terminal and
+leaves the model's memory of the thread untouched, since there the visible
+scrollback is a constant reminder that history persists; Telegram has no
+such reminder, so the same "just redraw" behavior read as a memory bug.
+`/theme` is an intentional no-op (Telegram's own app controls that).
+Replies are converted from ULTRON's Markdown (`**bold**`, `` `code` ``,
+`# headers`, `~~strikethrough~~`, links) to Telegram's HTML parse mode
+(`src/interfaces/telegram/format.ts`), with a plain-text fallback if a
+reply's formatting somehow fails to parse. Requires `TELEGRAM_BOT_TOKEN` in
+`.env` (see `.env.example`).
 
-Conversations are organized as chats, each with its own id and title,
-listed in the web UI's sidebar (create, rename, delete, switch between
-them). Running `/archive` from the CLI finalizes the current chat and
-starts a new one, so the archived chat stays browsable and resumable from
-the web sidebar — the CLI itself always resumes whichever chat was most
-recently active on either interface.
+Conversations are organized as chats, each with its own id and title.
+**Conversation management — browsing, opening, and continuing any chat,
+whether it originated on the CLI or on Telegram — lives exclusively on the
+web UI's sidebar and the iOS app** (`ios/`, badges each chat "CLI" or
+"Telegram" using a server-computed origin field on `GET /api/chats`). The
+local CLI, remote CLI and Telegram bot are deliberately pure chat
+terminals: each always continues its own one fixed conversation (the
+shared "cli"-scope Main for both CLIs, this Telegram chat's own linked
+thread for Telegram) and carries no `/resume`/`/main`/`/delete` commands of
+its own anymore — that capability moved entirely to the two interfaces
+built for browsing a list.
 
 The web UI also has:
 
@@ -156,8 +157,13 @@ A native iOS app (`ios/`, SwiftUI, iOS 17+, zero external dependency) is a
 fourth client, in the same shape as the remote CLI: pure HTTP/SSE against the
 web server over Tailscale, no auth beyond that, no bank/database of its own.
 Its menu mirrors the web sidebar's chat list (grouped by day, agent-owned
-chats excluded) plus five modules — Finance, Health, Tokens, Skills, Memory —
-each backed by the same REST endpoints the web dashboards already use. The
+chats excluded, each row badged "CLI" or "Telegram" from a server-computed
+`origin` field) plus five modules — Finance, Health, Tokens, Skills, Memory —
+each backed by the same REST endpoints the web dashboards already use. It is
+now the primary place (alongside the web sidebar) to browse, open and
+continue any conversation regardless of which interface it started on — the
+CLI and Telegram no longer have their own `/resume`/`/main`/`/delete`
+commands. The
 conversation screen streams the same SSE turn events (`text`/`tool_call`/
 `tool_result`/`approval_required`/`done`) as every other interface, with a
 native tool-approval card and a composer bar mirroring the web's model/task-
@@ -255,9 +261,6 @@ The terminal handles these commands without sending them to Nemotron:
 | `/compact` | Summarize old session messages and keep the recent turns |
 | `/think on\|low\|off` | Enable full reasoning, low-effort reasoning, or no reasoning |
 | `/verbose on\|off` | Show or hide the per-turn stats line (model, input/output tokens, elapsed time, estimated cost) |
-| `/resume` | Browse saved conversations — Enter to open, Ctrl+D to delete |
-| `/main` | Return to the permanent main conversation |
-| `/delete` | Remove this conversation from the registry; preserve memory |
 | `/memory [clear\|forget <id>]` | List, clear, or remove auto-accumulated observations about you (see below) |
 | `/quit` | Exit ULTRON |
 
@@ -265,9 +268,10 @@ Press Tab after starting a slash command to accept its completion. `/stop` can
 also be typed while Nemotron is generating; Ctrl+C remains available as the
 immediate interrupt.
 
-`/compact`, `/retry`, `/archive` and `/resume` are also available from
-the web interface (with its own rename/browse panels) and from Telegram —
-see [PLAN.md](PLAN.md) for interface-specific details.
+There is no `/resume`, `/main` or `/delete` here (or on Telegram) — the
+terminal always continues its one fixed conversation. Browsing, opening and
+deleting any conversation is a web UI sidebar / iOS app feature only — see
+[PLAN.md](PLAN.md) for interface-specific details.
 
 ## Repository map
 
