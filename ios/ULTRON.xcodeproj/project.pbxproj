@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0B03CA8BC058FDBFFD1E7953 /* SkillsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83596178D98A9E33F0AF9548 /* SkillsView.swift */; };
+		122DF68831FB220B26755932 /* SchedulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 916B37C28223EF861389AC45 /* SchedulesView.swift */; };
 		17C445D2EB6412B6F8FCF291 /* ComposerPickers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFFC97450AA2A233265FE7E9 /* ComposerPickers.swift */; };
 		18AC8BF9B81C068B670B6A13 /* ServerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */; };
 		30253060622F786A541A7CFE /* OpenAILoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A11F30FD0AC57BB7234030 /* OpenAILoginSheet.swift */; };
@@ -40,6 +41,7 @@
 		83596178D98A9E33F0AF9548 /* SkillsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsView.swift; sourceTree = "<group>"; };
 		8BDD62C16EC7F352CFA93C80 /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
 		8CC5A83F5B96CA4B171D1FA4 /* ApprovalCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalCardView.swift; sourceTree = "<group>"; };
+		916B37C28223EF861389AC45 /* SchedulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulesView.swift; sourceTree = "<group>"; };
 		92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettingsView.swift; sourceTree = "<group>"; };
 		AF3E074F58F965547A5789B1 /* ULTRONClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONClient.swift; sourceTree = "<group>"; };
 		BC9220BBD1B70581A4BF6EEF /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -84,6 +86,7 @@
 				176B8AB22742853C0D98E083 /* Health */,
 				C97D357FF868829D3D50CDFF /* Memory */,
 				4AB54670B10F151A0059BB65 /* Menu */,
+				29C473CDA9C0761F21832EC7 /* Schedules */,
 				0D9DA2EC4DBB50AF11B01771 /* Settings */,
 				6377B94E2E391FA9203C9837 /* Skills */,
 				63F8524A7C946BFECD2A54AC /* Tokens */,
@@ -113,6 +116,14 @@
 				D208BF5036689DC38E4D5D66 /* FinanceView.swift */,
 			);
 			path = Finance;
+			sourceTree = "<group>";
+		};
+		29C473CDA9C0761F21832EC7 /* Schedules */ = {
+			isa = PBXGroup;
+			children = (
+				916B37C28223EF861389AC45 /* SchedulesView.swift */,
+			);
+			path = Schedules;
 			sourceTree = "<group>";
 		};
 		4AB54670B10F151A0059BB65 /* Menu */ = {
@@ -280,6 +291,7 @@
 				30253060622F786A541A7CFE /* OpenAILoginSheet.swift in Sources */,
 				F9914A45D2E60B4C65368A59 /* RootView.swift in Sources */,
 				A78DF93F9EA98781039A72F7 /* SSEParser.swift in Sources */,
+				122DF68831FB220B26755932 /* SchedulesView.swift in Sources */,
 				18AC8BF9B81C068B670B6A13 /* ServerSettingsView.swift in Sources */,
 				0B03CA8BC058FDBFFD1E7953 /* SkillsView.swift in Sources */,
 				CABBE5EDDDCCB567C6553749 /* TokensView.swift in Sources */,

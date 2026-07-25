@@ -402,7 +402,7 @@ body {
 .agent-chat-actions button:hover { color: var(--accent); }
 .agent-empty { padding: 3px 8px; color: var(--text-dimmer); font-size: var(--fs-xs); }
 
-#automation-panel { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.dialog { width: min(440px, calc(100vw - 32px)); padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-panel); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; color: var(--text-dimmer); font: 700 var(--fs-2xs) var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .panel-heading-title { display: flex; align-items: center; gap: 6px; }
 .panel-heading .icon-btn { font-size: 11px; padding: 2px 5px; text-transform: none; letter-spacing: normal; }
@@ -447,11 +447,10 @@ body {
 .schedule-item button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
 .empty-hint { padding: 8px; color: var(--text-dimmer); font-size: var(--fs-xs); }
 
-.automation-dialog { width: min(440px, calc(100vw - 32px)); padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-panel); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
-.automation-dialog h2 { margin: 0 0 16px; font-size: var(--fs-lg); }
-.automation-dialog label { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; color: var(--text-dim); font-size: var(--fs-sm); }
-.automation-dialog [hidden] { display: none !important; }
-.automation-dialog input, .automation-dialog textarea, .automation-dialog select { width: 100%; box-sizing: border-box; padding: 9px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-raised); color: var(--text); font: inherit; }
+.dialog h2 { margin: 0 0 16px; font-size: var(--fs-lg); }
+.dialog label { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; color: var(--text-dim); font-size: var(--fs-sm); }
+.dialog [hidden] { display: none !important; }
+.dialog input, .dialog textarea, .dialog select { width: 100%; box-sizing: border-box; padding: 9px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-raised); color: var(--text); font: inherit; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .dialog-actions button { padding: 8px 14px; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--bg-raised); color: var(--text); cursor: pointer; }
 .dialog-actions button[type="submit"] { background: var(--accent); color: white; border-color: var(--accent); }

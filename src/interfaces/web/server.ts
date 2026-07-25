@@ -251,10 +251,8 @@ async function streamGraphTurn(
   let finalText = "";
 
   try {
-    // Serialized per chatId (see threadLock.ts) so this can never run
-    // concurrently with, e.g., a spawn_agent wake-up note (tools/agents.ts)
-    // landing on the same chat mid-stream — that race was corrupting live
-    // replies with stray tool/report text from the other run.
+    // Serialized per chatId (see threadLock.ts) so another graph execution
+    // cannot land on the same chat mid-stream and corrupt the live reply.
     await withThreadLock(chatId, async () => {
       const stream = await graph.stream(input, {
         configurable: { thread_id: chatId, thinking: thinkingMode, taskMode },
@@ -565,8 +563,8 @@ async function handleMainChat(res: ServerResponse): Promise<void> {
 
 // ChatGPT device-code OAuth login (see src/core/llm/openaiAuth.ts's header
 // comment for the verified flow) — same start/background-loop/status shape
-// already used for spawn_agent's background runs (src/core/runs.ts), reused
-// here rather than inventing a new pattern. A login is global (one ULTRON
+// already used for the server's asynchronous flows, reused here rather than
+// inventing a new pattern. A login is global (one ULTRON
 // install, one ChatGPT account), not per-chat, so every interface (CLI,
 // web, mobile) hitting these same routes shares one outcome.
 interface OpenAILoginState {

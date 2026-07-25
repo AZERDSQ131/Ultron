@@ -104,10 +104,10 @@ final class ULTRONClient {
         return response.chats
     }
 
-    struct CreateChatBody: Encodable { let title: String?; let agentId: String?; let origin: String }
+    struct CreateChatBody: Encodable { let title: String?; let origin: String }
     struct ChatResponse: Codable { let chat: Chat }
     func createChat(title: String? = nil) async throws -> Chat {
-        let response: ChatResponse = try await request("POST", "/api/chats", body: CreateChatBody(title: title, agentId: nil, origin: "app"))
+        let response: ChatResponse = try await request("POST", "/api/chats", body: CreateChatBody(title: title, origin: "app"))
         return response.chat
     }
 
@@ -141,6 +141,36 @@ final class ULTRONClient {
     func setSecurityMode(_ chatId: String, mode: String) async throws -> Chat {
         let response: ChatResponse = try await request("PATCH", "/api/chats/\(chatId)/security", body: SecurityModeBody(mode: mode))
         return response.chat
+    }
+
+    // MARK: - Scheduled tasks
+
+    struct SchedulesResponse: Codable { let schedules: [Schedule] }
+    struct ScheduleResponse: Codable { let schedule: Schedule }
+    struct CreateScheduleBody: Encodable {
+        let name: String
+        let instruction: String
+        let cron: String
+        let timezone: String
+    }
+    struct ScheduleEnabledBody: Encodable { let enabled: Bool }
+
+    func listSchedules() async throws -> [Schedule] {
+        let response: SchedulesResponse = try await requestNoBody("GET", "/api/schedules")
+        return response.schedules
+    }
+
+    func createSchedule(name: String, instruction: String, cron: String, timezone: String) async throws -> Schedule {
+        let response: ScheduleResponse = try await request("POST", "/api/schedules", body: CreateScheduleBody(name: name, instruction: instruction, cron: cron, timezone: timezone))
+        return response.schedule
+    }
+
+    func setScheduleEnabled(_ id: String, enabled: Bool) async throws {
+        let _: SchedulesResponse = try await request("PATCH", "/api/schedules/\(id)", body: ScheduleEnabledBody(enabled: enabled))
+    }
+
+    func deleteSchedule(_ id: String) async throws {
+        let _: DeletedResponse = try await requestNoBody("DELETE", "/api/schedules/\(id)")
     }
 
     // MARK: - Todos

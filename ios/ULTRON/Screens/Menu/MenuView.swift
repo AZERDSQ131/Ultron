@@ -15,6 +15,7 @@ struct MenuView: View {
         .init(title: "Tokens", icon: "chart.bar.fill", tint: .blue, destination: .tokens),
         .init(title: "Skills", icon: "hammer.fill", tint: .orange, destination: .skills),
         .init(title: "Memory", icon: "brain.head.profile", tint: .purple, destination: .memory),
+        .init(title: "Crons", icon: "clock.badge.checkmark", tint: .orange, destination: .schedules),
     ]
 
     var body: some View {
@@ -104,15 +105,14 @@ struct MenuView: View {
             SkillsView()
         case .memory:
             MemoryView()
+        case .schedules:
+            SchedulesView()
         }
     }
 
     private var visibleChats: [Chat] {
-        // Parity with the web sidebar: agent-owned chats live in a separate
-        // Agents panel, not this main list — see chatList.js's !chat.agentId filter.
-        let base = chats.filter { $0.agentId == nil }
-        guard !searchQuery.isEmpty else { return base }
-        return base.filter { $0.title.localizedCaseInsensitiveContains(searchQuery) }
+        guard !searchQuery.isEmpty else { return chats }
+        return chats.filter { $0.title.localizedCaseInsensitiveContains(searchQuery) }
     }
 
     private struct ChatGroup { let title: String; let chats: [Chat] }
@@ -202,4 +202,5 @@ enum NavigationTarget: Hashable {
     case tokens
     case skills
     case memory
+    case schedules
 }

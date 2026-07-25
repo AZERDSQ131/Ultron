@@ -6,7 +6,6 @@ struct Chat: Codable, Identifiable, Equatable {
     var title: String
     let createdAt: String
     var updatedAt: String
-    let agentId: String?
     let scheduleId: String?
     var securityMode: String
     let archivedAt: String?
@@ -15,6 +14,19 @@ struct Chat: Codable, Identifiable, Equatable {
     // from, computed server-side (ChatRegistry.getOrigin). Only present on
     // GET /api/chats today.
     let origin: String?
+}
+
+struct Schedule: Codable, Identifiable, Equatable {
+    let id: String
+    var name: String
+    var instruction: String
+    var cron: String
+    var timezone: String
+    var enabled: Bool
+    let nextRunAt: String?
+    let lastRunAt: String?
+    let lastRunChatId: String?
+    let createdAt: String
 }
 
 // Mirrors graph.ts's ChatMessage shape returned by GET /api/chats/:id/messages.

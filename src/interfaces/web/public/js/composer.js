@@ -23,10 +23,7 @@ import { openUsageView } from "./usageView.js";
 import { openFinanceView } from "./financeView.js";
 
 // Any tool result from either of these means the panel is stale — refresh
-// it. Kept as a set so a future todo tool only needs adding here once,
-// instead of touching both tool_result handlers below (streamTurn's own
-// turn, and attachToRunningChat's reattachment to a background spawn_agent
-// run) separately again.
+// it. Kept as a set so a future todo tool only needs adding here once.
 const TODO_TOOL_NAMES = new Set(["todo_write", "todo_update", "plan_propose"]);
 
 const composer = document.getElementById("composer");

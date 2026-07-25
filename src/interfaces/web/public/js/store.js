@@ -10,6 +10,5 @@ export const state = {
   securityMode: "bypass",
   activeChatId: null,
   chatsCache: [],
-  agentsCache: [],
   toolScopes: {},
 };
