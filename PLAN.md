@@ -6,7 +6,7 @@ What we're building, in order. Updated as decisions change — this is the sourc
 
 A personal AI agent built from scratch, replacing OpenClaw and Hermes Agent. The whole point of building it ourselves is control: no black-box agent loop, no framework-imposed defaults we didn't choose. Two end products:
 
-1. **The classic agent** — a conversational agent reachable via Telegram that can act on the user's behalf (read/organize files, manage mail, etc.), the same category of thing OpenClaw does, minus the parts that caused loss of control.
+1. **The classic agent** — a conversational agent reachable through the local web UI, CLI and iOS app that can act on the user's behalf (read/organize files, manage mail, etc.), the same category of thing OpenClaw does, minus the parts that caused loss of control.
 2. **The vibe-coding app** — a Codex-style app for coding entirely with AI: one main conversation that, behind the scenes, spins up background sub-agents to manage individual projects.
 
 We are currently building **#1 only**. #2 is deliberately deferred — noted here so it isn't forgotten, not started.
@@ -98,55 +98,15 @@ interface at a time.
   `chats.ts`) is registered into the chat table on startup via `chats.ensure(...)`, so upgrading
   doesn't orphan whatever history already existed.
 
-## Phase 2 — Telegram interface (done)
+## Phase 2 — Interface alignment (done)
 
-- `src/interfaces/telegram/index.ts` (grammY, long polling — `pnpm telegram` / `start:telegram`), a
-  third entry point next to the CLI and web UI: same `buildGraph()`, same shared SQLite file, so a
-  Telegram conversation has the same memory, tools and personality as the other two.
-- Which ULTRON chat a Telegram chat points at is set via `TelegramLinkRegistry`
-  (`src/core/memory/telegramLinks.ts`), auto-linked on first contact and fixed from then on —
-  see the "Conversation management moved to mobile" note below for why this is no longer
-  repointable from within Telegram itself. Every chat it touches is a normal row in
-  `ChatRegistry`, visible (and continuable) from the mobile app too.
-- No true token-by-token streaming: Telegram rate-limits `editMessageText`, so a single placeholder
-  message is sent per turn, updated only when the active tool's name changes (a coarse "what's it
-  doing" indicator) and once more with the final text.
-- Tool-approval interrupts (`accept_edit`/`manual` security mode) render as one inline-keyboard
-  Approve/Deny covering the whole pending batch — not per-call like the CLI's y/n prompt or the
-  web's approval block, since Telegram's UI doesn't lend itself to that level of granularity.
-- Full CLI command parity at the time (see "Conversation management moved to mobile" below for
-  `/resume`/`/main`/`/delete`'s later removal from both): `/help`, `/model`, `/status`, `/context`,
-  `/stop`, `/retry`, `/compact`, `/think`, `/task` (including `goal` mode's judge-then-continue
-  loop, ported as a sequential loop of independent turns — see `runTurn`'s comment on why it must
-  not recurse into a still-held per-chat lock, the way `server.ts`'s SSE goal continuation currently
-  does), `/permissions`, `/security`, `/verbose`, `/memory`, `/clear`, `/theme`, `/quit`. Interactive
-  CLI pickers (arrow-key selection) become inline keyboards; `/theme` is an intentional no-op
-  (Telegram's own app controls that, not ULTRON).
-- `/clear` wipes the conversation's actual message state (`clearThreadMessages` in `graph.ts`, a
-  `RemoveMessage(REMOVE_ALL_MESSAGES)` update), on top of deleting what
-  Telegram lets a bot delete of its own recent messages (own messages only, ~48h window). This is
-  deliberately different from the CLI/web, where `/clear` only redraws the terminal and leaves the
-  model's memory of the thread untouched — there the visible scrollback is a constant reminder that
-  history persists, so that's a reasonable reading of "clear"; Telegram shows no such reminder, and
-  a real report confirmed the confusion (saying "Salut" again after `/clear` got a reply that
-  referenced the pre-clear greeting).
-- Replies are converted from ULTRON's Markdown (`**bold**`, `` `code` ``, `# headers`,
-  `~~strikethrough~~`, `[text](url)`) to Telegram's HTML parse mode (`src/interfaces/telegram/format.ts`,
-  `markdownToTelegramHtml`) rather than MarkdownV2 — MarkdownV2 requires escaping a long list of
-  punctuation anywhere it appears outside formatting, exactly what an LLM's free-form prose trips
-  over; HTML only needs `&`/`<`/`>` escaped, which is mechanical. Falls back to the plain
-  unformatted text (still truncated to Telegram's 4096-char limit) if the converted HTML is
-  oversized or fails to parse for any reason, rather than losing the message.
-- `stripThinking` (`telegram/index.ts`) removes any `<think>...</think>` chain-of-thought Nemotron's
-  raw content stream includes inline when reasoning is on (`/think on`/`full`) — the CLI/web don't
-  surface it either, but only Telegram was reported actually leaking the literal tags into the
-  user-visible reply. Also drops a dangling, never-closed `<think>` (turn interrupted mid-reasoning)
-  rather than showing a half-finished fragment.
-- The `/verbose` stats line is sent as its own separate message, after the reply — not appended to
-  it — since it's a distinct piece of information, not part of the answer.
-- Session state with no natural persistence slot (`thinkingMode`, `taskMode`, `verbose`) is
-  in-memory per ULTRON chat, reset on bot restart — same lifetime as the CLI's process-local
-  variables.
+- Telegram support was retired. The supported interfaces are now the local CLI,
+  remote CLI, local web UI and native iOS app.
+- CLI and web share the same graph, SQLite state, tools, provider/model controls,
+  thinking modes, task modes, security modes and streaming events.
+- iOS uses the same HTTP/SSE API and now exposes the same model/provider,
+  reasoning (`full`/`low`/`off`), task (`none`/`todo`/`plan`/`goal`), security
+  and verbose controls. Mobile turns identify themselves as `app` events.
 
 ## Phase 3 — Tools (in progress)
 
@@ -188,39 +148,29 @@ opening).
 
 ## Conversation management moved to mobile (done)
 
-Triggered by a real report: a message sent from the iOS app appeared on Telegram prefixed
-"🖥️ CLI › ...". Root cause: `ChatEventSource` (`src/core/memory/chatEvents.ts`) only has two
-values, `"cli"`/`"telegram"`, and `handleTurn` (`server.ts`) collapses any missing/other `source`
-to `"cli"` — the mobile app posts to `/api/turn` without a `source` field, exactly like the
-remote CLI and the browser web UI already did (this was a pre-existing gap, not mobile-specific).
-The chat the phone used happened to be linked to the user's Telegram conversation, so Telegram's
-cross-interface echo (`startEventSync`, `telegram/index.ts`) picked it up and relayed it.
+The mobile client now identifies itself explicitly on the shared HTTP/SSE contract. This keeps
+CLI-originated and app-originated events distinguishable without a separate messaging bridge.
 
-Resolution, on explicit request: **the mobile app is now the only place to browse, open, and
-continue any conversation** — `/resume`, `/main` and `/delete` were removed entirely from the
-local CLI, the remote CLI, and Telegram. `ChatEventSource` stays two-valued by choice (no third
-"web"/"mobile" category).
+The mobile app is the place to browse, open, and continue any conversation — `/resume`, `/main`
+and `/delete` remain out of the terminal clients. Chat events use `"cli"` or `"app"` sources.
 
 - Local/remote CLI: startup now always resolves to the shared `CLI_CHAT_SCOPE` anchor chat
   (`chats.activateMain(CLI_CHAT_SCOPE)` locally, `POST /api/main` remotely) and never moves again
   — no more `getFocus`/`/api/focus` lookup, no more "switched to X from the other interface" live
   poll (`syncFocusedChat` in `remote.ts`, deleted along with the now-unused `GET /api/focus` route
   and `handleChatFocus`).
-- Telegram: unaffected in practice — `currentChatId()`'s auto-link-on-first-contact and the
-  boot-time `startEventSync` restore loop never depended on the `/resume`/`/main`/`/delete`
-  commands, only their now-removed interactive triggers (inline keyboard + `resumeInto`) are gone.
 - `handleTurn` no longer calls `chats.setFocus(chatId, CLI_CHAT_SCOPE)` on every turn — that call
   existed purely to feed the remote CLI's follow-along poll; without a reader, it was actively
   harmful (any HTTP client opening an old chat silently relocated where the terminal CLI would
   resume next time).
-- New: `GET /api/chats` attaches `origin: "cli" | "telegram" | "app"` per chat, computed by
+- New: `GET /api/chats` attaches `origin: "cli" | "app"` per chat, computed by
   `ChatRegistry.getOrigin` (made public) — the mobile app renders it as a small badge
   (`ChatListRow.swift`) next to each conversation. The web UI's own sidebar/archive panel is
   completely untouched: same routes (`/api/chats/:id/archive`, `/api/chats/:id/resume`,
   `/api/chats/archived`, `POST /api/main`), same behavior. Follow-up fix: a brand-new chat
   created from the mobile app showed up mislabeled "CLI" because `getOrigin` only ever inferred
   origin from message history, and a just-created empty chat has none yet — fixed by stamping a
-  new `chats.created_via` column at creation time (`"cli"`/`"telegram"`/`"app"`, distinct from
+  new `chats.created_via` column at creation time (`"cli"`/`"app"`, distinct from
   `chat_events.source` which tags individual messages, not the conversation) and having
   `getOrigin` read that first, falling back to the old history-based guess only for chats that
   predate the column. `POST /api/chats` now accepts an `origin` field for this.
@@ -245,7 +195,7 @@ Fix, on explicit request ("retire la notion de Main"):
   side effect of some other client's delete call. `archiveAndCreate` (the web UI's own `/archive`)
   also stopped special-casing "Main" the same way; a rotated-in chat is just an ordinary
   `DEFAULT_CHAT_TITLE` row now.
-- No chat is ever titled the literal string `"Main"` again — every chat, including a CLI/Telegram
+- No chat is ever titled the literal string `"Main"` again — every chat, including the CLI anchor,
   anchor, starts as `DEFAULT_CHAT_TITLE` ("New chat") and gets a real title the same way every
   other chat does (next point).
 - **Every chat now gets an actual agent-generated title**, not just `deriveTitle`'s plain
@@ -299,7 +249,7 @@ the client_id below is exactly what that implementation uses.
   is global (one ULTRON install, one ChatGPT account) — connecting from any one interface makes
   `openai` available on all of them.
 - Login UX added to all four interfaces per explicit request: `/login openai` on local CLI, remote
-  CLI, and Telegram; the web command palette's `/login openai`; `OpenAILoginSheet.swift` on mobile
+  CLI and web; `OpenAILoginSheet.swift` on mobile
   (surfaced from the model picker's empty "OPENAI" group).
 - Verified live: `POST /api/openai/login/start` against the real `auth.openai.com` returned a
   genuine device code + verification URL, confirming the endpoint/client_id/request-shape chain is
@@ -308,13 +258,13 @@ the client_id below is exactly what that implementation uses.
 
 ## Jetson deployment + Mac access (in progress)
 
-Target architecture (see `docs/agent-ia-personnel.md`'s follow-up discussion, not yet written back into that file): ULTRON's process — web server, Telegram bot, database — lives permanently on a Jetson Orin Nano, reachable over Tailscale; the Mac is a client plus a remote-controllable target, not where the graph runs.
+Target architecture (see `docs/agent-ia-personnel.md`'s follow-up discussion, not yet written back into that file): ULTRON's process — web server and database — lives permanently on a Jetson Orin Nano, reachable over Tailscale; the Mac is a client plus a remote-controllable target, not where the graph runs.
 
-- Jetson: repo cloned at `~/ultron` (not the earlier `~/t9-backup/ULTRON`, which was a manual duplicate, not Syncthing-managed, and has been deleted), built, `.env` in place. Two systemd user units are prepared but **not enabled** — `~/.config/systemd/user/ultron-web.service` and `ultron-telegram.service` (the latter still needs `TELEGRAM_BOT_TOKEN` added to `.env` before it can run). Verified manually: the web server answers on both `127.0.0.1:4173` and the Jetson's Tailscale IP.
+- Jetson: repo cloned at `~/ultron` (not the earlier `~/t9-backup/ULTRON`, which was a manual duplicate, not Syncthing-managed, and has been deleted), built, `.env` in place. The web systemd user unit is prepared but **not enabled**. Verified manually: the web server answers on both `127.0.0.1:4173` and the Jetson's Tailscale IP.
 - `src/interfaces/cli/remote.ts` (new, see Phase "CLI" note below) is the piece that makes `ultron` on the Mac a thin client instead of a local process — this is what the Mac-side `ultron` command should invoke, pointed at the Jetson's Tailscale IP via `ULTRON_SERVER_URL`.
 - `src/core/tools/remoteHost.ts` + the `host: "jetson" | "mac"` param on the fs/shell tools + `macos.ts`'s platform-branching (see below) is what lets ULTRON act on the Mac's filesystem/apps once it's running on the Jetson instead of on the Mac itself.
 - **Blocked on the user**: Tailscale SSH is enabled on this tailnet and intercepts the Jetson→Mac SSH connection with an interactive per-session browser check (`https://login.tailscale.com/a/...`) — plain key auth (already set up: a fresh `ultron-jetson-to-mac` ed25519 key on the Jetson, its pubkey in the Mac's `~/.ssh/authorized_keys`, a `Host mac` alias in the Jetson's `~/.ssh/config`) can't complete that check non-interactively. Until the user either approves that check once from a browser or adjusts the tailnet's SSH policy/ACL, the `host: "mac"` tool path only works from wherever a session can pass that check — verified instead against a local loopback SSH target (`MAC_SSH_HOST=localhost` on the Mac itself) to prove the tool logic is correct.
-- Not yet done: enabling the two systemd services (deliberately left for the user — see "prepare without activating"), `TELEGRAM_BOT_TOKEN` in the Jetson's `.env`, resolving the Tailscale SSH check above.
+- Not yet done: enabling the web systemd service (deliberately left for the user — see "prepare without activating"), resolving the Tailscale SSH check above.
 
 ## Phase 4 — Vibe-coding app (deferred, not started)
 

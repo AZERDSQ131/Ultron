@@ -55,7 +55,7 @@ export async function writeExport(graph: Parameters<typeof listChatMessages>[0],
   await rename(tmpPath, path);
 }
 
-// Called from every turn-completion hook (CLI, web, Telegram) — a no-op if
+// Called from every turn-completion hook (CLI, web) — a no-op if
 // the chat has no export path set, so it's safe to call unconditionally.
 export async function maybeExportChat(graph: Parameters<typeof listChatMessages>[0], chat: Chat): Promise<void> {
   if (!chat.exportPath) return;

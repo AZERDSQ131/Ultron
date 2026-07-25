@@ -3,7 +3,7 @@ import { getOpenAIAuthRegistry } from "../memory/openaiAuth.js";
 import { getValidAuth, codexAuthHeaders, CHATGPT_CODEX_BASE_URL, CODEX_CLIENT_VERSION } from "./openaiAuth.js";
 
 // Shared by the local CLI (src/interfaces/cli/index.ts), the web server
-// (src/interfaces/web/server.ts, which the remote CLI and Telegram's /model
+// (src/interfaces/web/server.ts, which the remote CLI's /model
 // both go through) — one place that knows how to enumerate/enrich models
 // for whichever provider is asked about, instead of three near-identical
 // copies of the NVIDIA /models fetch + modelcard scrape that used to live
@@ -115,7 +115,7 @@ async function fetchProviderModels(provider: LlmProvider): Promise<ModelInfo[]> 
 }
 
 // The active provider's models only — used where only one provider's list
-// makes sense (CLI/web/Telegram's initial context-window lookup at
+// makes sense (CLI/web's initial context-window lookup at
 // startup, and after a /provider switch).
 export async function listAvailableModels(): Promise<ModelInfo[]> {
   return fetchProviderModels(config.provider);

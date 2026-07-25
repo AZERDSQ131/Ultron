@@ -139,7 +139,7 @@ async function main() {
       for (const event of data.events ?? []) {
         eventCursor = Math.max(eventCursor, event.id);
         if (event.source === "cli") continue;
-        const speaker = event.kind === "human" ? chalk.yellow("telegram") : chalk.redBright.bold("ultron");
+        const speaker = event.kind === "human" ? chalk.yellow("app") : chalk.redBright.bold("ultron");
         appendTranscript(`${speaker} ${uiDim("›")} ${event.content}\n\n`);
       }
       eventCursor = Math.max(eventCursor, data.latestId ?? eventCursor);

@@ -28,7 +28,7 @@ function toPlainText(content: MessageContent): string {
 // lets createNemotronModel stay synchronous — the only genuinely async step
 // (a network refresh call) is deferred to request time, which was already
 // async (.invoke()/.stream()), rather than forcing buildGraph() and every
-// one of its many call sites (CLI, web, Telegram, every cheap separate call
+// one of its many call sites (CLI, web, every cheap separate call
 // in goalJudge.ts/userModelExtractor.ts/chatTitler.ts/narrator.ts) to await
 // model construction too.
 // Loosely typed (the `openai` SDK's own Fetch type uses a bespoke URLLike

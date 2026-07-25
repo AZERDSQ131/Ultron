@@ -765,13 +765,8 @@ export async function listChatMessages(graph: ReturnType<typeof buildGraph>, thr
   return out;
 }
 
-// Wipes a thread's conversation state in place — exposed standalone for
-// Telegram's /clear: unlike the CLI/web, where /clear only redraws the
-// terminal (the model's actual memory of the thread is untouched — the user
-// can still see the old scrollback and knows it), a Telegram chat has no
-// visible scrollback reminder that server-side history persists, so a
-// Telegram user typing /clear reasonably means "the model should forget
-// this conversation", not just "redraw my screen".
+// Wipes a thread's conversation state in place for callers that need a real
+// conversation reset; the CLI/web clear command only redraws the terminal.
 export async function clearThreadMessages(graph: ReturnType<typeof buildGraph>, threadId: string): Promise<void> {
   await graph.updateState({ configurable: { thread_id: threadId } }, { messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES })] });
 }

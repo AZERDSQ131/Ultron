@@ -35,7 +35,6 @@ struct ChatListRow: View {
 
     private func label(for origin: String) -> String {
         switch origin {
-        case "telegram": return "Telegram"
         case "app": return "App"
         default: return "CLI"
         }
@@ -43,7 +42,6 @@ struct ChatListRow: View {
 
     private func color(for origin: String) -> Color {
         switch origin {
-        case "telegram": return .blue
         case "app": return .purple
         default: return .secondary
         }

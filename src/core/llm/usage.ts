@@ -28,8 +28,8 @@ export function formatTurnStats(usage: TurnUsage): string {
 }
 
 // Logs one LLM call to the persistent usage_log table (see
-// src/core/memory/usage.ts) — the single place every interface (CLI, web,
-// Telegram) and every cheap separate call (narrator.ts, goalJudge.ts,
+// src/core/memory/usage.ts) — the single place every interface (CLI, web)
+// and every cheap separate call (narrator.ts, goalJudge.ts,
 // userModelExtractor.ts, visionAnalyzer.ts) reports through, so the web
 // UI's "Tokens" page reflects every request instead of only whatever the
 // current turn's stats line last showed. Never throws — a broken usage

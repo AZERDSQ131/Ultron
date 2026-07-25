@@ -77,7 +77,7 @@ function setInputValue(text) {
 }
 
 // The full CLI command surface (see src/interfaces/cli/index.ts), replicated
-// here so the web UI is a superset, not a subset, of what the CLI/Telegram
+// here so the web UI is a superset, not a subset, of what the CLI
 // can do — this was the biggest gap the redesign was asked to close.
 export const COMMANDS = [
   { name: "/help", desc: "show available commands" },

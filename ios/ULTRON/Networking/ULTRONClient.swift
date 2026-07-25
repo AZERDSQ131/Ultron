@@ -298,6 +298,7 @@ final class ULTRONClient {
         let thinking: String?
         let taskMode: String?
         let retry: Bool?
+        let source: String?
     }
 
     struct ApproveBody: Encodable {
@@ -305,6 +306,7 @@ final class ULTRONClient {
         let thinking: String?
         let taskMode: String?
         let decisions: [String: Bool]
+        let source: String?
     }
 
     func streamTurn(
@@ -314,7 +316,7 @@ final class ULTRONClient {
         taskMode: String = "none",
         retry: Bool = false
     ) -> AsyncThrowingStream<TurnEvent, Error> {
-        stream(path: "/api/turn", body: TurnBody(chatId: chatId, text: text, thinking: thinking, taskMode: taskMode, retry: retry))
+        stream(path: "/api/turn", body: TurnBody(chatId: chatId, text: text, thinking: thinking, taskMode: taskMode, retry: retry, source: "app"))
     }
 
     func streamApprove(
@@ -323,7 +325,7 @@ final class ULTRONClient {
         thinking: String = "full",
         taskMode: String = "none"
     ) -> AsyncThrowingStream<TurnEvent, Error> {
-        stream(path: "/api/approve", body: ApproveBody(chatId: chatId, thinking: thinking, taskMode: taskMode, decisions: decisions))
+        stream(path: "/api/approve", body: ApproveBody(chatId: chatId, thinking: thinking, taskMode: taskMode, decisions: decisions, source: "app"))
     }
 
     private func stream(path: String, body: some Encodable) -> AsyncThrowingStream<TurnEvent, Error> {

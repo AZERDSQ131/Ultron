@@ -249,8 +249,7 @@ export const healthExport = tool(
   },
 );
 
-// Text-only counterpart to the Telegram photo path (visionAnalyzer.ts +
-// bot.on("message:photo") in src/interfaces/telegram/index.ts) — when the
+// Text-only counterpart to the photo path (visionAnalyzer.ts) — when the
 // user just describes a meal or exercise in a normal message instead of
 // sending a photo, this writes to the same meal_log/exercise_log tables
 // with photoPath left null. No separate model call needed here: the main
@@ -309,7 +308,7 @@ export const logMealOrExercise = tool(
     name: "log_meal_or_exercise",
     description:
       "Log a meal or exercise the user just described in plain text (no photo) — writes to the same health " +
-      "journal a Telegram photo would. Call this whenever the user mentions eating something or doing a workout/" +
+      "journal a photo would. Call this whenever the user mentions eating something or doing a workout/" +
       "exercise, even briefly ('had eggs for breakfast', 'ran 5k this morning'), not just when explicitly asked to " +
       "log it. Estimate the numeric fields yourself from the description (rough visual/typical-serving guesses are " +
       "fine); use null for anything you can't reasonably estimate. Fill only the fields relevant to the kind — " +

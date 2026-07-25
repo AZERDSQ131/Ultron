@@ -14,8 +14,8 @@ function required(name: string): string {
   return value;
 }
 
-// The active chat-completion provider (CLI /provider, web PATCH /api/provider,
-// Telegram /provider). Independent of visionModel below, which always stays
+// The active chat-completion provider (CLI /provider, web PATCH /api/provider).
+// Independent of visionModel below, which always stays
 // on NVIDIA regardless of this setting — photo analysis has no DeepSeek/Groq
 // equivalent wired up. "openai" is unlike the other three: no API key, it
 // authenticates via ChatGPT device-code OAuth (see src/core/llm/openaiAuth.ts)
@@ -32,7 +32,7 @@ function initialProvider(): LlmProvider {
 }
 
 // Each provider remembers its own last-picked model, so toggling providers
-// back and forth (CLI /provider, web, Telegram) restores whichever model was
+// back and forth (CLI /provider, web) restores whichever model was
 // last active on that provider instead of resetting to the .env default
 // every time.
 const providerModels: Record<LlmProvider, string> = {
@@ -65,10 +65,6 @@ export const config = {
   // (nemotronModel) is text-only, so photos go to NVIDIA's own
   // Nemotron-branded VL model instead of a non-NVIDIA provider.
   visionModel: process.env.HEALTH_VISION_MODEL ?? "nvidia/nemotron-nano-12b-v2-vl",
-  // Only required to run the Telegram interface (src/interfaces/telegram) —
-  // not validated with required() since every other entry point (CLI, web,
-  // scheduled tasks) must keep working without it.
-  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   webSearchProvider: process.env.WEB_SEARCH_PROVIDER ?? "auto",
   tavilyApiKey: process.env.TAVILY_API_KEY,
   // Reference point for the context gauge in the CLI: 262,144 tokens
@@ -110,7 +106,7 @@ export const config = {
 };
 
 // Switches the active chat-completion provider at runtime (CLI /provider,
-// web PATCH /api/provider, Telegram /provider) — restores whichever model
+// web PATCH /api/provider) — restores whichever model
 // was last active on that provider (see providerModels above).
 export function setActiveProvider(next: LlmProvider): void {
   config.provider = next;
@@ -118,7 +114,7 @@ export function setActiveProvider(next: LlmProvider): void {
 }
 
 // Called whenever the active provider's model changes (CLI /model, web
-// PATCH /api/model, Telegram's model picker) so providerModels stays in
+// PATCH /api/model) so providerModels stays in
 // sync with what's actually running and a later /provider switch restores
 // the right thing.
 export function setActiveModel(modelId: string): void {
@@ -143,7 +139,7 @@ export function hasProviderCredentials(provider: LlmProvider): boolean {
 
 // Next provider in the fixed nvidia → deepseek → groq → openai → nvidia
 // cycle that actually has credentials configured — the bare /provider
-// command (CLI, web, Telegram) skips over providers with no API key/login
+// command (CLI, web) skips over providers with no API key/login
 // set instead of switching to one that would just fail on the next turn.
 export function nextConfiguredProvider(current: LlmProvider): LlmProvider {
   const startIndex = PROVIDER_CYCLE.indexOf(current);

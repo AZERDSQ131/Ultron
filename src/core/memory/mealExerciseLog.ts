@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
 // Meal/exercise logging — two entry paths write into the same tables:
-// a photo sent on Telegram (src/core/health/visionAnalyzer.ts estimates
+// a photo sent to the app (src/core/health/visionAnalyzer.ts estimates
 // the content, photoPath always set) or a plain text description in any
 // conversation (the log_meal_or_exercise tool, src/core/tools/health.ts —
 // the main chat model estimates the content itself, photoPath is null).

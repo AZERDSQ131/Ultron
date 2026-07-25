@@ -68,8 +68,8 @@ export async function narrateHealth(input: HealthNarrationInput, signal?: AbortS
   return raw.trim();
 }
 
-// Same cheap-separate-LLM-call pattern, for Telegram's meal/exercise photo
-// side channel (bot.on("message:photo", ...)) — that flow computed macros
+// Same cheap-separate-LLM-call pattern for meal/exercise photos — the flow
+// computes macros
 // deterministically via the vision model already, but was replying with a
 // fixed "Meal logged: X (Ykcal, ...)" template, which read like raw tool
 // output instead of a normal conversational confirmation. This phrases the

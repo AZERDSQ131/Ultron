@@ -97,47 +97,20 @@ SQLite database (`ultron-state.sqlite3`) — a message sent from one interface
 shows up in the other, and `/compact`, `/retry` and `/archive` act on the
 same history no matter which interface issued them. `GET /api/health` is a
 liveness probe (process uptime, model, whether the shared SQLite file is
-reachable) — useful for the Telegram process or a supervisor script to check
-before assuming ULTRON is up.
+reachable) — useful for a supervisor script to check before assuming ULTRON
+is up.
 
-A Telegram bot (`pnpm telegram`, grammY, long polling) is a third entry
-point: same `buildGraph()`, same shared SQLite file, so a Telegram chat has
-the same memory, tools and personality as the CLI and the web UI. Which
-ULTRON chat a given Telegram chat points at is auto-linked on first contact
-(`TelegramLinkRegistry`) and stays fixed from then on — every chat it
-touches is a normal row in `ChatRegistry`, visible (and continuable) from
-the mobile app too. There's no true token-by-token streaming (Telegram
-rate-limits message edits); a single placeholder message per turn is
-updated when the active tool changes and once more with the final text. A
-pending tool-approval interrupt (`accept_edit`/`manual` security mode)
-renders as one inline-keyboard Approve/Deny for the whole batch, not per
-call. `/clear` wipes this conversation's actual message memory
-(`clearThreadMessages` in `graph.ts`) in addition to deleting what Telegram
-lets a bot delete of its own recent messages (own messages only, ~48h
-window) — unlike the CLI/web, where `/clear` only redraws the terminal and
-leaves the model's memory of the thread untouched, since there the visible
-scrollback is a constant reminder that history persists; Telegram has no
-such reminder, so the same "just redraw" behavior read as a memory bug.
-`/theme` is an intentional no-op (Telegram's own app controls that).
-Replies are converted from ULTRON's Markdown (`**bold**`, `` `code` ``,
-`# headers`, `~~strikethrough~~`, links) to Telegram's HTML parse mode
-(`src/interfaces/telegram/format.ts`), with a plain-text fallback if a
-reply's formatting somehow fails to parse. Requires `TELEGRAM_BOT_TOKEN` in
-`.env` (see `.env.example`).
+The supported interfaces are the local CLI, remote CLI, local web UI and
+native iOS app. They share the same graph, SQLite state, tools and HTTP/SSE
+contract. The iOS composer exposes the same model/provider, reasoning,
+task-mode, security and verbose controls as the terminal and web clients.
 
 Conversations are organized as chats, each with its own id and title.
-**Conversation management — browsing, opening, and continuing any chat,
-whether it originated on the CLI or on Telegram — lives exclusively on the
-web UI's sidebar and the iOS app** (`ios/`, badges each chat "CLI" or
-"Telegram" using a server-computed origin field on `GET /api/chats`). The
-local CLI, remote CLI and Telegram bot are deliberately pure chat
-terminals: each always continues its own one fixed conversation (the
-shared "cli"-scope anchor chat for both CLIs, this Telegram chat's own
-linked thread for Telegram) — an ordinary chat like any other, with no
-special title or protection from deletion, auto-titled from its first
-message the same way — and carries no `/resume`/`/main`/`/delete` commands
-of its own anymore — that capability moved entirely to the two interfaces
-built for browsing a list.
+**Conversation management — browsing, opening, and continuing any chat —
+lives on the web UI's sidebar and the iOS app** (`ios/`, with CLI/App origin
+badges from `GET /api/chats`). The local and remote CLI remain focused
+terminals on the shared CLI anchor chat; browsing the full conversation list
+is handled by the web and mobile clients.
 
 The web UI also has:
 
@@ -217,7 +190,6 @@ Available configuration:
 | `DATABASE_PATH` | `ultron-state.sqlite3` | Shared checkpoint database (CLI + web) |
 | `WEB_SEARCH_PROVIDER` | `auto` | `auto`, `tavily` or `duckduckgo` |
 | `TAVILY_API_KEY` | empty | Optional Tavily API key; required when the provider is `tavily` |
-| `TELEGRAM_BOT_TOKEN` | empty | Required only to run the Telegram interface |
 | `ULTRON_SERVER_URL` | empty | Required only by the remote CLI (`pnpm remote` / the `ultron` bin) — address of the ULTRON web server to connect to |
 | `MAC_SSH_HOST` | `mac` | SSH alias (from `~/.ssh/config`, on whichever machine ULTRON's process runs on) used by tools called with `host: "mac"`, and by `open_app`/`applescript_run` whenever ULTRON isn't itself running on macOS |
 
@@ -227,13 +199,11 @@ Available configuration:
 pnpm dev          # run the terminal interface directly from TypeScript (local — runs the graph in-process)
 pnpm remote       # run the terminal interface as a network client (needs ULTRON_SERVER_URL, nothing else)
 pnpm web          # run the local web interface (http://localhost:4173 by default)
-pnpm telegram     # run the Telegram bot (long polling)
 pnpm typecheck    # strict TypeScript check
 pnpm build        # compile to dist/, including the web frontend assets
 pnpm start        # run the compiled local terminal interface
 pnpm start:remote # run the compiled remote terminal interface
 pnpm start:web    # run the compiled web interface
-pnpm start:telegram # run the compiled Telegram bot
 ```
 
 To get a plain `ultron` command that always connects to a remote server
@@ -306,7 +276,6 @@ src/interfaces/                      presentation layers — import from core, n
     js/api.js                        fetch wrappers for every backend route
     js/store.js                      shared app state
     js/markdown.js                   the same lightweight Markdown renderer as the CLI
-  telegram/index.ts                  Telegram bot (grammY, long polling)
 src/config.ts                        shared configuration (env vars, paths)
 ios/                                  native iOS app (SwiftUI) — HTTP/SSE client, no backend code
   project.yml                        XcodeGen spec (source of truth for ULTRON.xcodeproj)
@@ -321,8 +290,7 @@ PLAN.md                              project roadmap and scope
 ## Roadmap
 
 1. ~~Terminal loop and classic file memory~~ — done.
-2. ~~Telegram interface with grammY~~ — done.
-3. Mail and calendar tools with OAuth.
+2. Mail and calendar tools with OAuth.
 4. ~~Background scheduled tasks once the core loop is trusted~~ — web foundation started: Agents, Agent-owned chats, persisted five-field cron schedules and scheduled execution chats are available in the web interface. Schedules are created conversationally through ULTRON's `schedule_task` tool.
 5. Separate Codex-style vibe-coding application — deferred.
 

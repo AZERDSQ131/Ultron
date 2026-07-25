@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
 export type ChatEventKind = "human" | "ai";
-export type ChatEventSource = "cli" | "telegram";
+export type ChatEventSource = "cli" | "app";
 
 export interface ChatEvent {
   id: number;

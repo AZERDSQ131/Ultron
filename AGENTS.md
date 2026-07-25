@@ -10,14 +10,14 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 
 ## Architecture decisions already made
 
-- **Model**: Nemotron (NVIDIA API) exclusively for now — no multi-provider setup.
+- **Model**: NVIDIA/Nemotron is the default; DeepSeek, Groq and OpenAI/Codex are also supported through the shared provider layer.
 - **Orchestrator**: LangGraph.js — the user owns the loop and the state, not a black-box framework.
 - **Memory**: local SQLite checkpoint database (`ultron-state.sqlite3`), a hand-written `SqliteSaver` in `src/core/memory/checkpointer.ts` implementing LangGraph's `BaseCheckpointSaver` on Node's built-in `node:sqlite` (no `@langchain/langgraph-checkpoint-postgres`/`pg`, no `@langchain/langgraph-checkpoint-sqlite` — neither package's published versions match this project's `@langchain/core` ^0.3 / `langgraph` ^0.2 pin).
-- **Chats**: not a single hardcoded thread anymore. `src/core/memory/chats.ts` (`ChatRegistry`) tracks every chat (id, title, timestamps) in the same database file — a chat's `id` doubles as its LangGraph `thread_id`. The web UI has a sidebar to list/create/rename/delete chats. CLI and Telegram share a focused conversation: the permanent `/main` chat is the return point, `/resume` lists saved conversations, and `/delete` removes only registry metadata while preserving LangGraph memory. New chats receive a title from their first human message. The pre-chats hardcoded thread id (`"ultron-main"`, exported as `LEGACY_CHAT_ID`) is migrated into the registry on startup via `chats.ensure(...)`.
-- **Interface**: terminal (`src/interfaces/cli/`), local web UI (`src/interfaces/web/`) and Telegram (`src/interfaces/telegram/`) share the core graph, memory, focus and incremental message events. `/main`, `/resume` and `/delete` work consistently in CLI and Telegram.
+- **Chats**: not a single hardcoded thread anymore. `src/core/memory/chats.ts` (`ChatRegistry`) tracks every chat (id, title, timestamps) in the same database file — a chat's `id` doubles as its LangGraph `thread_id`. The web UI and iOS app browse/create/rename/delete chats. The local and remote CLI share a focused anchor conversation. New chats receive a title from their first human message. The pre-chats hardcoded thread id (`"ultron-main"`, exported as `LEGACY_CHAT_ID`) is migrated into the registry on startup via `chats.ensure(...)`.
+- **Interface**: local/remote terminal (`src/interfaces/cli/`), local web UI (`src/interfaces/web/`) and native iOS app (`ios/`) share the core graph, memory and incremental message events. iOS and the web server use the same HTTP/SSE contract.
 - **Language**: the project itself (code, comments, console labels, docs) is in English. ULTRON's conversational replies match whatever language the user is currently writing in (French in → French out, English in → English out) — this is enforced in [AGENT.md](AGENT.md). Do not let it default to English regardless of input language.
 - **System prompt split**: [SOUL.md](SOUL.md) is personality only (voice, tone, examples). [AGENT.md](AGENT.md) is everything else — tool-use protocol, language matching, other operational rules. Don't fold one into the other; `src/core/graph.ts` concatenates both at startup.
-- **Folder architecture**: `src/core/` is the shared engine (graph, LLM client, memory, tools) — it knows nothing about any particular interface. `src/interfaces/<name>/` is a presentation layer that imports from `src/core/` (never the reverse). Adding an interface (e.g. Telegram) means adding a new folder under `src/interfaces/`, not touching `src/core/`.
+- **Folder architecture**: `src/core/` is the shared engine (graph, LLM client, memory, tools) — it knows nothing about any particular interface. `src/interfaces/<name>/` is a presentation layer that imports from `src/core/` (never the reverse).
 - **Security intentionally minimal**: the user explicitly asked for **no Docker, no hardened secret management, full bypass of manual permissions/confirmations**. This is NOT an oversight — do not reintroduce sandboxing or confirmation gates without an explicit request.
 - **Logs**: explicitly not required by the user for now. Do not add a logging/audit system without being asked.
 - **Stop**: Ctrl+C must interrupt the loop at any time, including mid LLM call (AbortController).
@@ -27,8 +27,7 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 ## Known roadmap (do not build ahead of a request)
 
 1. Loop + memory (done) + local web interface alongside the CLI (done, shares memory/commands via SQLite)
-2. Telegram interface
-3. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity. In progress: shell + filesystem tools done (`src/core/tools/`), mail/calendar still pending (need OAuth).
+2. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity. In progress: shell + filesystem tools done (`src/core/tools/`), mail/calendar still pending (need OAuth).
 4. Separate "Codex-style" app for vibe coding, with a main conversation orchestrating background sub-agents to manage projects. Do not start this without an explicit request — it was deliberately deferred during initial design.
 
 ## Stack

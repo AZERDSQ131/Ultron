@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
 // Every LLM call ULTRON makes, across every interface and every provider —
-// the main chat turn (CLI/web/Telegram) as well as the cheap separate calls
+// the main chat turn (CLI/web) as well as the cheap separate calls
 // (narrator.ts, goalJudge.ts, userModelExtractor.ts, visionAnalyzer.ts,
 // chatTitler.ts) — logged here so the web UI's "Tokens" page (see
 // usageView.js) can answer "how much am I actually using, on what, and on

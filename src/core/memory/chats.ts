@@ -36,9 +36,9 @@ export const CLI_CHAT_SCOPE = "cli";
 // since a brand-new chat with zero messages yet has no chat_events row to
 // infer from at all (that gap is exactly what made a freshly created mobile
 // chat show up mislabeled "CLI"). Distinct from ChatEventSource
-// ("cli"/"telegram", chatEvents.ts), which tags each individual message,
+// ("cli"/"app", chatEvents.ts), which tags each individual message,
 // not the conversation as a whole.
-export type ChatOrigin = "cli" | "telegram" | "app";
+export type ChatOrigin = "cli" | "app";
 
 export interface Chat {
   id: string;
@@ -150,23 +150,21 @@ export class ChatRegistry {
   }
 
   // Public so callers outside listResumable (e.g. the web server's
-  // GET /api/chats, for the mobile app's CLI/Telegram/App origin badge) can
+  // GET /api/chats, for the mobile app's CLI/App origin badge) can
   // label a chat without duplicating this lookup. Prefers the stamped
   // created_via column (authoritative, set once at creation — see create()/
   // ensure()) so a brand-new chat with zero messages yet is labeled
   // correctly right away, instead of falling through to the message-history
   // guess below (which used to default every unused chat to "CLI").
-  getOrigin(id: string): "CLI" | "Tel" | "App" {
+  getOrigin(id: string): "CLI" | "App" {
     try {
       const row = this.db.prepare("SELECT created_via FROM chats WHERE id = ?").get(id) as { created_via?: string | null } | undefined;
       if (row?.created_via === "app") return "App";
-      if (row?.created_via === "telegram") return "Tel";
       if (row?.created_via === "cli") return "CLI";
       const event = this.db.prepare("SELECT source FROM chat_events WHERE chat_id = ? ORDER BY id ASC LIMIT 1").get(id) as { source?: string } | undefined;
-      if (event?.source === "telegram") return "Tel";
+      if (event?.source === "app") return "App";
       if (event?.source === "cli") return "CLI";
-      const link = this.db.prepare("SELECT 1 FROM telegram_links WHERE ultron_chat_id = ? LIMIT 1").get(id);
-      return link ? "Tel" : "CLI";
+      return "CLI";
     } catch {
       return "CLI";
     }
@@ -208,7 +206,7 @@ export class ChatRegistry {
     return chat;
   }
 
-  // Every entry point (CLI, web, Telegram) called `ensure(LEGACY_CHAT_ID)`
+  // Every entry point (CLI, web) called `ensure(LEGACY_CHAT_ID)`
   // unconditionally at startup — meant as a one-time migration for the
   // pre-chats-feature hardcoded thread, but since `ensure()` recreates the
   // row whenever it's missing, deleting that specific chat only lasted
@@ -224,8 +222,8 @@ export class ChatRegistry {
     this.db.prepare("INSERT INTO chat_meta (key, value) VALUES ('legacy_migrated', '1') ON CONFLICT(key) DO NOTHING").run();
   }
 
-  // The scope's anchor conversation — what the local/remote CLI and a given
-  // Telegram chat always resume. Not a specially-titled or undeletable chat:
+  // The scope's anchor conversation — what the local/remote CLI resumes.
+  // Not a specially-titled or undeletable chat:
   // it's an ordinary row like any other, auto-titled from its first message
   // the same way (see chatTitler.ts). Its chat id may rotate (e.g. after the
   // web UI's /archive) — the main_chat_id pointer just tracks which id that
@@ -244,7 +242,7 @@ export class ChatRegistry {
     // the CLI is starting up) — never as an immediate side effect of
     // deleting the previous one, which used to make a deleted "main" chat
     // reappear instantly in any client polling the chat list.
-    const main = scope === CLI_CHAT_SCOPE ? this.ensure(LEGACY_CHAT_ID, DEFAULT_CHAT_TITLE, "cli") : this.create(DEFAULT_CHAT_TITLE, null, null, "telegram");
+    const main = this.ensure(LEGACY_CHAT_ID, DEFAULT_CHAT_TITLE, "cli");
     this.setMain(main.id, scope);
     this.setFocus(main.id, scope);
     return main;

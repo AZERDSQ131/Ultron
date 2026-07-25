@@ -145,14 +145,13 @@ function requireChat(res: ServerResponse, chatId: unknown): chatId is string {
   return true;
 }
 
-function originLabel(raw: "CLI" | "Tel" | "App"): ChatOrigin {
-  if (raw === "Tel") return "telegram";
+function originLabel(raw: "CLI" | "App"): ChatOrigin {
   if (raw === "App") return "app";
   return "cli";
 }
 
 async function handleListChats(res: ServerResponse): Promise<void> {
-  // origin: "cli" | "telegram" | "app" — lets a client (the mobile app) show
+  // origin: "cli" | "app" — lets a client (the mobile app) show
   // which interface a conversation came from without duplicating getOrigin's
   // logic.
   const withOrigin = chats.list().map((chat) => ({
@@ -173,7 +172,7 @@ async function handleCreateChat(req: IncomingMessage, res: ServerResponse): Prom
   // chat" button, the remote CLI) predates this field and didn't send it;
   // only the mobile app now explicitly sends "app" so its own new chats
   // aren't mislabeled "CLI" before their first message.
-  const origin: ChatOrigin = payload.origin === "app" || payload.origin === "telegram" ? payload.origin : "cli";
+  const origin: ChatOrigin = payload.origin === "app" ? "app" : "cli";
   const chat = chats.create(payload.title?.trim() || undefined, payload.agentId ?? null, null, origin);
   sendJson(res, 200, { chat });
 }
@@ -432,7 +431,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
     sendJson(res, 400, { error: "message text is required" });
     return;
   } else {
-    chatEvents.append(chatId, "human", payload.source === "telegram" ? "telegram" : "cli", input);
+    chatEvents.append(chatId, "human", payload.source === "app" ? "app" : "cli", input);
     autoTitleChat(chats, chatId, input);
     if (taskMode === "goal") goals.set(chatId, input, config.goalMaxTurns);
     else goals.clear(chatId);
@@ -445,7 +444,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   // retries intentionally keep their existing list.
   if (!isRetry && (taskMode === "todo" || taskMode === "plan")) todos.clear(chatId);
 
-  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(expandSkillMentions(input))] }, payload.source === "telegram" ? "telegram" : "cli");
+  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(expandSkillMentions(input))] }, payload.source === "app" ? "app" : "cli");
   const exportedChat = chats.get(chatId);
   if (exportedChat) void maybeExportChat(graph, exportedChat);
 }
@@ -455,7 +454,7 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
 // the turn — including a further approval_required if another destructive
 // call follows immediately.
 async function handleApprove(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ chatId?: string; thinking?: ThinkingMode; taskMode?: TaskMode; decisions?: ToolApprovalDecision }>(req);
+  const payload = await readJson<{ chatId?: string; thinking?: ThinkingMode; taskMode?: TaskMode; decisions?: ToolApprovalDecision; source?: ChatEventSource }>(req);
   if (!payload || !requireChat(res, payload.chatId)) return;
   const chatId = payload.chatId as string;
   if (!payload.decisions) {
@@ -464,7 +463,7 @@ async function handleApprove(req: IncomingMessage, res: ServerResponse): Promise
   }
   const thinkingMode: ThinkingMode = payload.thinking ?? "full";
   const taskMode: TaskMode = payload.taskMode ?? "none";
-  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, new Command({ resume: payload.decisions }));
+  await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, new Command({ resume: payload.decisions }), payload.source === "app" ? "app" : "cli");
   const exportedChat = chats.get(chatId);
   if (exportedChat) void maybeExportChat(graph, exportedChat);
 }
@@ -615,7 +614,7 @@ async function handleMainChat(res: ServerResponse): Promise<void> {
 // already used for spawn_agent's background runs (src/core/runs.ts), reused
 // here rather than inventing a new pattern. A login is global (one ULTRON
 // install, one ChatGPT account), not per-chat, so every interface (CLI,
-// web, Telegram, mobile) hitting these same routes shares one outcome.
+// web, mobile) hitting these same routes shares one outcome.
 interface OpenAILoginState {
   status: "pending" | "complete" | "error";
   error?: string;
@@ -668,7 +667,7 @@ async function handleOpenAILogout(res: ServerResponse): Promise<void> {
 
 // Lightweight liveness probe — a real (cheap) DB query but no LLM call — so
 // anything that needs to know the process is up and the shared SQLite file
-// is reachable (a future Telegram bot, a supervisor script) doesn't have to
+// is reachable (a supervisor script) doesn't have to
 // hit a heavier endpoint just to check.
 async function handleHealth(res: ServerResponse): Promise<void> {
   let databaseReachable = true;
@@ -907,7 +906,7 @@ function serveHealthPhoto(req: IncomingMessage, res: ServerResponse): boolean {
   return true;
 }
 
-// Web-UI parity for the CLI/Telegram /memory command (passive user-model
+// Web-UI parity for the CLI /memory command (passive user-model
 // observations, see src/core/memory/userModel.ts) — previously only
 // reachable from the CLI, so "every command" in the redesigned web UI had a
 // real gap here.

@@ -103,20 +103,19 @@ async function main() {
   let currentChatId = chats.activateMain(CLI_CHAT_SCOPE).id;
   setActivePermissionLabel(chats.getSecurityMode(currentChatId));
 
-  // The local CLI shares the database with Telegram directly. Keep listening
-  // to Telegram-originated events so /resume is live, not just a one-time
-  // history restore.
+  // The local CLI shares the database with the app directly. Keep listening
+  // to app-originated events so a live conversation stays visible.
   let eventCursor = chatEvents.latestId(currentChatId);
   let eventPollBusy = false;
-  const pollTelegramEvents = async (): Promise<void> => {
+  const pollAppEvents = async (): Promise<void> => {
     if (eventPollBusy) return;
     eventPollBusy = true;
     try {
       const events = chatEvents.listAfter(currentChatId, eventCursor);
       for (const event of events) {
         eventCursor = event.id;
-        if (event.source !== "telegram") continue;
-        const speaker = event.kind === "human" ? chalk.yellow("telegram") : chalk.redBright.bold("ultron");
+        if (event.source !== "app") continue;
+        const speaker = event.kind === "human" ? chalk.yellow("app") : chalk.redBright.bold("ultron");
         appendTranscript(`${speaker} ${uiDim("›")} ${event.content}\n\n`);
       }
       if (events.length) renderScreen("", 0, "");
@@ -124,7 +123,7 @@ async function main() {
       eventPollBusy = false;
     }
   };
-  const eventPollTimer = setInterval(() => { void pollTelegramEvents(); }, 750);
+  const eventPollTimer = setInterval(() => { void pollAppEvents(); }, 750);
 
   let abortController: AbortController | undefined;
   let stopping = false;
