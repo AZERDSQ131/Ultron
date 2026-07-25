@@ -93,6 +93,15 @@ export const config = {
   // directly by an external health-export app/shortcut, not the browser
   // UI. Undefined disables the endpoint (it always 401s).
   healthIngestToken: process.env.HEALTH_INGEST_TOKEN,
+  // ActivityKit push credentials. Leave unset to keep Live Activities local
+  // only; configure these on the ULTRON server to update/end activities while
+  // the iOS app is suspended.
+  apnsKeyId: process.env.APNS_KEY_ID,
+  apnsTeamId: process.env.APNS_TEAM_ID,
+  apnsPrivateKeyPath: process.env.APNS_PRIVATE_KEY_PATH,
+  apnsPrivateKey: process.env.APNS_PRIVATE_KEY,
+  apnsEnvironment: process.env.APNS_ENVIRONMENT === "production" ? "production" : "sandbox",
+  apnsBundleId: process.env.APNS_BUNDLE_ID ?? "com.ultron.mobile",
   // Per-turn cost shown in the stats line (CLI /verbose and web's verbose
   // toggle). NVIDIA NIM doesn't expose per-model public pricing the way
   // Anthropic/OpenAI do, so this is a configurable estimate rather than a

@@ -143,8 +143,16 @@ opening).
   modules. Full tap-through of every screen wasn't automated (no reliable simulator UI-automation
   tool in this environment); the user should click through the golden path once on a real device
   or simulator.
+- **Live Activity** — `ULTRONLiveActivity` is a WidgetKit extension with compact/minimal/expanded/
+  Lock Screen layouts. `LiveActivityManager` starts one for each mobile turn, mirrors text/tool/
+  approval/done events locally, and registers the ActivityKit push token with
+  `POST /api/live-activities/register`. The server persists tokens and sends ActivityKit/APNs
+  updates for mobile turns; app-originated turns continue server-side after the SSE client closes
+  so iOS suspension doesn't abort the work. Configure `APNS_KEY_ID`, `APNS_TEAM_ID`,
+  `APNS_PRIVATE_KEY_PATH` (or `APNS_PRIVATE_KEY`), `APNS_ENVIRONMENT` and `APNS_BUNDLE_ID` on the
+  server for remote updates. Without APNs credentials, foreground/local updates still work.
 - Deferred, same as everywhere else: Agents/Schedules panel, Goal mode (CLI-only today), file/photo
-  upload from mobile, push notifications.
+  upload from mobile.
 
 ## Conversation management moved to mobile (done)
 

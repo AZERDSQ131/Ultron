@@ -46,6 +46,7 @@ import { saveUpload } from "../../core/uploads.js";
 import { transcribeAudio } from "../../core/transcription.js";
 import { getUsageRegistry } from "../../core/memory/usage.js";
 import { getFinanceRegistry, type AccountType } from "../../core/memory/finance.js";
+import { getLiveActivityRegistry } from "../../core/memory/liveActivities.js";
 import { getOpenAIAuthRegistry } from "../../core/memory/openaiAuth.js";
 import { requestDeviceCode, pollAndExchange, decodeAccountEmail, decodeAccountId, revoke as revokeOpenAI, type DeviceCodeSession } from "../../core/llm/openaiAuth.js";
 
@@ -63,6 +64,14 @@ const todos = getTodoRegistry(config.databasePath);
 const goals = getGoalRegistry(config.databasePath);
 const chatEvents = getChatEventRegistry(config.databasePath);
 const openaiAuth = getOpenAIAuthRegistry(config.databasePath);
+const liveActivities = getLiveActivityRegistry(config.databasePath, {
+  keyId: config.apnsKeyId,
+  teamId: config.apnsTeamId,
+  privateKeyPath: config.apnsPrivateKeyPath,
+  privateKey: config.apnsPrivateKey,
+  environment: config.apnsEnvironment as "sandbox" | "production",
+  bundleId: config.apnsBundleId,
+});
 // Migrates the CLI's original hardcoded thread ("ultron-main", used before
 // chats existed) into the registry on first run, so pre-existing history
 // shows up as a chat instead of being orphaned. Runs at most once ever
@@ -134,7 +143,19 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): boolean {
 }
 
 function sseWrite(res: ServerResponse, event: string, data: unknown): void {
+  if (res.destroyed || res.writableEnded) return;
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function publishLiveActivity(
+  chatId: string,
+  status: "running" | "completed" | "failed" | "waitingForApproval",
+  latestAction: string,
+  options: { force?: boolean; end?: boolean } = {},
+): void {
+  void liveActivities.publish(chatId, status, latestAction, options).catch((error) => {
+    debugLog(`live activity update failed chat=${chatId}: ${error instanceof Error ? error.message : String(error)}`);
+  });
 }
 
 function requireChat(res: ServerResponse, chatId: unknown): chatId is string {
@@ -245,7 +266,10 @@ async function streamGraphTurn(
   activeAborts.set(chatId, abortController);
 
   req.on("close", () => {
-    if (activeAborts.get(chatId) === abortController) abortController.abort();
+    // Mobile Live Activities need the server-side turn to keep running while
+    // iOS suspends the SSE client. The explicit /api/stop route still aborts
+    // it when the user asks to stop.
+    if (source !== "app" && activeAborts.get(chatId) === abortController) abortController.abort();
   });
 
   const turnStarted = Date.now();
@@ -276,10 +300,12 @@ async function streamGraphTurn(
           const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
           if (pending) {
             sseWrite(res, "tool_call", { name: pending.name, summary: summarizeToolCall(pending.name, pending.args) });
+            if (source === "app") publishLiveActivity(chatId, "running", `Outil : ${pending.name} — ${summarizeToolCall(pending.name, pending.args)}`);
             const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
             if (key !== undefined) pendingToolCalls.delete(key);
           }
           sseWrite(res, "tool_result", { name: toolName, content: String(chunk.content) });
+          if (source === "app") publishLiveActivity(chatId, "running", `Résultat : ${toolName} — ${String(chunk.content).slice(0, 120)}`);
           continue;
         }
 
@@ -317,6 +343,7 @@ async function streamGraphTurn(
       if (pendingApproval) {
         debugLog(`approval required chat=${chatId} calls=${JSON.stringify(pendingApproval.calls.map((c) => c.name))}`);
         sseWrite(res, "approval_required", { calls: pendingApproval.calls });
+        if (source === "app") publishLiveActivity(chatId, "waitingForApproval", "Approbation requise", { force: true });
       } else {
         // Close the whole plan in the host after the real work is done;
         // never spend one model turn per item changing statuses.
@@ -342,6 +369,7 @@ async function streamGraphTurn(
           contextTokens,
           maxTokens: config.contextWindowTokens,
         });
+        if (source === "app") publishLiveActivity(chatId, "completed", "Terminé", { force: true, end: true });
 
         // Passive memory extraction (see userModelExtractor.ts) — never
         // awaited, never blocks the SSE response; only for an actual new
@@ -391,8 +419,10 @@ async function streamGraphTurn(
     debugLog(`turn error chat=${chatId} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`);
     if (abortController.signal.aborted) {
       sseWrite(res, "aborted", {});
+      if (source === "app") publishLiveActivity(chatId, "failed", "Arrêté", { force: true, end: true });
     } else {
       sseWrite(res, "error", { message: err instanceof Error ? err.message : String(err) });
+      if (source === "app") publishLiveActivity(chatId, "failed", "Erreur", { force: true, end: true });
     }
   } finally {
     if (activeAborts.get(chatId) === abortController) activeAborts.delete(chatId);
@@ -677,6 +707,20 @@ async function handleHealthIngest(req: IncomingMessage, res: ServerResponse): Pr
   }
   const { dates } = getHealthRegistry(config.databasePath).ingest(payload);
   sendJson(res, 200, { status: "ok", dates });
+}
+
+async function handleLiveActivityRegister(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ chatId?: string; activityId?: string; pushToken?: string }>(req);
+  if (!payload?.chatId || !payload.activityId || !payload.pushToken || !chats.get(payload.chatId)) {
+    sendJson(res, 400, { error: "chatId, activityId and pushToken are required" });
+    return;
+  }
+  if (!/^[0-9a-f]+$/i.test(payload.pushToken)) {
+    sendJson(res, 400, { error: "pushToken must be hexadecimal" });
+    return;
+  }
+  liveActivities.register(payload.chatId, payload.activityId, payload.pushToken);
+  sendJson(res, 200, { registered: true });
 }
 
 // Read-only data for the "Tokens" view (public/js/usageView.js) — every
@@ -1200,6 +1244,10 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/health-data/ingest") {
     handleHealthIngest(req, res).catch((err) => console.error("[ultron-web] health ingest failed:", err));
+    return;
+  }
+  if (req.method === "POST" && path === "/api/live-activities/register") {
+    handleLiveActivityRegister(req, res).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
   if (req.method === "GET" && path === "/api/health-data/summary") {

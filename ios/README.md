@@ -32,8 +32,11 @@ moment via l'icône ⚙️ du menu principal.
 
 - `ULTRON/Networking/ULTRONClient.swift` — client HTTP/SSE unique, `@MainActor`,
   qui mirror l'API du serveur (chats, turns/SSE, modèles/provider, finance,
-  santé, usage, memory, skills, tools). Aucune logique métier côté client : le
+  santé, usage, memory, skills, tools et l'enregistrement ActivityKit). Aucune logique métier côté client : le
   serveur reste la seule source de vérité.
+- `ULTRONLiveActivity/` — extension WidgetKit qui rend la tâche dans le
+  Dynamic Island et sur l'écran verrouillé. L'app démarre l'activité au premier
+  plan, puis le serveur peut la mettre à jour via APNs quand iOS suspend l'app.
 - `ULTRON/Networking/SSEParser.swift` — parsing de frames SSE fait main.
 - `ULTRON/Screens/Menu/` — menu principal (modules + liste de conversations
   groupée par date).
@@ -44,7 +47,16 @@ moment via l'icône ⚙️ du menu principal.
 
 ## Hors scope v1
 
-Panneau Agents/Schedules, mode Goal, upload de fichiers/photos, notifications
-push, bloc "Thinking" repliable (aucun événement SSE dédié au raisonnement
-n'existe côté serveur aujourd'hui). Voir le plan d'implémentation d'origine
-pour le détail des décisions.
+Panneau Agents/Schedules, mode Goal, bloc "Thinking" repliable (aucun
+événement SSE dédié au raisonnement n'existe côté serveur aujourd'hui). Voir
+le plan d'implémentation d'origine pour le détail des décisions.
+
+## Configuration APNs
+
+Pour les mises à jour lorsque l'app est suspendue, renseigne sur le serveur
+les variables `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY_PATH` (ou
+`APNS_PRIVATE_KEY`), `APNS_ENVIRONMENT` et `APNS_BUNDLE_ID`. Active aussi la
+capability Push Notifications pour l'app dans le portail Apple Developer et
+utilise un profil de provisioning qui contient cette capability. Sans ces
+variables, l'activité fonctionne quand l'app est active, mais ne reçoit pas les
+changements distants pendant sa suspension.

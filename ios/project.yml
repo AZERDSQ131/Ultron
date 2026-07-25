@@ -31,6 +31,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ultron.mobile
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: false
+    entitlements:
+      path: ULTRON/Resources/ULTRON.entitlements
+      properties:
+        aps-environment: development
     dependencies:
       - target: ULTRONLiveActivity
   ULTRONLiveActivity:
