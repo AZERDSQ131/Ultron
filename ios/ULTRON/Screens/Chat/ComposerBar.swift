@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 struct ComposerBar: View {
     @Binding var text: String
@@ -8,6 +9,8 @@ struct ComposerBar: View {
     let permissionLabel: String
     let verbose: Bool
     let isSending: Bool
+    @Binding var photoItem: PhotosPickerItem?
+    let isRecording: Bool
     let onSend: () -> Void
     let onStop: () -> Void
     let onTapModel: () -> Void
@@ -15,6 +18,7 @@ struct ComposerBar: View {
     let onTapTaskMode: () -> Void
     let onTapPermission: () -> Void
     let onToggleVerbose: () -> Void
+    let onToggleRecording: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
@@ -29,11 +33,29 @@ struct ComposerBar: View {
             .scrollableIfNeeded()
 
             HStack(alignment: .bottom, spacing: 8) {
+                PhotosPicker(selection: $photoItem, matching: .images) {
+                    Image(systemName: "plus")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+
                 TextField("Écris à ULTRON...", text: $text, axis: .vertical)
                     .lineLimit(1...6)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 18).fill(Color(.secondarySystemBackground)))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.22)))
+
+                Button(action: onToggleRecording) {
+                    Image(systemName: isRecording ? "waveform" : "mic.fill")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(isRecording ? .red : .primary)
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isRecording ? "Arrêter la dictée" : "Dicter un message")
 
                 Button {
                     if isSending {
@@ -46,14 +68,16 @@ struct ComposerBar: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.white)
                         .frame(width: 34, height: 34)
-                        .background(Circle().fill(isSending ? Color.red : Color.accentColor))
+                        .background(.thinMaterial, in: Circle())
+                        .overlay(Circle().fill(isSending ? Color.red : Color.accentColor).opacity(0.9))
                 }
                 .disabled(!isSending && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.18)).frame(height: 0.5) }
     }
 
     private func pillButton(_ label: String, systemImage: String, action: @escaping () -> Void) -> some View {
@@ -62,7 +86,8 @@ struct ComposerBar: View {
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Capsule().fill(Color(.secondarySystemBackground)))
+                .background(.thinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
         }
         .foregroundStyle(.primary)
     }

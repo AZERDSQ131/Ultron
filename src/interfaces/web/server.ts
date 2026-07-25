@@ -43,6 +43,7 @@ import { summarizeToolCall } from "../../core/tools/summarize.js";
 import { withThreadLock } from "../../core/threadLock.js";
 import { log } from "../../core/logger.js";
 import { saveUpload } from "../../core/uploads.js";
+import { transcribeAudio } from "../../core/transcription.js";
 import { getUsageRegistry } from "../../core/memory/usage.js";
 import { getFinanceRegistry, type AccountType } from "../../core/memory/finance.js";
 import { getOpenAIAuthRegistry } from "../../core/memory/openaiAuth.js";
@@ -504,6 +505,25 @@ async function handleUpload(req: IncomingMessage, res: ServerResponse, chatId: s
   const buffer = Buffer.from(payload.dataBase64, "base64");
   const saved = saveUpload(chatId, filename, buffer);
   sendJson(res, 200, saved);
+}
+
+async function handleTranscription(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ audioBase64?: string; filename?: string; mimeType?: string; language?: string }>(req);
+  if (!payload?.audioBase64 || !payload.filename || !payload.mimeType) {
+    sendJson(res, 400, { error: "audioBase64, filename and mimeType are required" });
+    return;
+  }
+  try {
+    const text = await transcribeAudio({
+      buffer: Buffer.from(payload.audioBase64, "base64"),
+      filename: payload.filename,
+      mimeType: payload.mimeType,
+      language: payload.language,
+    });
+    sendJson(res, 200, { text });
+  } catch (err) {
+    sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 async function handleSetSecurity(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
@@ -1105,6 +1125,10 @@ const server = createServer((req, res) => {
       if (!res.headersSent) sendJson(res, 500, { error: "internal error" });
       else res.end();
     });
+    return;
+  }
+  if (req.method === "POST" && path === "/api/transcribe") {
+    handleTranscription(req, res).catch((err) => sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
   if (req.method === "POST" && path === "/api/approve") {

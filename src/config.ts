@@ -60,6 +60,10 @@ export const config = {
   // validation as deepseekApiKey above.
   groqApiKey: process.env.GROQ_API_KEY,
   groqBaseUrl: process.env.GROQ_BASE_URL ?? "https://api.groq.com/openai/v1",
+  // Voxtral transcription runs server-side so the Mistral key never ships
+  // inside the mobile app.
+  mistralApiKey: process.env.MISTRAL_API_KEY,
+  mistralTranscriptionModel: process.env.MISTRAL_TRANSCRIPTION_MODEL ?? "voxtral-mini-latest",
   // Separate vision-capable model for meal/exercise photo analysis (see
   // src/core/health/visionAnalyzer.ts) — the main chat model
   // (nemotronModel) is text-only, so photos go to NVIDIA's own

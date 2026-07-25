@@ -313,6 +313,31 @@ final class ULTRONClient {
         return response.results
     }
 
+    // MARK: - Attachments / voice input
+
+    struct SavedUpload: Codable { let path: String; let filename: String; let size: Int }
+    struct TranscriptionBody: Encodable { let audioBase64: String; let filename: String; let mimeType: String; let language: String? }
+    struct TranscriptionResponse: Codable { let text: String }
+
+    func uploadFile(chatId: String, filename: String, data: Data) async throws -> SavedUpload {
+        let body = try JSONEncoder().encode([
+            "filename": filename,
+            "dataBase64": data.base64EncodedString(),
+        ])
+        var req = URLRequest(url: try url("/api/chats/\(chatId)/upload"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        let (responseData, response) = try await session.data(for: req)
+        try Self.checkStatus(response, data: responseData)
+        return try JSONDecoder().decode(SavedUpload.self, from: responseData)
+    }
+
+    func transcribe(data: Data, filename: String = "recording.m4a", mimeType: String = "audio/mp4", language: String? = "fr") async throws -> String {
+        let response: TranscriptionResponse = try await request("POST", "/api/transcribe", body: TranscriptionBody(audioBase64: data.base64EncodedString(), filename: filename, mimeType: mimeType, language: language))
+        return response.text
+    }
+
     // MARK: - Stop
 
     struct ChatIdBody: Encodable { let chatId: String }

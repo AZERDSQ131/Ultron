@@ -1,4 +1,6 @@
 import SwiftUI
+import AVFoundation
+import PhotosUI
 
 struct ChatView: View {
     let chatId: String
@@ -16,6 +18,9 @@ struct ChatView: View {
     @State private var securityMode = "bypass"
     @State private var verbose = false
     @State private var verboseStats: String?
+    @State private var photoItem: PhotosPickerItem?
+    @State private var isRecording = false
+    @State private var recorder: AVAudioRecorder?
 
     @State private var showModelPicker = false
     @State private var showThinkingModePicker = false
@@ -65,13 +70,16 @@ struct ChatView: View {
                 permissionLabel: permissionLabel,
                 verbose: verbose,
                 isSending: isSending,
+                photoItem: $photoItem,
+                isRecording: isRecording,
                 onSend: send,
                 onStop: stop,
                 onTapModel: { showModelPicker = true },
                 onTapThinkingMode: { showThinkingModePicker = true },
                 onTapTaskMode: { showTaskModePicker = true },
                 onTapPermission: { showPermissionPicker = true },
-                onToggleVerbose: { verbose.toggle() }
+                onToggleVerbose: { verbose.toggle() },
+                onToggleRecording: toggleRecording
             )
         }
         .navigationTitle("Conversation")
@@ -97,6 +105,11 @@ struct ChatView: View {
             PermissionPickerSheet(chatId: chatId, selected: $securityMode)
         }
         .task { await bootstrap() }
+        .onChange(of: photoItem) { _, item in
+            guard let item else { return }
+            Task { await attachPhoto(item) }
+            photoItem = nil
+        }
     }
 
     private var taskModeLabel: String {
@@ -159,13 +172,90 @@ struct ChatView: View {
         }
     }
 
-    private func send() {
-        let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func send(textOverride: String? = nil) {
+        let text = (textOverride ?? composerText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         composerText = ""
         timeline.addHumanMessage(text)
         verboseStats = nil
         runStream(client.streamTurn(chatId: chatId, text: text, thinking: thinkingMode, taskMode: taskMode))
+    }
+
+    private func attachPhoto(_ item: PhotosPickerItem) async {
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else { return }
+            let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
+            let extensionName = mimeType.split(separator: "/").last.map(String.init) ?? "jpg"
+            let saved = try await client.uploadFile(chatId: chatId, filename: "photo.\(extensionName)", data: data)
+            let note = "[Attached image]\n- \(saved.path)"
+            composerText = composerText.isEmpty ? note : "\(composerText)\n\n\(note)"
+        } catch {
+            errorMessage = "Impossible d'importer la photo : \(error.localizedDescription)"
+        }
+    }
+
+    private func toggleRecording() {
+        if isRecording {
+            finishRecording()
+        } else {
+            requestMicrophoneAndRecord()
+        }
+    }
+
+    private func requestMicrophoneAndRecord() {
+        let permission = AVAudioSession.sharedInstance().recordPermission
+        if permission == .denied {
+            errorMessage = "L'accès au microphone est désactivé dans Réglages."
+            return
+        }
+        if permission == .undetermined {
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                Task { @MainActor in
+                    if granted { startRecording() }
+                    else { errorMessage = "L'accès au microphone est nécessaire pour dicter." }
+                }
+            }
+        } else {
+            startRecording()
+        }
+    }
+
+    private func startRecording() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.record, mode: .spokenAudio, options: [.allowBluetooth])
+            try session.setActive(true)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("ultron-voice-\(UUID().uuidString).m4a")
+            recorder = try AVAudioRecorder(url: url, settings: [
+                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                AVSampleRateKey: 44_100,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+            ])
+            recorder?.record()
+            isRecording = true
+        } catch {
+            errorMessage = "Impossible de démarrer le microphone : \(error.localizedDescription)"
+        }
+    }
+
+    private func finishRecording() {
+        guard let recorder else { return }
+        recorder.stop()
+        self.recorder = nil
+        isRecording = false
+        let url = recorder.url
+        Task {
+            do {
+                let data = try Data(contentsOf: url)
+                let transcript = try await client.transcribe(data: data)
+                let combined = composerText.isEmpty ? transcript : "\(composerText) \(transcript)"
+                send(textOverride: combined)
+                try? FileManager.default.removeItem(at: url)
+            } catch {
+                errorMessage = "Transcription Voxtral impossible : \(error.localizedDescription)"
+            }
+        }
     }
 
     private func stop() {

@@ -23,6 +23,7 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        NSMicrophoneUsageDescription: "ULTRON utilise le microphone pour transcrire tes messages avec Voxtral."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ultron.mobile
