@@ -16,7 +16,6 @@ import { readTodayNote } from "./memory/daily.js";
 import { getUserModelRegistry } from "./memory/userModel.js";
 import { getHealthRegistry } from "./memory/health.js";
 import { listSkills } from "./skills.js";
-import { AgentRegistry, type Agent } from "./memory/agents.js";
 import { tools, toolScopes } from "./tools/index.js";
 import { summarizeToolCall } from "./tools/summarize.js";
 import { log } from "./logger.js";
@@ -61,24 +60,7 @@ ${lines}
 </skills>`;
 }
 
-const agentRegistry = new AgentRegistry(appConfig.databasePath);
 const chatRegistryForPrompt = getChatRegistry(appConfig.databasePath);
-
-// A chat owned by an Agent (spawn_agent, schedule_task — see toolScopes'
-// "destructive" note on spawn_agent) must NOT get SOUL.md's "you are
-// ULTRON" identity or MEMORY.md's personal facts about the user: handing a
-// sub-agent that persona while a human message simultaneously tells it
-// "you are a research agent, task: X" produced exactly the confused,
-// off-task replies (the sub-agent describing itself as ULTRON) that this
-// split exists to prevent. AGENT.md's tool-use protocol still applies, since
-// a sub-agent calls tools the same way ULTRON does.
-function buildAgentSystemPrompt(agent: Agent): string {
-  return `You are "${agent.name}", a sub-agent spawned by ULTRON to complete a specific task in your own separate conversation. You are not ULTRON and do not have ULTRON's personality or memory — stay focused on the task you were given and report your findings plainly.
-
-${agent.instructions?.trim() ? `Your standing persona and instructions:\n${agent.instructions.trim()}\n\n` : ""}---
-
-${agentNotes}${skillsCatalog()}`;
-}
 
 // Explicit per-turn task-management mode picked from the composer's task
 // selector (next to reasoning/security — see composer.js's task-btn), sent
@@ -193,10 +175,6 @@ function taskModeReminder(mode: TaskMode, state: TodoState): string {
 }
 
 function buildSystemPrompt(threadId?: string, taskMode: TaskMode = "none"): string {
-  const chat = threadId ? chatRegistryForPrompt.get(threadId) : undefined;
-  const owner = chat?.agentId ? agentRegistry.getAgent(chat.agentId) : undefined;
-  if (owner) return buildAgentSystemPrompt(owner) + taskModeDirective(taskMode);
-
   const todayNote = readTodayNote();
   const userModelSummary = userModelRegistryForPrompt.renderForPrompt();
   const healthSummary = healthRegistryForPrompt.renderForPrompt();
@@ -735,7 +713,7 @@ export async function searchMessages(
 }
 
 // Message list for replaying a chat's history in a UI (the web sidebar
-// switching between chats, or reattaching to a spawn_agent execution once
+// switching between chats, or reopening a scheduled execution once
 // it's already finished — see runs.ts) — human/ai text plus tool calls and
 // their results, in order, so a chat that mostly *did things* (a spawned
 // research agent, say) doesn't read as empty. System/summary messages are

@@ -277,9 +277,9 @@ async function main() {
       for (;;) {
         // Serialized per chatId (see threadLock.ts), released again as soon
         // as this iteration's stream finishes — not held across the
-        // human-approval prompt below, so a spawn_agent wake-up note
-        // (tools/agents.ts) targeting this same chat isn't stuck behind the
-        // user thinking about a y/n. Without this lock, that wake-up racing
+        // human-approval prompt below, so another graph event targeting this
+        // same chat isn't stuck behind the user thinking about a y/n. Without
+        // this lock, that event racing
         // a still-live stream on the same checkpoint thread was exactly
         // what let stray tool/report text bleed into an unrelated reply.
         await withThreadLock(chatId, async () => {

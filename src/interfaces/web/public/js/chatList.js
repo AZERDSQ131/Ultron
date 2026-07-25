@@ -3,7 +3,7 @@ import { renderMarkdown } from "./markdown.js";
 import { state } from "./store.js";
 import { addTurn, beginToolGroup, addSystemNote, clearThread, updateTurnActions } from "./thread.js";
 import { loadStatus } from "./statusBar.js";
-import { attachToRunningChat, setGenerating, syncSecurityMode } from "./composer.js";
+import { setGenerating, syncSecurityMode } from "./composer.js";
 import { closeHealthView } from "./healthView.js";
 import { closeUsageView } from "./usageView.js";
 import { closeFinanceView } from "./financeView.js";
@@ -22,7 +22,6 @@ export function initChatList(injectedHandlers) {
   newChatBtn.addEventListener("click", () => createNewChat());
   sidebarToggle.addEventListener("click", () => sidebar.classList.toggle("collapsed"));
   sidebarScrim.addEventListener("click", () => sidebar.classList.add("collapsed"));
-  window.addEventListener("agents:loaded", renderChatList);
 }
 
 export function toggleSidebar(force) {
@@ -38,13 +37,7 @@ function timeAgo(iso) {
   return `${Math.round(hours / 24)}d`;
 }
 
-// Schedule-owned chats still show here, grouped chronologically like
-// ChatGPT's sidebar (Today / Yesterday / Previous 7 days / a bucket per
-// older month), with a ⏰ badge. Agent-owned chats (chat.agentId set) are
-// deliberately excluded from this list — they clutter the day-to-day
-// timeline with sub-agent runs that aren't really "today's conversations"
-// — and are reached from the Agents panel instead (automation.js), by
-// clicking an agent to open its most recent chat.
+// Scheduled-task chats show here with a clock badge, alongside regular chats.
 function dayKey(iso) {
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -84,7 +77,7 @@ function chatBadge(chat) {
 
 function renderChatList() {
   chatListEl.innerHTML = "";
-  const allChats = [...state.chatsCache].filter((chat) => !chat.agentId).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  const allChats = [...state.chatsCache].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   if (allChats.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-hint";
@@ -263,15 +256,7 @@ export async function selectChat(id) {
       }
     }
     updateTurnActions();
-    // The chat may still be a spawn_agent execution in progress (see
-    // runs.ts) — attach to its live output instead of leaving the view
-    // frozen on whatever history had been written by the time this loaded.
-    // Otherwise, force-clear any stale "generating" state a still-finishing
-    // attach to the *previous* chat left behind (it only clears itself if
-    // it's still the active chat when its stream ends — see
-    // attachToRunningChat's stillViewing() guard in composer.js).
-    if (data.running) attachToRunningChat(id);
-    else setGenerating(false);
+    setGenerating(false);
   } catch {
     addSystemNote("[ultron] could not load chat history.", true);
   }

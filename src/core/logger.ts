@@ -18,7 +18,7 @@ export function disableConsoleEcho(): void {
 }
 
 // Shared by graph.ts, server.ts and the tools that log their own
-// diagnostics (agents.ts, schedules.ts) so there's one place that knows
+// diagnostics (schedules.ts) so there's one place that knows
 // whether stderr is safe to write to right now, instead of each module
 // deciding for itself and the CLI having no way to override them all.
 export function log(prefix: string, message: string): void {

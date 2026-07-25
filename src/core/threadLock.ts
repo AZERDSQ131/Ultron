@@ -1,9 +1,9 @@
-// Serializes every graph execution (a normal streamed turn, a spawn_agent
-// wake-up note — see tools/agents.ts, a scheduled-task run) that targets
+// Serializes every graph execution (a normal streamed turn or a scheduled
+// task run) that targets
 // the same thread_id, within this process.
 //
-// Without this, a fast spawn_agent sub-agent finishing while the user's own
-// turn on the same parent chat was still streaming would fire its wake-up
+// Without this, a scheduled task while the user's own turn on the same chat
+// was still streaming would fire its graph run
 // graph.invoke() concurrently with that live graph.stream() — two Pregel
 // runs reading and writing the same SQLite-backed checkpoint thread at
 // once. Observed effect: the live reply picked up the wake-up's injected

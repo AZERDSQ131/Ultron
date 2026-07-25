@@ -25,7 +25,7 @@ import { autoTitleChat } from "../../core/chatTitler.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type ChatOrigin, type SecurityMode } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
-import { AgentRegistry } from "../../core/memory/agents.js";
+import { ScheduleRegistry } from "../../core/memory/schedules.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getHealthRegistry, pickLatestWithData, type HealthExportPayload, type HealthMetric } from "../../core/memory/health.js";
@@ -40,7 +40,6 @@ import { listSkills, readSkill } from "../../core/skills.js";
 import { installHubSkill, listHubSkills } from "../../core/skillsHub.js";
 import { tools, toolScopes } from "../../core/tools/index.js";
 import { summarizeToolCall } from "../../core/tools/summarize.js";
-import { abortRun, isRunning, subscribeToRun } from "../../core/runs.js";
 import { withThreadLock } from "../../core/threadLock.js";
 import { log } from "../../core/logger.js";
 import { saveUpload } from "../../core/uploads.js";
@@ -58,7 +57,7 @@ function debugLog(message: string): void {
 let graph = buildGraph();
 const fallbackContextWindowTokens = config.contextWindowTokens;
 const chats = getChatRegistry(config.databasePath);
-const agents = new AgentRegistry(config.databasePath);
+const schedules = new ScheduleRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
 const goals = getGoalRegistry(config.databasePath);
 const chatEvents = getChatEventRegistry(config.databasePath);
@@ -162,18 +161,17 @@ async function handleListChats(res: ServerResponse): Promise<void> {
 }
 
 async function handleCreateChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ title?: string; agentId?: string | null; origin?: ChatOrigin }>(req);
+  const payload = await readJson<{ title?: string; origin?: ChatOrigin }>(req);
   if (!payload) {
     sendJson(res, 400, { error: "invalid JSON body" });
     return;
   }
-  if (payload.agentId && !agents.getAgent(payload.agentId)) { sendJson(res, 404, { error: "unknown agent" }); return; }
   // origin defaults to "cli" — every existing caller (the web UI's own "new
   // chat" button, the remote CLI) predates this field and didn't send it;
   // only the mobile app now explicitly sends "app" so its own new chats
   // aren't mislabeled "CLI" before their first message.
   const origin: ChatOrigin = payload.origin === "app" ? "app" : "cli";
-  const chat = chats.create(payload.title?.trim() || undefined, payload.agentId ?? null, null, origin);
+  const chat = chats.create(payload.title?.trim() || undefined, null, origin);
   sendJson(res, 200, { chat });
 }
 
@@ -198,10 +196,7 @@ async function handleDeleteChat(res: ServerResponse, chatId: string): Promise<vo
 async function handleChatMessages(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   const messages = await listChatMessages(graph, chatId);
-  // Tells the client whether to open GET /api/chats/:id/stream (see
-  // handleAttachToRun) right after loading this history — true for a
-  // spawn_agent execution chat (see tools/agents.ts) still in progress.
-  sendJson(res, 200, { messages, running: isRunning(chatId) });
+  sendJson(res, 200, { messages, running: false });
 }
 
 // Backs the web UI's right-side to-do panel — read straight from the todos
@@ -528,48 +523,7 @@ async function handleStop(res: ServerResponse, chatId: string | undefined): Prom
   if (!requireChat(res, chatId)) return;
   const wasActive = activeAborts.has(chatId);
   activeAborts.get(chatId)?.abort();
-  // Covers both kinds of run this server can have going on a chat: a
-  // request-scoped turn (activeAborts, above) and a spawn_agent background
-  // run registered in runs.ts — same Stop button either way.
-  const wasBackgroundRun = abortRun(chatId);
-  sendJson(res, 200, { stopped: wasActive || wasBackgroundRun });
-}
-
-// Lets the web UI open a chat that's currently running as a background
-// spawn_agent execution (see tools/agents.ts) and see it live — tool calls,
-// text, the works — instead of only the finished result once someone
-// happens to refresh. If the chat isn't running, this just says so and
-// closes; the client already has (or fetches) the static history for that
-// case via GET /api/chats/:id/messages.
-async function handleAttachToRun(res: ServerResponse, chatId: string): Promise<void> {
-  if (!requireChat(res, chatId)) return;
-
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream; charset=utf-8",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-  });
-
-  if (!isRunning(chatId)) {
-    sseWrite(res, "not_running", {});
-    res.end();
-    return;
-  }
-
-  sseWrite(res, "attached", {});
-  const unsubscribe = subscribeToRun(chatId, (event) => {
-    sseWrite(res, event.type, event);
-    if (event.type === "done" || event.type === "aborted" || event.type === "error") res.end();
-  });
-  // subscribeToRun can't return undefined here (isRunning just confirmed a
-  // handle exists), but the run can still finish between those two calls —
-  // guard defensively rather than assume the race can't happen.
-  if (!unsubscribe) {
-    sseWrite(res, "not_running", {});
-    res.end();
-    return;
-  }
-  res.on("close", unsubscribe);
+  sendJson(res, 200, { stopped: wasActive });
 }
 
 async function handleCompact(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1021,50 +975,22 @@ async function handleSetProvider(req: IncomingMessage, res: ServerResponse): Pro
   sendJson(res, 200, { provider: config.provider, model: config.nemotronModel });
 }
 
-async function handleAgents(res: ServerResponse): Promise<void> { sendJson(res, 200, { agents: agents.listAgents() }); }
-async function handleCreateAgent(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const p = await readJson<{ name?: string; description?: string; instructions?: string }>(req);
-  if (!p?.name?.trim()) { sendJson(res, 400, { error: "name is required" }); return; }
-  sendJson(res, 200, { agent: agents.createAgent(p.name.trim(), p.description?.trim() ?? "", p.instructions?.trim() ?? "") });
-}
-// Shared by the explicit DELETE /api/agents/:id route and the periodic
-// ephemeral-agent sweep below — an Agent's chats are never left orphaned
-// pointing at a deleted owner, whichever path triggered the deletion.
-function purgeAgent(id: string): void {
-  for (const chat of chats.listAll().filter((candidate) => candidate.agentId === id)) chats.delete(chat.id);
-  agents.deleteAgent(id);
-}
-
-async function handleDeleteAgent(res: ServerResponse, id: string): Promise<void> {
-  if (!agents.getAgent(id)) { sendJson(res, 404, { error: "unknown agent" }); return; }
-  purgeAgent(id);
-  sendJson(res, 200, { deleted: true });
-}
-async function handleSchedules(res: ServerResponse): Promise<void> { sendJson(res, 200, { schedules: agents.listSchedules() }); }
+async function handleSchedules(res: ServerResponse): Promise<void> { sendJson(res, 200, { schedules: schedules.listSchedules() }); }
 async function handleCreateSchedule(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const p = await readJson<{ agentId?: string | null; name?: string; instruction?: string; cron?: string; timezone?: string }>(req);
+  const p = await readJson<{ name?: string; instruction?: string; cron?: string; timezone?: string }>(req);
   if (!p?.name?.trim() || !p.instruction?.trim() || !p.cron?.trim()) { sendJson(res, 400, { error: "name, instruction and cron are required" }); return; }
-  if (p.agentId && !agents.getAgent(p.agentId)) { sendJson(res, 404, { error: "unknown agent" }); return; }
-  try { sendJson(res, 200, { schedule: agents.createSchedule({ ...p, name: p.name.trim(), instruction: p.instruction.trim(), cron: p.cron.trim() }) }); } catch (err) { sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }); }
+  try { sendJson(res, 200, { schedule: schedules.createSchedule({ ...p, name: p.name.trim(), instruction: p.instruction.trim(), cron: p.cron.trim() }) }); } catch (err) { sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }); }
 }
-async function handleScheduleAction(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> { const p = await readJson<{ enabled?: boolean }>(req); agents.setScheduleEnabled(id, p?.enabled === true); sendJson(res, 200, { schedules: agents.listSchedules() }); }
-async function handleDeleteSchedule(res: ServerResponse, id: string): Promise<void> { agents.deleteSchedule(id); sendJson(res, 200, { deleted: true }); }
+async function handleScheduleAction(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> { const p = await readJson<{ enabled?: boolean }>(req); schedules.setScheduleEnabled(id, p?.enabled === true); sendJson(res, 200, { schedules: schedules.listSchedules() }); }
+async function handleDeleteSchedule(res: ServerResponse, id: string): Promise<void> { schedules.deleteSchedule(id); sendJson(res, 200, { deleted: true }); }
 
 async function runDueSchedules(): Promise<void> {
-  agents.cleanupCompletedSchedules();
-  // Ephemeral agents (spawn_agent auto-created, see tools/agents.ts) whose
-  // last run ended over an hour ago — same retention window as the
-  // @once-schedule cleanup above, just for agents instead of schedules.
-  for (const id of agents.listExpiredEphemeralAgentIds()) purgeAgent(id);
-  for (const task of agents.getDueSchedules()) {
-    debugLog(`scheduler picked id=${task.id} name=${task.name} agent=${task.agentId ?? "ultron"}`);
-    agents.markRun(task.id);
-    const execution = chats.create(`Scheduled: ${task.name}`, task.agentId, task.id);
-    agents.setLastRunChat(task.id, execution.id);
-    // Owner instructions (if any) are no longer prefixed here — a chat
-    // owned by an Agent already gets them as its system prompt (see
-    // buildAgentSystemPrompt in graph.ts), which also keeps this execution
-    // out of ULTRON's own SOUL.md persona and memory.
+  schedules.cleanupCompletedSchedules();
+  for (const task of schedules.getDueSchedules()) {
+    debugLog(`scheduler picked id=${task.id} name=${task.name}`);
+    schedules.markRun(task.id);
+    const execution = chats.create(`Scheduled: ${task.name}`, task.id);
+    schedules.setLastRunChat(task.id, execution.id);
     const prompt = `This is a scheduled task. Execute it now and report exactly what happened.\n\nTask: ${task.instruction}`;
     try { await withThreadLock(execution.id, () => graph.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: execution.id, thinking: "low" }, recursionLimit: config.graphRecursionLimit })); }
     catch (err) { debugLog(`scheduled task failed name=${task.name} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`); }
@@ -1162,11 +1088,6 @@ const server = createServer((req, res) => {
     handleUpload(req, res, decodeURIComponent(chatMatch[1])).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
-  const streamMatch = path.match(/^\/api\/chats\/([^/]+)\/stream$/);
-  if (streamMatch && req.method === "GET") {
-    handleAttachToRun(res, decodeURIComponent(streamMatch[1])).catch((err) => console.error("[ultron-web] attach to run failed:", err));
-    return;
-  }
   if (chatMatch && !chatMatch[2] && req.method === "PATCH") {
     handleRenameChat(req, res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] rename chat failed:", err));
     return;
@@ -1246,10 +1167,6 @@ const server = createServer((req, res) => {
     handleSetProvider(req, res).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
-  if (req.method === "GET" && path === "/api/agents") { handleAgents(res).catch((err) => console.error("[ultron-web] list agents failed:", err)); return; }
-  if (req.method === "POST" && path === "/api/agents") { handleCreateAgent(req, res).catch((err) => console.error("[ultron-web] create agent failed:", err)); return; }
-  const agentMatch = path.match(/^\/api\/agents\/([^/]+)$/);
-  if (agentMatch && req.method === "DELETE") { handleDeleteAgent(res, decodeURIComponent(agentMatch[1])).catch((err) => console.error("[ultron-web] delete agent failed:", err)); return; }
   if (req.method === "GET" && path === "/api/schedules") { handleSchedules(res).catch((err) => console.error("[ultron-web] list schedules failed:", err)); return; }
   if (req.method === "POST" && path === "/api/schedules") { handleCreateSchedule(req, res).catch((err) => console.error("[ultron-web] create schedule failed:", err)); return; }
   const scheduleMatch = path.match(/^\/api\/schedules\/([^/]+)$/);

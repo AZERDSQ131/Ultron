@@ -45,7 +45,6 @@ export interface Chat {
   title: string;
   createdAt: string;
   updatedAt: string;
-  agentId: string | null;
   scheduleId: string | null;
   securityMode: SecurityMode;
   archivedAt: string | null;
@@ -57,7 +56,6 @@ interface ChatRow {
   title: string;
   created_at: string;
   updated_at: string;
-  agent_id?: string | null;
   schedule_id?: string | null;
   security_mode?: string | null;
   archived_at?: string | null;
@@ -70,7 +68,6 @@ function toChat(row: ChatRow): Chat {
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    agentId: row.agent_id ?? null,
     scheduleId: row.schedule_id ?? null,
     securityMode: (row.security_mode as SecurityMode | null) ?? DEFAULT_SECURITY_MODE,
     archivedAt: row.archived_at ?? null,
@@ -183,12 +180,12 @@ export class ChatRegistry {
     return row ? toChat(row) : undefined;
   }
 
-  create(title: string = DEFAULT_CHAT_TITLE, agentId: string | null = null, scheduleId: string | null = null, createdVia: ChatOrigin | null = null): Chat {
+  create(title: string = DEFAULT_CHAT_TITLE, scheduleId: string | null = null, createdVia: ChatOrigin | null = null): Chat {
     const now = new Date().toISOString();
-    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, agentId, scheduleId, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
+    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, scheduleId, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
     this.db
-      .prepare("INSERT INTO chats (id, title, created_at, updated_at, agent_id, schedule_id, created_via) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.agentId, chat.scheduleId, createdVia);
+      .prepare("INSERT INTO chats (id, title, created_at, updated_at, schedule_id, created_via) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.scheduleId, createdVia);
     return chat;
   }
 
@@ -199,7 +196,7 @@ export class ChatRegistry {
     const existing = this.get(id);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const chat: Chat = { id, title, createdAt: now, updatedAt: now, agentId: null, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
+    const chat: Chat = { id, title, createdAt: now, updatedAt: now, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at, created_via) VALUES (?, ?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, createdVia);
@@ -285,7 +282,7 @@ export class ChatRegistry {
   archiveAndCreate(id: string, title?: string): { archived: Chat | undefined; fresh: Chat } {
     const wasMain = this.getMain().id === id;
     const archived = this.archive(id, title);
-    const fresh = this.create(DEFAULT_CHAT_TITLE, null, null, "cli");
+    const fresh = this.create(DEFAULT_CHAT_TITLE, null, "cli");
     if (wasMain) this.setMain(fresh.id);
     this.setFocus(fresh.id);
     return { archived, fresh };

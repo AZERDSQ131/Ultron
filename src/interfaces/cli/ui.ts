@@ -852,7 +852,6 @@ export function markDanglingToolBlock(start: number, label: string): void {
 export function formatToolResult(name: string, content: string): string {
   if (name === "web_search") return `${chalk.cyanBright.bold("[search]")}\n${styleSearchResults(capForDisplay(content))}`;
   if (name === "fetch_url" || name === "http_request") return `${chalk.blueBright.bold("[fetch]")}\n${styleFetchResult(content)}`;
-  if (name === "spawn_agent") return `${chalk.magentaBright.bold("[agent]")} ${content}`;
   return `${uiDim(`[tool result · ${name}]`)}\n${capForDisplay(content)}`;
 }
 

@@ -9,11 +9,11 @@ async function json(res) {
 
 export const api = {
   listChats: () => fetch("/api/chats").then(json),
-  createChat: (title, agentId = null) =>
+  createChat: (title) =>
     fetch("/api/chats", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...(title ? { title } : {}), ...(agentId ? { agentId } : {}) }),
+      body: JSON.stringify(title ? { title } : {}),
     }).then(json),
   renameChat: (id, title) =>
     fetch(`/api/chats/${encodeURIComponent(id)}`, {
@@ -72,9 +72,6 @@ export const api = {
   openaiLoginStatus: (loginId) => fetch(`/api/openai/login/status?loginId=${encodeURIComponent(loginId)}`).then(json),
   openaiStatus: () => fetch("/api/openai/status").then(json),
   search: (query) => fetch(`/api/search?q=${encodeURIComponent(query)}`).then(json),
-  listAgents: () => fetch("/api/agents").then(json),
-  createAgent: (body) => fetch("/api/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(json),
-  deleteAgent: (id) => fetch(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" }).then(json),
   listSchedules: () => fetch("/api/schedules").then(json),
   createSchedule: (body) => fetch("/api/schedules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(json),
   toggleSchedule: (id, enabled) => fetch(`/api/schedules/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) }).then(json),
