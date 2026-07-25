@@ -337,6 +337,7 @@ async function streamGraphTurn(
         generatedChars += chunk.content.length;
         finalText += chunk.content;
         sseWrite(res, "text", { delta: chunk.content });
+        if (source === "app") publishLiveActivity(chatId, "running", `Réponse : ${finalText.slice(-140)}`);
       }
 
       const pendingApproval = await getPendingApproval(graph, chatId);
