@@ -2,6 +2,8 @@
 
 Instructions for any Claude Code session working on this repo.
 
+**Current status (2026-07-26):** Telegram and the Agent/sub-agent interface are retired. The supported clients are local/remote CLI, web and iOS. Persistent scheduled tasks use `src/core/memory/schedules.ts`; iOS exposes Crons list/create/toggle/delete controls.
+
 ## Project context
 
 ULTRON is a personal AI agent built from scratch by the user, replacing OpenClaw and Hermes Agent. Reason for the switch: loss of control felt with those frameworks (see documented case where an OpenClaw agent deleted hundreds of emails despite being instructed to wait for approval — no technical checkpoint blocked the action).
@@ -35,7 +37,7 @@ The full research context (latest AI models, OpenClaw vs Hermes Agent comparison
 ## Known roadmap (do not build ahead of a request)
 
 1. Loop + memory (current stage, done)
-2. Telegram interface (done — `src/interfaces/telegram/`)
+2. Scheduled tasks (done — shared API and iOS Crons screen)
 3. Tools with scopes (read / write / destructive) — even with manual confirmations disabled by choice, keep scopes declared in code for clarity. In progress: shell + filesystem tools done (`src/core/tools/`), mail/calendar still pending (need OAuth).
 4. Separate "Codex-style" app for vibe coding, with a main conversation orchestrating background sub-agents to manage projects. Do not start this without an explicit request — it was deliberately deferred during initial design.
 

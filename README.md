@@ -131,9 +131,9 @@ The web UI also has:
 A native iOS app (`ios/`, SwiftUI, iOS 17+, zero external dependency) is a
 fourth client, in the same shape as the remote CLI: pure HTTP/SSE against the
 web server over Tailscale, no auth beyond that, no bank/database of its own.
-Its menu mirrors the web sidebar's chat list (grouped by day, agent-owned
-chats excluded, each row badged "CLI" or "Telegram" from a server-computed
-`origin` field) plus five modules — Finance, Health, Tokens, Skills, Memory —
+Its menu mirrors the web sidebar's chat list (grouped by day, including
+scheduled execution chats, with a server-computed `origin` field) plus six
+modules — Finance, Health, Tokens, Skills, Memory and Crons —
 each backed by the same REST endpoints the web dashboards already use. It is
 now the primary place (alongside the web sidebar) to browse, open and
 continue any conversation regardless of which interface it started on — the
@@ -291,7 +291,7 @@ PLAN.md                              project roadmap and scope
 
 1. ~~Terminal loop and classic file memory~~ — done.
 2. Mail and calendar tools with OAuth.
-4. ~~Background scheduled tasks once the core loop is trusted~~ — web foundation started: Agents, Agent-owned chats, persisted five-field cron schedules and scheduled execution chats are available in the web interface. Schedules are created conversationally through ULTRON's `schedule_task` tool.
+4. ~~Background scheduled tasks once the core loop is trusted~~ — persisted five-field cron schedules and scheduled execution chats are available through the shared API, the `schedule_task` tool and iOS Crons management.
 5. Separate Codex-style vibe-coding application — deferred.
 
 See [PLAN.md](PLAN.md) for the detailed project plan and
