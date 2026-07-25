@@ -559,7 +559,7 @@ export class HealthRegistry {
 
 // Tiny ASCII/Unicode sparkline for a metric over a short range (e.g. the
 // CLI's /health command) — shared here rather than duplicated per
-// interface since Telegram's /health can use the same block characters.
+// interface since every text client can use the same block characters.
 const SPARK_BLOCKS = "▁▂▃▄▅▆▇█";
 export function sparkline(values: (number | null)[]): string {
   const present = values.filter((v): v is number => v !== null);

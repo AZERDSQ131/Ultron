@@ -25,17 +25,17 @@ the same and shares the same memory no matter which one you're on:
                          │   SQLite (chats + memory)      │
                          │                                │
                          │  ┌──────────┐   ┌────────────┐ │
-                         │  │ web UI   │   │ Telegram   │ │
-                         │  │ (HTTP)   │   │ bot (long  │ │
-                         │  │          │   │ polling)   │ │
+                         │  │ web UI   │   │ HTTP/SSE   │ │
+                         │  │ (HTTP)   │   │ API        │ │
+                         │  │          │   │            │ │
                          │  └──────────┘   └────────────┘ │
                          └───────────────┬────────────────┘
                                          │ Tailscale (HTTP/SSE)
               ┌───────────────┬──────────┼──────────┬───────────────┐
               │               │          │          │               │
        ┌──────▼──────┐ ┌──────▼──────┐ ┌─▼────────┐ ┌▼──────────────┐
-       │  Browser     │ │ `ultron` CLI│ │ Telegram │ │  iOS app      │
-       │  (any device)│ │(laptop/Mac) │ │(phone)   │ │  (SwiftUI)    │
+       │  Browser     │ │ `ultron` CLI│ │ remote   │ │  iOS app      │
+       │  (any device)│ │(laptop/Mac) │ │ CLI      │ │  (SwiftUI)    │
        └──────────────┘ └─────────────┘ └──────────┘ └───────────────┘
 ```
 
