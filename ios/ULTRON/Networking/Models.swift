@@ -143,6 +143,11 @@ struct CategorySpend: Codable, Identifiable, Equatable {
     let category: String
     let amount: Double
     var id: String { category }
+
+    enum CodingKeys: String, CodingKey {
+        case category
+        case amount = "total"
+    }
 }
 
 struct CashFlowPoint: Codable, Identifiable, Equatable {
@@ -156,6 +161,12 @@ struct MonthSummary: Codable, Equatable {
     let income: Double
     let expenses: Double
     let net: Double
+
+    enum CodingKeys: String, CodingKey {
+        case income
+        case expenses
+        case net = "savings"
+    }
 }
 
 struct FinanceSummary: Codable, Equatable {
@@ -176,6 +187,12 @@ struct DaySummary: Codable, Identifiable, Equatable {
     let recoveryScore: Double?
     let activityScore: Double?
     var id: String { date }
+
+    enum CodingKeys: String, CodingKey {
+        case date
+        case recoveryScore = "recovery"
+        case activityScore = "activity"
+    }
 }
 
 struct HealthSummary: Codable, Equatable {
@@ -195,6 +212,13 @@ struct UsageByKind: Codable, Identifiable, Equatable {
     let outputTokens: Int
     let estimatedCost: Double
     var id: String { kind }
+
+    enum CodingKeys: String, CodingKey {
+        case kind = "key"
+        case inputTokens
+        case outputTokens
+        case estimatedCost = "costUsd"
+    }
 }
 
 struct UsageSummary: Codable, Equatable {
@@ -203,6 +227,40 @@ struct UsageSummary: Codable, Equatable {
     let totalOutputTokens: Int?
     let totalEstimatedCost: Double?
     let byKind: [UsageByKind]?
+
+    private struct Totals: Codable {
+        let inputTokens: Int
+        let outputTokens: Int
+        let costUsd: Double
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case hasData
+        case totals
+        case byKind
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hasData = try container.decode(Bool.self, forKey: .hasData)
+        let totals = try container.decodeIfPresent(Totals.self, forKey: .totals)
+        totalInputTokens = totals?.inputTokens
+        totalOutputTokens = totals?.outputTokens
+        totalEstimatedCost = totals?.costUsd
+        byKind = try container.decodeIfPresent([UsageByKind].self, forKey: .byKind)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(hasData, forKey: .hasData)
+        if let totalInputTokens, let totalOutputTokens, let totalEstimatedCost {
+            try container.encode(
+                Totals(inputTokens: totalInputTokens, outputTokens: totalOutputTokens, costUsd: totalEstimatedCost),
+                forKey: .totals
+            )
+        }
+        try container.encodeIfPresent(byKind, forKey: .byKind)
+    }
 }
 
 // MARK: - Generic JSON passthrough (for raw tool-call args / flexible payloads)
