@@ -1,7 +1,9 @@
 @preconcurrency import ActivityKit
 import Foundation
+import Observation
 
 @MainActor
+@Observable
 final class LiveActivityManager {
     private weak var client: ULTRONClient?
     private var activity: Activity<ULTRONTaskActivityAttributes>?
@@ -15,6 +17,8 @@ final class LiveActivityManager {
 
     func start(chatId: String, title: String) async {
         await end()
+        actions = []
+        actionCounter = 0
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
         let attributes = ULTRONTaskActivityAttributes(chatId: chatId, title: title)
@@ -57,6 +61,12 @@ final class LiveActivityManager {
             actions: actions
         )
         await activity.update(ActivityContent(state: state, staleDate: Date(timeIntervalSinceNow: 15 * 60)))
+    }
+
+    func appendText(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await update(status: .running, action: "Réponse : \(String(trimmed.suffix(140)))")
     }
 
     func finish(success: Bool) async {

@@ -6,6 +6,7 @@ struct ChatView: View {
     let chatId: String
 
     @Environment(ULTRONClient.self) private var client
+    @Environment(LiveActivityManager.self) private var liveActivity
     @State private var timeline = ChatTimelineBuilder()
     @State private var composerText = ""
     @State private var isSending = false
@@ -178,6 +179,7 @@ struct ChatView: View {
         composerText = ""
         timeline.addHumanMessage(text)
         verboseStats = nil
+        Task { await liveActivity.start(chatId: chatId, title: "ULTRON") }
         runStream(client.streamTurn(chatId: chatId, text: text, thinking: thinkingMode, taskMode: taskMode))
     }
 
@@ -261,6 +263,7 @@ struct ChatView: View {
     private func stop() {
         streamTask?.cancel()
         Task { try? await client.stop(chatId: chatId) }
+        Task { await liveActivity.end() }
         isSending = false
         timeline.endTurn()
     }
@@ -274,29 +277,44 @@ struct ChatView: View {
         isSending = true
         timeline.beginAssistantTurn()
         streamTask = Task {
+            var terminalEventReceived = false
             do {
                 for try await event in stream {
                     switch event {
                     case .text(let delta):
                         timeline.appendText(delta)
+                        await liveActivity.appendText(delta)
                     case .toolCall(let name, let summary):
                         timeline.addToolCall(name: name, summary: summary)
+                        await liveActivity.update(status: .running, action: "Outil : \(name) — \(summary)")
                     case .toolResult(let name, let content):
                         timeline.addToolResult(name: name, content: content)
+                        await liveActivity.update(status: .running, action: "Résultat : \(name) — \(String(content.prefix(120)))")
                     case .approvalRequired(let calls):
                         timeline.addApproval(calls)
+                        await liveActivity.update(status: .waitingForApproval, action: "Approbation requise")
                     case .done(let stats):
                         verboseStats = stats.stats
+                        terminalEventReceived = true
+                        await liveActivity.finish(success: true)
                     case .goal:
                         break
                     case .aborted:
-                        break
+                        terminalEventReceived = true
+                        await liveActivity.finish(success: false)
                     case .error(let message):
                         errorMessage = message
+                        terminalEventReceived = true
+                        await liveActivity.finish(success: false)
                     }
                 }
             } catch {
                 errorMessage = error.localizedDescription
+                terminalEventReceived = true
+                await liveActivity.finish(success: false)
+            }
+            if !terminalEventReceived && !isSending {
+                await liveActivity.finish(success: false)
             }
             timeline.endTurn()
             isSending = false
