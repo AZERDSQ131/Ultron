@@ -57,6 +57,8 @@ Pour les mises à jour lorsque l'app est suspendue, renseigne sur le serveur
 les variables `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY_PATH` (ou
 `APNS_PRIVATE_KEY`), `APNS_ENVIRONMENT` et `APNS_BUNDLE_ID`. Active aussi la
 capability Push Notifications pour l'app dans le portail Apple Developer et
-utilise un profil de provisioning qui contient cette capability. Sans ces
-variables, l'activité fonctionne quand l'app est active, mais ne reçoit pas les
-changements distants pendant sa suspension.
+utilise un profil de provisioning qui contient cette capability — cette étape
+nécessite un compte Apple Developer payant. Avec un compte personnel, l'app
+utilise automatiquement une activité locale sans push : elle fonctionne quand
+l'app est active, mais ne reçoit pas les changements distants pendant sa
+suspension.

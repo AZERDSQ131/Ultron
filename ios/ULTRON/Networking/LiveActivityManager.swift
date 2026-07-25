@@ -28,13 +28,32 @@ final class LiveActivityManager {
             actions: []
         )
 
+        let activity: Activity<ULTRONTaskActivityAttributes>
+        var supportsPushUpdates = true
         do {
-            let activity = try Activity.request(
+            activity = try Activity.request(
                 attributes: attributes,
                 content: ActivityContent(state: state, staleDate: Date(timeIntervalSinceNow: 15 * 60)),
                 pushType: .token
             )
-            self.activity = activity
+        } catch {
+            // Personal Apple teams cannot sign Push Notifications. Fall back
+            // to a local-only Live Activity so the Dynamic Island still works.
+            supportsPushUpdates = false
+            do {
+                activity = try Activity.request(
+                    attributes: attributes,
+                    content: ActivityContent(state: state, staleDate: Date(timeIntervalSinceNow: 15 * 60)),
+                    pushType: nil
+                )
+            } catch {
+                self.activity = nil
+                return
+            }
+        }
+
+        self.activity = activity
+        if supportsPushUpdates {
             tokenTask = Task { [weak self, weak activity] in
                 guard let activity else { return }
                 for await tokenData in activity.pushTokenUpdates {
@@ -47,8 +66,6 @@ final class LiveActivityManager {
                     )
                 }
             }
-        } catch {
-            activity = nil
         }
     }
 

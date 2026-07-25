@@ -31,10 +31,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ultron.mobile
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: false
-    entitlements:
-      path: ULTRON/Resources/ULTRON.entitlements
-      properties:
-        aps-environment: development
+        DEVELOPMENT_TEAM: 8M5UCCN46W
     dependencies:
       - target: ULTRONLiveActivity
   ULTRONLiveActivity:
@@ -52,3 +49,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ultron.mobile.liveactivity
         TARGETED_DEVICE_FAMILY: "1"
+        DEVELOPMENT_TEAM: 8M5UCCN46W

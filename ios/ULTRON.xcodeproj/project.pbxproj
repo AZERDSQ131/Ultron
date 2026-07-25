@@ -75,7 +75,6 @@
 		916B37C28223EF861389AC45 /* SchedulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulesView.swift; sourceTree = "<group>"; };
 		92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettingsView.swift; sourceTree = "<group>"; };
 		AF3E074F58F965547A5789B1 /* ULTRONClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONClient.swift; sourceTree = "<group>"; };
-		BC8ACF22867F633A8EB1806B /* ULTRON.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ULTRON.entitlements; sourceTree = "<group>"; };
 		BC9220BBD1B70581A4BF6EEF /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		C21F1A36BC53D6520F9EC32D /* ComposerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerBar.swift; sourceTree = "<group>"; };
 		C54BC0F0E0693727E7B30013 /* TokensView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokensView.swift; sourceTree = "<group>"; };
@@ -141,7 +140,6 @@
 			isa = PBXGroup;
 			children = (
 				FA61F184ECFFCD31B8A4DA43 /* Info.plist */,
-				BC8ACF22867F633A8EB1806B /* ULTRON.entitlements */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -467,7 +465,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = ULTRON/Resources/ULTRON.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DEVELOPMENT_TEAM = 8M5UCCN46W;
 				INFOPLIST_FILE = ULTRON/Resources/Info.plist;
@@ -485,6 +482,7 @@
 		7FCF99FD8A598AAF50049DA0 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				DEVELOPMENT_TEAM = 8M5UCCN46W;
 				INFOPLIST_FILE = ULTRONLiveActivity/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -501,7 +499,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = ULTRON/Resources/ULTRON.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DEVELOPMENT_TEAM = 8M5UCCN46W;
 				INFOPLIST_FILE = ULTRON/Resources/Info.plist;
@@ -519,6 +516,7 @@
 		C15110E1F54C584E91543C56 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				DEVELOPMENT_TEAM = 8M5UCCN46W;
 				INFOPLIST_FILE = ULTRONLiveActivity/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
