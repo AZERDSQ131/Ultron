@@ -3,21 +3,27 @@ import SwiftUI
 struct ComposerBar: View {
     @Binding var text: String
     let modelLabel: String
+    let thinkingModeLabel: String
     let taskModeLabel: String
     let permissionLabel: String
+    let verbose: Bool
     let isSending: Bool
     let onSend: () -> Void
     let onStop: () -> Void
     let onTapModel: () -> Void
+    let onTapThinkingMode: () -> Void
     let onTapTaskMode: () -> Void
     let onTapPermission: () -> Void
+    let onToggleVerbose: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 pillButton(modelLabel, systemImage: "cpu", action: onTapModel)
+                pillButton(thinkingModeLabel, systemImage: "brain.head.profile", action: onTapThinkingMode)
                 pillButton(taskModeLabel, systemImage: "checklist", action: onTapTaskMode)
                 pillButton(permissionLabel, systemImage: "lock.shield", action: onTapPermission)
+                pillButton(verbose ? "Stats" : "", systemImage: "gauge.with.dots.needle.33percent", action: onToggleVerbose)
                 Spacer()
             }
             .scrollableIfNeeded()

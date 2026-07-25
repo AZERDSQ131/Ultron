@@ -84,6 +84,7 @@ struct TaskModePickerSheet: View {
         ("none", "Aucun", "circle"),
         ("todo", "To-Do", "checklist"),
         ("plan", "Plan", "list.bullet.clipboard"),
+        ("goal", "Objectif", "target"),
     ]
 
     var body: some View {
@@ -105,6 +106,45 @@ struct TaskModePickerSheet: View {
                 .foregroundStyle(.primary)
             }
             .navigationTitle("Mode de tâche")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fermer") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+struct ThinkingModePickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selected: String
+    let onPicked: (String) -> Void
+
+    private let modes: [(value: String, label: String, icon: String)] = [
+        ("full", "Complet", "brain"),
+        ("low", "Réduit", "brain.head.profile"),
+        ("off", "Désactivé", "brain.head.profile.fill"),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            List(modes, id: \.value) { mode in
+                Button {
+                    selected = mode.value
+                    onPicked(mode.value)
+                    dismiss()
+                } label: {
+                    HStack {
+                        Label(mode.label, systemImage: mode.icon)
+                        Spacer()
+                        if selected == mode.value {
+                            Image(systemName: "checkmark").foregroundStyle(.tint)
+                        }
+                    }
+                }
+                .foregroundStyle(.primary)
+            }
+            .navigationTitle("Raisonnement")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Fermer") { dismiss() }

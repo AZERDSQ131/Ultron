@@ -11,10 +11,14 @@ struct ChatView: View {
 
     @State private var modelId = ""
     @State private var providerId = ""
+    @State private var thinkingMode = "full"
     @State private var taskMode = "none"
     @State private var securityMode = "bypass"
+    @State private var verbose = false
+    @State private var verboseStats: String?
 
     @State private var showModelPicker = false
+    @State private var showThinkingModePicker = false
     @State private var showTaskModePicker = false
     @State private var showPermissionPicker = false
 
@@ -46,30 +50,45 @@ struct ChatView: View {
                     .padding(.horizontal, 12)
             }
 
+            if verbose, let verboseStats {
+                Text(verboseStats)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+            }
+
             ComposerBar(
                 text: $composerText,
                 modelLabel: modelId.isEmpty ? "Modèle" : modelId,
+                thinkingModeLabel: thinkingModeLabel,
                 taskModeLabel: taskModeLabel,
                 permissionLabel: permissionLabel,
+                verbose: verbose,
                 isSending: isSending,
                 onSend: send,
                 onStop: stop,
                 onTapModel: { showModelPicker = true },
+                onTapThinkingMode: { showThinkingModePicker = true },
                 onTapTaskMode: { showTaskModePicker = true },
-                onTapPermission: { showPermissionPicker = true }
+                onTapPermission: { showPermissionPicker = true },
+                onToggleVerbose: { verbose.toggle() }
             )
         }
         .navigationTitle("Conversation")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showModelPicker) {
             ModelPickerSheet { provider, model in
+                let previousProvider = providerId
                 providerId = provider
                 modelId = model
                 Task {
-                    if provider != providerId { try? await client.setProvider(provider) }
+                    if provider != previousProvider { try? await client.setProvider(provider) }
                     _ = try? await client.setModel(model)
                 }
             }
+        }
+        .sheet(isPresented: $showThinkingModePicker) {
+            ThinkingModePickerSheet(selected: $thinkingMode) { _ in }
         }
         .sheet(isPresented: $showTaskModePicker) {
             TaskModePickerSheet(selected: $taskMode) { _ in }
@@ -84,7 +103,16 @@ struct ChatView: View {
         switch taskMode {
         case "todo": return "To-Do"
         case "plan": return "Plan"
+        case "goal": return "Objectif"
         default: return "Aucun mode"
+        }
+    }
+
+    private var thinkingModeLabel: String {
+        switch thinkingMode {
+        case "low": return "Réduit"
+        case "off": return "Sans raisonnement"
+        default: return "Complet"
         }
     }
 
@@ -136,7 +164,8 @@ struct ChatView: View {
         guard !text.isEmpty else { return }
         composerText = ""
         timeline.addHumanMessage(text)
-        runStream(client.streamTurn(chatId: chatId, text: text, taskMode: taskMode))
+        verboseStats = nil
+        runStream(client.streamTurn(chatId: chatId, text: text, thinking: thinkingMode, taskMode: taskMode))
     }
 
     private func stop() {
@@ -148,7 +177,7 @@ struct ChatView: View {
 
     private func approve(decisions: [String: Bool]) {
         if let id = pendingApprovalId { timeline.removeApproval(id: id) }
-        runStream(client.streamApprove(chatId: chatId, decisions: decisions, taskMode: taskMode))
+        runStream(client.streamApprove(chatId: chatId, decisions: decisions, thinking: thinkingMode, taskMode: taskMode))
     }
 
     private func runStream(_ stream: AsyncThrowingStream<TurnEvent, Error>) {
@@ -166,8 +195,8 @@ struct ChatView: View {
                         timeline.addToolResult(name: name, content: content)
                     case .approvalRequired(let calls):
                         timeline.addApproval(calls)
-                    case .done:
-                        break
+                    case .done(let stats):
+                        verboseStats = stats.stats
                     case .goal:
                         break
                     case .aborted:
