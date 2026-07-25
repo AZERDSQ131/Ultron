@@ -15,6 +15,7 @@ targets:
     platform: iOS
     sources:
       - path: ULTRON
+      - path: Shared/ULTRONTaskActivityAttributes.swift
     info:
       path: ULTRON/Resources/Info.plist
       properties:
@@ -24,8 +25,26 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSMicrophoneUsageDescription: "ULTRON utilise le microphone pour transcrire tes messages avec Voxtral."
+        NSSupportsLiveActivities: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ultron.mobile
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: false
+    dependencies:
+      - target: ULTRONLiveActivity
+  ULTRONLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ULTRONLiveActivity
+      - path: Shared/ULTRONTaskActivityAttributes.swift
+    info:
+      path: ULTRONLiveActivity/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ultron.mobile.liveactivity
+        TARGETED_DEVICE_FAMILY: "1"

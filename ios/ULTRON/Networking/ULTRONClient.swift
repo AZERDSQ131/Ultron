@@ -289,6 +289,26 @@ final class ULTRONClient {
         try await requestNoBody("GET", "/api/usage/summary?days=\(days)")
     }
 
+    // MARK: - Live Activities
+
+    struct RegisterLiveActivityBody: Encodable {
+        let chatId: String
+        let activityId: String
+        let pushToken: String
+    }
+
+    struct LiveActivityRegistrationResponse: Codable {
+        let registered: Bool
+    }
+
+    func registerLiveActivity(chatId: String, activityId: String, pushToken: String) async {
+        _ = try? await request(
+            "POST",
+            "/api/live-activities/register",
+            body: RegisterLiveActivityBody(chatId: chatId, activityId: activityId, pushToken: pushToken)
+        ) as LiveActivityRegistrationResponse
+    }
+
     // MARK: - Memory
 
     struct MemoryResponse: Codable { let observations: [UserModelObservation]; let count: Int }

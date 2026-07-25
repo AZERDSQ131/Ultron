@@ -72,14 +72,14 @@ struct ChatView: View {
                 isSending: isSending,
                 photoItem: $photoItem,
                 isRecording: isRecording,
-                onSend: send,
-                onStop: stop,
+                onSend: { send() },
+                onStop: { stop() },
                 onTapModel: { showModelPicker = true },
                 onTapThinkingMode: { showThinkingModePicker = true },
                 onTapTaskMode: { showTaskModePicker = true },
                 onTapPermission: { showPermissionPicker = true },
                 onToggleVerbose: { verbose.toggle() },
-                onToggleRecording: toggleRecording
+                onToggleRecording: { toggleRecording() }
             )
         }
         .navigationTitle("Conversation")
