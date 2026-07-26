@@ -11,6 +11,10 @@ struct MenuView: View {
     @State private var showSettings = false
     @State private var showCreateProject = false
     @State private var expandedFolders: Set<String> = []
+    // Drag & drop onto a project row turned out unreliable in a List
+    // (NavigationLink eats the gesture) — this swipe action is the robust
+    // fallback: pick a chat's project explicitly instead of dragging it.
+    @State private var addingToProjectChat: Chat?
 
     private static let modules: [ModuleItem] = [
         .init(title: "Finance", icon: "dollarsign.circle.fill", tint: .green, destination: .finance),
@@ -36,22 +40,14 @@ struct MenuView: View {
 
             Section {
                 ForEach(projects) { project in
-                    HStack {
-                        ZStack {
-                            Circle().fill(Color(hex: project.color).opacity(0.18)).frame(width: 28, height: 28)
-                            Text(project.icon).font(.footnote)
+                    NavigationLink(value: NavigationTarget.project(project.id)) {
+                        HStack {
+                            ZStack {
+                                Circle().fill(Color(hex: project.color).opacity(0.18)).frame(width: 28, height: 28)
+                                Text(project.icon).font(.footnote)
+                            }
+                            Text(project.name).foregroundStyle(.primary)
                         }
-                        Text(project.name).foregroundStyle(.primary)
-                    }
-                    .contentShape(Rectangle())
-                    .background(
-                        NavigationLink(value: NavigationTarget.project(project.id)) { EmptyView() }
-                            .opacity(0)
-                    )
-                    .dropDestination(for: String.self) { chatIds, _ in
-                        guard let chatId = chatIds.first else { return false }
-                        Task { await moveChat(chatId, toProject: project.id) }
-                        return true
                     }
                 }
                 Button {
@@ -117,30 +113,39 @@ struct MenuView: View {
                 Task { await createProject(name: name, icon: icon, color: color) }
             }
         }
+        .confirmationDialog(
+            "Ajouter à un projet",
+            isPresented: Binding(get: { addingToProjectChat != nil }, set: { if !$0 { addingToProjectChat = nil } }),
+            titleVisibility: .visible,
+            presenting: addingToProjectChat
+        ) { chat in
+            if projects.isEmpty {
+                Button("Créer un projet") { showCreateProject = true }
+            } else {
+                ForEach(projects) { project in
+                    Button("\(project.icon) \(project.name)") {
+                        Task { await moveChat(chat.id, toProject: project.id) }
+                    }
+                }
+            }
+            Button("Annuler", role: .cancel) {}
+        }
         .refreshable { await load() }
         .task { await load() }
     }
 
-    // NavigationLink's own tap gesture takes priority over everything else
-    // in a List row, including .draggable's long-press-then-drag gesture —
-    // wrapping the link (rather than the row content) is what let the tap
-    // recognizer swallow every drag attempt before it could even start.
-    // The row content now carries the drag, with the NavigationLink hidden
-    // behind it purely to still make the row tappable.
     @ViewBuilder
     private func chatRow(_ chat: Chat) -> some View {
-        ChatListRow(chat: chat)
-            .contentShape(Rectangle())
-            .background(
-                NavigationLink(value: NavigationTarget.chat(chat.id)) { EmptyView() }
-                    .opacity(0)
-            )
-            .draggable(chat.id) {
-                ChatListRow(chat: chat)
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(.regularMaterial))
+        NavigationLink(value: NavigationTarget.chat(chat.id)) {
+            ChatListRow(chat: chat)
+        }
+        .swipeActions(edge: .trailing) {
+            Button {
+                addingToProjectChat = chat
+            } label: {
+                Label("Ajouter", systemImage: "plus")
             }
-            .swipeActions(edge: .trailing) {
+            .tint(.blue)
             Button(role: .destructive) {
                 Task { await delete(chat) }
             } label: {
