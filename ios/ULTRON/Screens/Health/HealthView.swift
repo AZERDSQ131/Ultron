@@ -39,22 +39,38 @@ struct HealthView: View {
 
                 if let sleepDebt = summary.sleepDebt {
                     Section("Sommeil") {
-                        LabeledContent("Dette de sommeil") { Text(String(format: "%.1f h", sleepDebt)) }
+                        LabeledContent("Dette de sommeil") {
+                            Text(String(format: "%.1f h", sleepDebt.deficitHours))
+                        }
+                        LabeledContent("Sur") {
+                            Text("\(sleepDebt.daysCounted) jour\(sleepDebt.daysCounted > 1 ? "s" : "")")
+                        }
                     }
                 }
 
                 if let anomalies = summary.anomalies, !anomalies.isEmpty {
                     Section("Anomalies") {
-                        ForEach(anomalies, id: \.self) { anomaly in
-                            Label(anomaly, systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.orange)
+                        ForEach(anomalies) { anomaly in
+                            Label {
+                                Text(anomaly.message)
+                            } icon: {
+                                Image(systemName: anomaly.isSignificant ? "exclamationmark.triangle.fill" : "exclamationmark.triangle")
+                            }
+                            .foregroundStyle(anomaly.isSignificant ? .red : .orange)
                         }
                     }
                 }
 
                 if let bioAge = summary.bioAge {
                     Section {
-                        LabeledContent("Âge biologique estimé") { Text(String(format: "%.1f ans", bioAge)) }
+                        LabeledContent("Âge biologique estimé") {
+                            Text(String(format: "%.1f ans", bioAge.age))
+                        }
+                        ForEach(bioAge.explanation, id: \.self) { line in
+                            Text(line)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     } footer: {
                         Text("Estimation de bien-être non clinique.")
                     }

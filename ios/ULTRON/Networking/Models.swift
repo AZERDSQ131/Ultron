@@ -205,13 +205,38 @@ struct DaySummary: Codable, Identifiable, Equatable {
     }
 }
 
+// These three were typed as plain scalars while the server has always sent
+// objects (HealthAnomaly / HealthSleepDebt / BioAgeResult), which failed the
+// whole HealthSummary decode — the screen showed "isn't in the correct format"
+// and nothing else.
+
+struct HealthAnomaly: Codable, Equatable, Identifiable {
+    let metric: String
+    /// "notable" or "significant" — see NOTABLE_Z / SIGNIFICANT_Z in trends.ts.
+    let severity: String
+    let message: String
+
+    var id: String { "\(metric)-\(message)" }
+    var isSignificant: Bool { severity == "significant" }
+}
+
+struct HealthSleepDebt: Codable, Equatable {
+    let deficitHours: Double
+    let daysCounted: Int
+}
+
+struct HealthBioAge: Codable, Equatable {
+    let age: Double
+    let explanation: [String]
+}
+
 struct HealthSummary: Codable, Equatable {
     let hasData: Bool
     let days: [DaySummary]?
-    let sleepDebt: Double?
-    let anomalies: [String]?
+    let sleepDebt: HealthSleepDebt?
+    let anomalies: [HealthAnomaly]?
     let latestScores: JSONValue?
-    let bioAge: Double?
+    let bioAge: HealthBioAge?
 }
 
 // MARK: - Usage
