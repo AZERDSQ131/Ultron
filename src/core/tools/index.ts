@@ -7,6 +7,7 @@ import { getCurrentDatetime } from "./datetime.js";
 import { scheduleTask } from "./schedules.js";
 import { todoWrite, todoUpdate, todoRead } from "./todos.js";
 import { planPropose } from "./plan.js";
+import { researchNote, researchReview } from "./research.js";
 import { memoryWrite } from "./memory.js";
 import { skillRead } from "./skills.js";
 import { openApp, runAppleScript } from "./macos.js";
@@ -33,6 +34,8 @@ export const tools: StructuredToolInterface[] = [
   todoUpdate,
   todoRead,
   planPropose,
+  researchNote,
+  researchReview,
   memoryWrite,
   skillRead,
   openApp,
@@ -73,6 +76,8 @@ export const toolScopes: Record<string, ToolScope> = {
   // in graph.ts), so this scope only affects the badge color shown in the
   // approval card and tool-call blocks.
   plan_propose: "write",
+  research_note: "write",
+  research_review: "read",
   memory_write: "write",
   skill_read: "read",
   // Launches a process — a real effect, but bounded to "open this app"

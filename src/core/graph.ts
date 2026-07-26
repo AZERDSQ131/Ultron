@@ -12,6 +12,7 @@ import { createNemotronModel, type ThinkingMode } from "./llm/nemotron.js";
 import { getCheckpointer } from "./memory/checkpointer.js";
 import { getChatRegistry } from "./memory/chats.js";
 import { getTodoRegistry } from "./memory/todos.js";
+import { getResearchRegistry } from "./memory/research.js";
 import { readTodayNote } from "./memory/daily.js";
 import { getUserModelRegistry } from "./memory/userModel.js";
 import { getHealthRegistry } from "./memory/health.js";
@@ -94,7 +95,7 @@ const chatRegistryForPrompt = getChatRegistry(appConfig.databasePath);
 // todo/plan, the goal loop is driven entirely on the CLI side
 // (GoalRegistry + driveGoalLoop), so the model just sees a normal user
 // message for the objective and any auto-continuation turn.
-export type TaskMode = "none" | "todo" | "plan" | "goal";
+export type TaskMode = "none" | "todo" | "plan" | "goal" | "deep_research";
 
 function taskModeDirective(mode: TaskMode): string {
   if (mode === "todo") {
@@ -135,10 +136,64 @@ pauses and shows the user your plan:
   don't append to it: call plan_propose fresh, replacing it outright once
   approved, rather than mixing an unrelated request into a stale plan.`;
   }
+  if (mode === "deep_research") {
+    // Structure taken from what deep-research implementations converge on
+    // (OpenAI/Gemini/Claude, and the published agent architectures): a
+    // Plan → Search → Read → Reflect → Iterate → Synthesise loop, where the
+    // plan is a set of sub-questions and each round records findings with
+    // citations plus what it failed to resolve, and those gaps drive the next
+    // round instead of the run stopping at the first plausible answer.
+    //
+    // ULTRON has no sub-agents (that interface was retired), so the parallel
+    // lead-agent/researcher fan-out those systems use is collapsed into one
+    // sequential agent working the plan aspect by aspect. The compensation for
+    // losing parallelism is research_note: findings are durable, so a long run
+    // doesn't degrade as its own tool output falls out of context.
+    return `
+
+---
+
+<task_mode>Deep Research</task_mode>
+For THIS turn, the user selected "Deep Research" mode. They want a
+thoroughly researched, properly cited answer, not a quick one. Work through
+these phases in order and do not skip ahead:
+
+1. SCOPE. If the question is ambiguous enough that different readings would
+   produce genuinely different research, ask up to three specific clarifying
+   questions in plain text and stop there — no tool calls. Otherwise state
+   your interpretation in one sentence and continue in the same turn.
+2. PLAN. Call todo_write exactly once, one item per sub-question the answer
+   depends on. Aim for 3–6 aspects that decompose the question, not a list of
+   actions ("Search for X" is not an aspect; "How much does X cost in
+   practice, and what drives the variance" is). Order them so foundational
+   aspects come before ones that build on them.
+3. INVESTIGATE, one aspect at a time. Mark it in_progress with todo_update.
+   Run several web_search calls with genuinely different phrasings — a single
+   query is never enough — then fetch_url the sources that look substantive
+   rather than trusting search snippets. Call research_note for every
+   finding worth citing, as you read it, with its source URL. Set that note's
+   \`gap\` field when a source raises something it doesn't settle.
+4. REFLECT. Mark the aspect completed. Look at the gaps you recorded: if one
+   materially affects the answer, run another round of searches targeting it
+   specifically before moving on. Add an aspect with todo_write if the
+   research revealed a sub-question the original plan missed.
+5. SYNTHESISE. Once the aspects are covered, call research_review once to get
+   every note back — including findings that have since scrolled out of
+   context — then write the report directly in your reply.
+
+The report should be structured with headings that follow the shape of what
+you actually found, not the shape of your plan. Cite inline as you make each
+claim, and end with a numbered source list. State disagreement between
+sources rather than averaging it away, and say plainly what you could not
+establish — an acknowledged gap is worth more to the user than a confident
+sentence with nothing behind it. Never cite a source you did not actually
+open.`;
+  }
   return "";
 }
 
 const todoRegistryForPrompt = getTodoRegistry(appConfig.databasePath);
+const researchRegistryForPrompt = getResearchRegistry(appConfig.databasePath);
 const userModelRegistryForPrompt = getUserModelRegistry(appConfig.databasePath);
 const healthRegistryForPrompt = getHealthRegistry(appConfig.databasePath);
 
@@ -176,11 +231,25 @@ function todoState(mode: TaskMode, threadId: string | undefined, messages: BaseM
 // list's current state so it doesn't keep repeating "before your first
 // tool call" once that's no longer true, and doesn't push a re-proposal
 // the instant a plan gets rejected (see todoState above).
-function taskModeReminder(mode: TaskMode, state: TodoState): string {
+function taskModeReminder(mode: TaskMode, state: TodoState, threadId?: string): string {
   // "goal" must short-circuit before the state checks below — those are
   // worded for todo/plan, and a leftover todo list from an earlier mode in
   // the same chat would otherwise make todoState() report "active" here too.
   if (mode === "none" || mode === "goal") return "";
+  // Deep Research has three distinct stages to nudge toward, and which one
+  // applies depends on how much has actually been recorded — not just on
+  // whether a plan exists, which is all TodoState knows.
+  if (mode === "deep_research") {
+    const notes = threadId ? researchRegistryForPrompt.count(threadId) : 0;
+    if (state !== "active") {
+      return `[ultron:task_mode=deep_research] Reminder: call todo_write now, before searching anything, laying out the 3-6 sub-questions this answer depends on.`;
+    }
+    if (notes === 0) {
+      return `[ultron:task_mode=deep_research] Reminder: the research plan exists, and nothing has been recorded yet. Search each aspect with several different phrasings, fetch_url the substantive sources rather than trusting snippets, and call research_note for each finding as you read it.`;
+    }
+    const gaps = threadId ? researchRegistryForPrompt.openGaps(threadId).length : 0;
+    return `[ultron:task_mode=deep_research] Reminder: ${notes} finding${notes === 1 ? "" : "s"} recorded${gaps ? `, ${gaps} gap${gaps === 1 ? "" : "s"} still open` : ""}. Keep calling research_note as you read${gaps ? ", target the open gaps that affect the answer" : ""}, and call research_review once before writing the report so it covers findings that have scrolled out of context.`;
+  }
   if (state === "active") return `[ultron:task_mode=${mode}] The initial plan already exists. Do the user's work now. Do not call any todo tool again in this turn.`;
   if (state === "plan_denied") {
     return `[ultron:task_mode=plan] Reminder: your last proposed plan was NOT approved. Do not call plan_propose again in this reply — respond in plain text instead (ask what to change, discuss alternatives) and wait for the user's direction.`;
@@ -499,7 +568,7 @@ export function buildGraph() {
       const taskMode = (runConfig.configurable?.taskMode as TaskMode | undefined) ?? "none";
       const history = sanitizeHistory(state.messages);
       const currentTodoState = todoState(taskMode, threadId, state.messages);
-      const taskReminder = taskModeReminder(taskMode, currentTodoState);
+      const taskReminder = taskModeReminder(taskMode, currentTodoState, threadId);
       const messages = [
         { role: "system" as const, content: buildSystemPrompt(threadId, taskMode) },
         ...history,

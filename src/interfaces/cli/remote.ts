@@ -471,7 +471,7 @@ async function main() {
             appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (available: ${reasoningOptions.join(", ")}). ${reasoningNote}\n\n`));
             continue;
           case "/task":
-            appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal).\n\n`));
+            appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal|research).\n\n`));
             continue;
           case "/security": {
             const chat = (await apiGet("/api/chats")).chats.find((c: Chat) => c.id === currentChatId);
@@ -506,13 +506,17 @@ async function main() {
               continue;
             }
             if (command.startsWith("/task ")) {
-              const mode = command.slice("/task ".length).trim();
-              if (mode !== "none" && mode !== "todo" && mode !== "plan" && mode !== "goal") {
-                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo, /task plan or /task goal.\n\n"));
+              // Same "research" shorthand as the local CLI — see its /task handler.
+              const raw = command.slice("/task ".length).trim();
+              const mode = raw === "research" ? "deep_research" : raw;
+              if (mode !== "none" && mode !== "todo" && mode !== "plan" && mode !== "goal" && mode !== "deep_research") {
+                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo, /task plan, /task goal or /task research.\n\n"));
                 continue;
               }
               taskMode = mode as TaskMode;
-              setActiveModeLabel(mode === "todo" ? "To-Do" : mode === "plan" ? "Plan" : mode === "goal" ? "Goal" : "None");
+              setActiveModeLabel(
+                mode === "todo" ? "To-Do" : mode === "plan" ? "Plan" : mode === "goal" ? "Goal" : mode === "deep_research" ? "Deep Research" : "None",
+              );
               appendTranscript(uiDim(`[ultron] task mode set to ${taskMode}.\n\n`));
               continue;
             }

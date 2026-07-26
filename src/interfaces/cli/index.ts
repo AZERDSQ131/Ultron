@@ -31,6 +31,7 @@ import { CLI_CHAT_SCOPE, getChatRegistry } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
+import { getResearchRegistry } from "../../core/memory/research.js";
 import { getChatEventRegistry } from "../../core/memory/chatEvents.js";
 import { buildContinuationPrompt, gatherCodeContext, gatherHealthContext, judgeGoal } from "../../core/goalJudge.js";
 import { disableConsoleEcho } from "../../core/logger.js";
@@ -90,6 +91,7 @@ async function main() {
   const chats = getChatRegistry(config.databasePath);
   const goals = getGoalRegistry(config.databasePath);
   const todos = getTodoRegistry(config.databasePath);
+  const research = getResearchRegistry(config.databasePath);
   const chatEvents = getChatEventRegistry(config.databasePath);
   // Registers the CLI's original hardcoded thread (from before chats
   // existed) so its history shows up in the registry instead of being
@@ -586,7 +588,7 @@ async function main() {
             appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (available: ${reasoningOptions.join(", ")}). ${reasoningNote}\n\n`));
             continue;
           case "/task":
-            appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal).\n\n`));
+            appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal|research).\n\n`));
             continue;
           case "/security":
             appendTranscript(
@@ -625,18 +627,25 @@ async function main() {
               continue;
             }
             if (command.startsWith("/task ")) {
-              const mode = command.slice("/task ".length).trim();
-              if (mode !== "none" && mode !== "todo" && mode !== "plan" && mode !== "goal") {
-                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo, /task plan or /task goal.\n\n"));
+              // "research" is accepted as a shorthand: the wire value has to
+              // stay deep_research (it's what the graph and every other client
+              // send) but typing an underscore at a prompt is unpleasant.
+              const raw = command.slice("/task ".length).trim();
+              const mode = raw === "research" ? "deep_research" : raw;
+              if (mode !== "none" && mode !== "todo" && mode !== "plan" && mode !== "goal" && mode !== "deep_research") {
+                appendTranscript(chalk.yellow("[ultron] use /task none, /task todo, /task plan, /task goal or /task research.\n\n"));
                 continue;
               }
               taskMode = mode;
-              setActiveModeLabel(mode === "todo" ? "To-Do" : mode === "plan" ? "Plan" : mode === "goal" ? "Goal" : "None");
+              setActiveModeLabel(
+                mode === "todo" ? "To-Do" : mode === "plan" ? "Plan" : mode === "goal" ? "Goal" : mode === "deep_research" ? "Deep Research" : "None",
+              );
               // Task mode applies to the next user request. Drop any state
               // left by an earlier request now, before it can be mistaken
               // for the plan/goal of the new one — same reset-at-selection
               // rule for all three modes, not just todo/plan.
-              if (mode === "todo" || mode === "plan") todos.clear(currentChatId);
+              if (mode === "todo" || mode === "plan" || mode === "deep_research") todos.clear(currentChatId);
+              if (mode === "deep_research") research.clear(currentChatId);
               if (mode !== "goal") goals.clear(currentChatId);
               appendTranscript(uiDim(`[ultron] task mode set to ${taskMode}.\n\n`));
               continue;
@@ -794,7 +803,8 @@ async function main() {
       // The selector describes the current request, not the whole chat.
       // Reset persisted task state at this boundary so an interrupted or
       // completed request cannot make the next one resume an old plan.
-      if (command !== "/retry" && (taskMode === "todo" || taskMode === "plan")) todos.clear(currentChatId);
+      if (command !== "/retry" && (taskMode === "todo" || taskMode === "plan" || taskMode === "deep_research")) todos.clear(currentChatId);
+      if (command !== "/retry" && taskMode === "deep_research") research.clear(currentChatId);
       // "goal" mode works the same way as todo/plan: selecting it just
       // arms the mode (see the /task handler above), and the next message
       // sent while it's active becomes the objective — no separate

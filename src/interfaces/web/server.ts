@@ -29,6 +29,7 @@ import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type ChatOrigin, type 
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { ScheduleRegistry } from "../../core/memory/schedules.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
+import { getResearchRegistry } from "../../core/memory/research.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getHealthRegistry, pickLatestWithData, type HealthExportPayload, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
@@ -63,6 +64,7 @@ const fallbackContextWindowTokens = config.contextWindowTokens;
 const chats = getChatRegistry(config.databasePath);
 const schedules = new ScheduleRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
+const research = getResearchRegistry(config.databasePath);
 const goals = getGoalRegistry(config.databasePath);
 const chatEvents = getChatEventRegistry(config.databasePath);
 const openaiAuth = getOpenAIAuthRegistry(config.databasePath);
@@ -484,7 +486,10 @@ async function handleTurn(req: IncomingMessage, res: ServerResponse): Promise<vo
   // the user-turn boundary so an interrupted or completed request cannot
   // make a new request resume an unrelated old plan. Approval resumes and
   // retries intentionally keep their existing list.
-  if (!isRetry && (taskMode === "todo" || taskMode === "plan")) todos.clear(chatId);
+  if (!isRetry && (taskMode === "todo" || taskMode === "plan" || taskMode === "deep_research")) todos.clear(chatId);
+  // Deep Research keeps its findings in their own table; a new question must
+  // not synthesise over the previous one's notes.
+  if (!isRetry && taskMode === "deep_research") research.clear(chatId);
 
   await streamGraphTurn(req, res, chatId, thinkingMode, taskMode, { messages: isRetry ? [] : [new HumanMessage(expandSkillMentions(input))] }, payload.source === "app" ? "app" : "cli");
   const exportedChat = chats.get(chatId);
