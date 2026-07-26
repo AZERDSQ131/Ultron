@@ -95,7 +95,7 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
       : provider === "groq"
         ? config.groqApiKey
         : provider === "openai"
-          ? "unused-overridden-per-request-by-openaiOAuthFetch"
+          ? config.openaiApiKey ?? "unused-overridden-per-request-by-openaiOAuthFetch"
           : config.nvidiaApiKey;
   const baseURL =
     provider === "deepseek"
@@ -103,7 +103,7 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
       : provider === "groq"
         ? config.groqBaseUrl
         : provider === "openai"
-          ? CHATGPT_CODEX_BASE_URL
+          ? config.openaiApiKey ? config.openaiBaseUrl : CHATGPT_CODEX_BASE_URL
           : config.nemotronBaseUrl;
 
   const model = new ChatOpenAI({
@@ -140,7 +140,7 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
     ...(provider === "openai" ? { useResponsesApi: true, modelKwargs: { store: false, reasoning: { effort: mode === "off" ? "none" : "medium" } } } : {}),
     configuration: {
       baseURL,
-      ...(provider === "openai" ? { fetch: openaiOAuthFetch() } : {}),
+      ...(provider === "openai" && !config.openaiApiKey ? { fetch: openaiOAuthFetch() } : {}),
     },
     streaming: true,
     // Verified against the live NVIDIA endpoint: it does return real usage

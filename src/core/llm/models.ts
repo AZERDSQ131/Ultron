@@ -127,11 +127,21 @@ async function fetchGroqModels(): Promise<ModelInfo[]> {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-// The ChatGPT-account-scoped Codex backend exposes its own /models list
-// (confirmed against openai/codex's own test fixtures), same live-discovery
-// shape as NVIDIA/Groq rather than a hardcoded list like DeepSeek's two
-// fixed models.
+// The ChatGPT-account-scoped Codex backend exposes its own /models list,
+// while the standard OpenAI API uses the regular OpenAI-compatible shape.
 async function fetchOpenAIModels(): Promise<ModelInfo[]> {
+  if (config.openaiApiKey) {
+    const response = await fetch(`${config.openaiBaseUrl.replace(/\/+$/, "")}/models`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${config.openaiApiKey}` },
+    });
+    if (!response.ok) throw new Error(`OpenAI returned HTTP ${response.status}`);
+    const payload = (await response.json()) as { data?: { id?: unknown }[] };
+    return (payload.data ?? [])
+      .map((model) => (typeof model.id === "string" && model.id ? { id: model.id } : undefined))
+      .filter((model): model is ModelInfo => Boolean(model))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
   const { accessToken, accountId } = await getValidAuth(getOpenAIAuthRegistry(config.databasePath));
   const response = await fetch(`${CHATGPT_CODEX_BASE_URL}/models?client_version=${CODEX_CLIENT_VERSION}`, {
     headers: { Accept: "application/json", ...codexAuthHeaders(accessToken, accountId) },

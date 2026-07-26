@@ -20,6 +20,7 @@ function required(name: string): string {
 // equivalent wired up. "openai" is unlike the other three: no API key, it
 // authenticates via ChatGPT device-code OAuth (see src/core/llm/openaiAuth.ts)
 // and calls the ChatGPT-account-scoped Responses API, not api.openai.com.
+// Set OPENAI_API_KEY to use the standard OpenAI API instead.
 export type LlmProvider = "nvidia" | "deepseek" | "groq" | "openai";
 
 // Fixed cycle order for the bare (argument-less) /provider command.
@@ -39,7 +40,7 @@ const providerModels: Record<LlmProvider, string> = {
   nvidia: process.env.NEMOTRON_MODEL ?? "deepseek-ai/deepseek-v4-flash",
   deepseek: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
   groq: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
-  openai: process.env.OPENAI_CODEX_MODEL ?? "gpt-5.6-sol",
+  openai: process.env.OPENAI_MODEL ?? (process.env.OPENAI_API_KEY ? "gpt-5" : process.env.OPENAI_CODEX_MODEL ?? "gpt-5.6-sol"),
 };
 
 const startingProvider = initialProvider();
@@ -60,6 +61,8 @@ export const config = {
   // validation as deepseekApiKey above.
   groqApiKey: process.env.GROQ_API_KEY,
   groqBaseUrl: process.env.GROQ_BASE_URL ?? "https://api.groq.com/openai/v1",
+  openaiApiKey: process.env.OPENAI_API_KEY,
+  openaiBaseUrl: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
   // Voxtral transcription runs server-side so the Mistral key never ships
   // inside the mobile app.
   mistralApiKey: process.env.MISTRAL_API_KEY,
@@ -147,7 +150,7 @@ export function hasProviderCredentials(provider: LlmProvider): boolean {
   if (provider === "nvidia") return true;
   if (provider === "deepseek") return Boolean(config.deepseekApiKey);
   if (provider === "groq") return Boolean(config.groqApiKey);
-  return isOpenAIAuthenticated();
+  return Boolean(config.openaiApiKey) || isOpenAIAuthenticated();
 }
 
 // Next provider in the fixed nvidia → deepseek → groq → openai → nvidia
