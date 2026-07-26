@@ -315,6 +315,27 @@ final class ULTRONClient {
         ) as LiveActivityRegistrationResponse
     }
 
+    struct LiveActivityStateEntry: Codable {
+        let id: String
+        let kind: String
+        let text: String
+    }
+
+    struct LiveActivityStateResponse: Codable {
+        let status: String
+        let entries: [LiveActivityStateEntry]
+        let startedAt: Double
+        let running: Bool
+    }
+
+    /// The server's view of a turn, used by `LiveActivityManager.reconcile()`.
+    /// iOS suspends the app mid-turn and the SSE stream dies with it, so this is
+    /// how the Live Activity learns what actually happened while it was frozen.
+    func liveActivityState(chatId: String) async -> LiveActivityStateResponse? {
+        let encoded = chatId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? chatId
+        return try? await requestNoBody("GET", "/api/live-activities/state?chatId=\(encoded)") as LiveActivityStateResponse
+    }
+
     // MARK: - Memory
 
     struct MemoryResponse: Codable { let observations: [UserModelObservation]; let count: Int }

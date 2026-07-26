@@ -297,21 +297,27 @@ struct ChatView: View {
         timeline.beginAssistantTurn()
         streamTask = Task {
             var terminalEventReceived = false
+            // The Live Activity rewrites its streaming line in place, so it needs
+            // the reply accumulated so far rather than the latest delta.
+            var assistantText = ""
             do {
                 for try await event in stream {
                     switch event {
                     case .text(let delta):
                         timeline.appendText(delta)
-                        await liveActivity.appendText(delta)
+                        assistantText += delta
+                        await liveActivity.noteAssistantText(assistantText)
                     case .toolCall(let name, let summary):
                         timeline.addToolCall(name: name, summary: summary)
-                        await liveActivity.update(status: .running, action: "Outil : \(name) — \(summary)")
+                        assistantText = ""
+                        await liveActivity.noteToolCall(name: name, summary: summary)
                     case .toolResult(let name, let content):
                         timeline.addToolResult(name: name, content: content)
-                        await liveActivity.update(status: .running, action: "Résultat : \(name) — \(String(content.prefix(120)))")
+                        assistantText = ""
+                        await liveActivity.noteToolResult(name: name, content: content)
                     case .approvalRequired(let calls):
                         timeline.addApproval(calls)
-                        await liveActivity.update(status: .waitingForApproval, action: "Approbation requise")
+                        await liveActivity.noteApprovalRequired()
                     case .done(let stats):
                         verboseStats = stats.stats
                         terminalEventReceived = true
@@ -330,10 +336,13 @@ struct ChatView: View {
             } catch {
                 errorMessage = error.localizedDescription
                 terminalEventReceived = true
-                await liveActivity.finish(success: false)
+                // A dead socket is not a failed turn: the server keeps running
+                // app-originated turns, so let the Live Activity ask it what
+                // really happened instead of claiming a failure.
+                await liveActivity.resolveAfterStreamFailure()
             }
             if !terminalEventReceived && !isSending {
-                await liveActivity.finish(success: false)
+                await liveActivity.resolveAfterStreamFailure()
             }
             timeline.endTurn()
             isSending = false

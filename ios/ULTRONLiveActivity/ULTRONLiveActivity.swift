@@ -2,99 +2,186 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
+private typealias TaskState = ULTRONTaskActivityAttributes.ContentState
+
 struct ULTRONLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ULTRONTaskActivityAttributes.self) { context in
-            lockScreenView(context: context)
+            LockScreenView(title: context.attributes.title, state: context.state)
                 .activityBackgroundTint(.black)
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
-            DynamicIsland {
+            let state = context.state
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: icon(for: context.state.status))
-                        .foregroundStyle(color(for: context.state.status))
+                    StatusIndicator(state: state)
+                        .padding(.leading, 4)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    ElapsedLabel(state: state)
+                        .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(context.attributes.title)
-                        .font(.headline)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                DynamicIslandExpandedRegion(.trailing) {
-                    Text(shortStatus(context.state.status))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(color(for: context.state.status))
-                }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(context.state.latestAction)
-                            .font(.subheadline.weight(.medium))
-                            .lineLimit(2)
-                        ForEach(context.state.actions.suffix(4)) { action in
-                            Text(action.label)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    TranscriptList(state: state)
                 }
             } compactLeading: {
-                Image(systemName: icon(for: context.state.status))
-                    .foregroundStyle(color(for: context.state.status))
+                StatusIndicator(state: state)
             } compactTrailing: {
-                Text(shortStatus(context.state.status))
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(color(for: context.state.status))
+                ElapsedLabel(state: state)
             } minimal: {
-                Image(systemName: icon(for: context.state.status))
-                    .foregroundStyle(color(for: context.state.status))
+                StatusIndicator(state: state)
             }
             .widgetURL(URL(string: "ultron://chat/\(context.attributes.chatId)"))
-            .keylineTint(color(for: context.state.status))
+            .keylineTint(accent(for: state.status))
         }
     }
+}
 
-    @ViewBuilder
-    private func lockScreenView(context: ActivityViewContext<ULTRONTaskActivityAttributes>) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon(for: context.state.status))
-                .font(.title2)
-                .foregroundStyle(color(for: context.state.status))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(context.attributes.title).font(.headline).lineLimit(1)
-                Text(context.state.latestAction).font(.subheadline).lineLimit(2)
+/// Left side of the Dynamic Island: a blue ring while the agent works, then a
+/// green check or a red cross once the turn lands.
+private struct StatusIndicator: View {
+    let state: TaskState
+
+    var body: some View {
+        switch state.status {
+        case .running:
+            // ActivityKit ignores SwiftUI animations that repeat indefinitely,
+            // so an indeterminate `ProgressView()` renders frozen here. A
+            // timer-interval ring is the only indicator that keeps moving on
+            // its own, without one push per frame.
+            ProgressView(timerInterval: state.ringInterval, countsDown: false) {
+                EmptyView()
+            } currentValueLabel: {
+                EmptyView()
             }
-            Spacer()
-            Text(shortStatus(context.state.status)).font(.caption.weight(.semibold))
-        }
-        .padding()
-    }
-
-    private func icon(for status: ULTRONTaskActivityAttributes.ContentState.Status) -> String {
-        switch status {
-        case .running: return "ellipsis"
-        case .completed: return "checkmark.circle.fill"
-        case .failed: return "xmark.circle.fill"
-        case .waitingForApproval: return "hand.raised.fill"
-        }
-    }
-
-    private func shortStatus(_ status: ULTRONTaskActivityAttributes.ContentState.Status) -> String {
-        switch status {
-        case .running: return "…"
-        case .completed: return "OK"
-        case .failed: return "!"
-        case .waitingForApproval: return "?"
+            .progressViewStyle(.circular)
+            .tint(.blue)
+            .frame(width: 18, height: 18)
+        case .waitingForApproval:
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.orange)
+        case .completed:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.green)
+        case .failed:
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.red)
         }
     }
+}
 
-    private func color(for status: ULTRONTaskActivityAttributes.ContentState.Status) -> Color {
-        switch status {
-        case .running: return .white
-        case .completed: return .green
-        case .failed: return .red
-        case .waitingForApproval: return .orange
+/// Right side of the compact island: how long the turn has been running. Counts
+/// up on its own, so it keeps moving even while the app is suspended and no
+/// update can reach the activity. Deliberately blank once the turn is over —
+/// the status icon alone carries the outcome.
+private struct ElapsedLabel: View {
+    let state: TaskState
+
+    var body: some View {
+        if state.status == .running {
+            Text(timerInterval: state.startedDate...state.startedDate.addingTimeInterval(3600), countsDown: false)
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.blue)
+                .frame(maxWidth: 44)
         }
+    }
+}
+
+/// What a long press reveals: the tail of the conversation, each line marked as
+/// an assistant message or a tool call.
+private struct TranscriptList: View {
+    let state: TaskState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if state.entries.isEmpty {
+                Text("Traitement en cours")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(state.entries.suffix(4)) { entry in
+                    EntryRow(entry: entry, isLatest: entry.id == state.entries.last?.id)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 2)
+    }
+}
+
+private struct EntryRow: View {
+    let entry: TaskState.Entry
+    let isLatest: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 12)
+            Text(entry.text)
+                .font(.caption2)
+                .foregroundStyle(isLatest ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .lineLimit(isLatest ? 2 : 1)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    private var icon: String {
+        switch entry.kind {
+        case .message: return "text.alignleft"
+        case .tool: return "wrench.and.screwdriver.fill"
+        case .status: return "exclamationmark.circle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch entry.kind {
+        case .message: return .blue
+        case .tool: return .orange
+        case .status: return .yellow
+        }
+    }
+}
+
+private struct LockScreenView: View {
+    let title: String
+    let state: TaskState
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            StatusIndicator(state: state)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    ElapsedLabel(state: state)
+                }
+                TranscriptList(state: state)
+            }
+        }
+        .padding(14)
+    }
+}
+
+private func accent(for status: TaskState.Status) -> Color {
+    switch status {
+    case .running: return .blue
+    case .waitingForApproval: return .orange
+    case .completed: return .green
+    case .failed: return .red
     }
 }
 
