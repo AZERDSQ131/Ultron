@@ -36,6 +36,11 @@ final class LiveActivityManager {
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     /// Polls the server when a turn is running with no live stream attached.
     private var watchdog: Task<Void, Never>?
+    /// True once the activity is showing a terminal outcome. It is still alive at
+    /// that point (see `finish`), so every update path has to stop writing to it.
+    private var finished = false
+    /// Takes the outcome down when the app was already on screen to see it.
+    private var autoDismiss: Task<Void, Never>?
 
     /// Assistant text arrives one delta at a time; pushing every one of them to
     /// ActivityKit would be throttled by the system anyway.
@@ -56,6 +61,7 @@ final class LiveActivityManager {
         entries = []
         entryCounter = 0
         streamingMessageIndex = nil
+        finished = false
         startedAt = Date().timeIntervalSince1970
         lastPushedAt = Date()
 
@@ -97,38 +103,51 @@ final class LiveActivityManager {
         }
     }
 
+    /// Shows the outcome and, crucially, does *not* end the activity.
+    ///
+    /// The Dynamic Island only renders **active** activities: calling
+    /// `activity.end()` here drops it out of the island immediately, whatever
+    /// dismissal policy is passed. `.default`'s "stays around after ending" only
+    /// covers the Lock Screen. So the terminal state is delivered as a plain
+    /// update and the activity is kept alive until something takes it down —
+    /// `dismissSeenActivities()` when the app is opened, or the short timer below
+    /// when the app was already on screen to see it.
     func finish(success: Bool) async {
-        guard let activity else { return }
+        guard let activity, !finished else { return }
+        finished = true
+        watchdog?.cancel()
+        watchdog = nil
+        tokenTask?.cancel()
+        tokenTask = nil
+        endBackgroundHold()
+
         let state = currentState(status: success ? .completed : .failed)
-        // Turn finished with the app on screen: the user is already watching, so
-        // the outcome only needs a moment. Finished while away: keep it up
-        // indefinitely (.default) so it is still there whenever they next look —
-        // dismissFinishedActivities() takes it down when they open the app.
-        let onScreen = UIApplication.shared.applicationState == .active
-        await activity.end(
-            ActivityContent(state: state, staleDate: nil),
-            dismissalPolicy: onScreen ? .after(.now + 4) : .default
-        )
-        teardown()
+        await activity.update(ActivityContent(state: state, staleDate: nil))
+
+        guard UIApplication.shared.applicationState == .active else { return }
+        autoDismiss = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, !Task.isCancelled else { return }
+            await self.end()
+        }
     }
 
-    /// Ends any activity still showing a finished turn. `finish` deliberately
-    /// leaves the green check / red cross on screen indefinitely, so this is what
-    /// takes it down once the user opens the app and has seen it. Enumerates the
-    /// system's own list because `finish` has already released our handle, and
-    /// skips anything still running so opening the app mid-turn doesn't wipe it.
-    func dismissFinishedActivities() async {
-        for activity in Activity<ULTRONTaskActivityAttributes>.activities {
-            switch activity.content.state.status {
-            case .completed, .failed:
-                await activity.end(nil, dismissalPolicy: .immediate)
-            case .running, .waitingForApproval:
-                continue
-            }
+    /// Called when the app becomes active: whatever the island was showing has
+    /// now been seen. Clears our own finished activity, plus any activity this
+    /// process doesn't own — those are orphans from a previous launch that
+    /// nothing is driving any more, and a "running" one would otherwise sit there
+    /// forever.
+    func dismissSeenActivities() async {
+        if finished { await end() }
+        let ownId = activity?.id
+        for orphan in Activity<ULTRONTaskActivityAttributes>.activities where orphan.id != ownId {
+            await orphan.end(nil, dismissalPolicy: .immediate)
         }
     }
 
     func end() async {
+        autoDismiss?.cancel()
+        autoDismiss = nil
         guard let activity else { return }
         await activity.end(nil, dismissalPolicy: .immediate)
         teardown()
@@ -139,9 +158,12 @@ final class LiveActivityManager {
         tokenTask = nil
         watchdog?.cancel()
         watchdog = nil
+        autoDismiss?.cancel()
+        autoDismiss = nil
         activity = nil
         chatId = nil
         streamingMessageIndex = nil
+        finished = false
         endBackgroundHold()
     }
 
@@ -231,7 +253,7 @@ final class LiveActivityManager {
     /// server is the only way to avoid flashing a red cross over work that
     /// actually succeeded.
     func resolveAfterStreamFailure() async {
-        guard activity != nil else { return }
+        guard activity != nil, !finished else { return }
         if await reconcileOnce() { return }
         await finish(success: false)
     }
@@ -239,7 +261,7 @@ final class LiveActivityManager {
     /// Returns false when the server had nothing to say, so the caller can fall
     /// back to its own conclusion.
     private func reconcileOnce() async -> Bool {
-        guard let chatId, activity != nil, let client else { return false }
+        guard let chatId, activity != nil, !finished, let client else { return false }
         guard let remote = await client.liveActivityState(chatId: chatId) else { return false }
 
         if !remote.entries.isEmpty {
@@ -312,7 +334,9 @@ final class LiveActivityManager {
     }
 
     private func push(status: TaskState.Status, throttled: Bool) async {
-        guard let activity else { return }
+        // Never write over a terminal outcome: the activity is still alive after
+        // finish(), so a late stream event would otherwise revive the counter.
+        guard let activity, !finished else { return }
         if throttled, Date().timeIntervalSince(lastPushedAt) < textUpdateInterval { return }
         lastPushedAt = Date()
         await activity.update(ActivityContent(state: currentState(status: status), staleDate: staleDate()))

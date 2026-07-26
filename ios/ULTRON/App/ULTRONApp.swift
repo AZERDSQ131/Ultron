@@ -33,7 +33,7 @@ struct ULTRONApp: App {
                             await liveActivityManager.reconcile()
                             // The user is now looking at the app, so a finished
                             // turn's outcome has served its purpose.
-                            await liveActivityManager.dismissFinishedActivities()
+                            await liveActivityManager.dismissSeenActivities()
                         }
                     @unknown default:
                         break
