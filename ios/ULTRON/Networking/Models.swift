@@ -133,50 +133,64 @@ struct FinanceAccount: Codable, Identifiable, Equatable {
     var type: String
     var currency: String
     var balance: Double?
+    /// When that balance was last recorded — snapshots are upserted once per day.
+    var balanceDate: String?
 }
 
 struct FinanceTransaction: Codable, Identifiable, Equatable {
-    let id: String
+    /// `finance_transactions.id` is an INTEGER PRIMARY KEY, so the server sends a
+    /// number here. Typing it as String failed the whole FinanceSummary decode
+    /// the moment a single transaction existed.
+    let id: Int
     let accountId: String
     let description: String
     let amount: Double
     let date: String
     let category: String?
+
+    var isExpense: Bool { amount < 0 }
+    var day: Date? { Date(healthDate: date) }
 }
 
-struct NetWorthPoint: Codable, Equatable {
+struct NetWorthPoint: Codable, Identifiable, Equatable {
     let date: String
     let netWorth: Double
+
+    var id: String { date }
+    var day: Date? { Date(healthDate: date) }
 }
 
 struct CategorySpend: Codable, Identifiable, Equatable {
     let category: String
     let amount: Double
+    /// How many transactions make up that total.
+    let count: Int
     var id: String { category }
 
     enum CodingKeys: String, CodingKey {
         case category
         case amount = "total"
+        case count
     }
 }
 
 struct CashFlowPoint: Codable, Identifiable, Equatable {
+    /// `YYYY-MM`.
     let month: String
     let income: Double
     let expenses: Double
+    let net: Double
+
     var id: String { month }
+    var monthStart: Date? { Date(healthDate: "\(month)-01") }
 }
 
 struct MonthSummary: Codable, Equatable {
     let income: Double
     let expenses: Double
-    let net: Double
-
-    enum CodingKeys: String, CodingKey {
-        case income
-        case expenses
-        case net = "savings"
-    }
+    let savings: Double
+    /// Null when there was no income to divide by.
+    let savingsRatePct: Double?
 }
 
 struct FinanceSummary: Codable, Equatable {
