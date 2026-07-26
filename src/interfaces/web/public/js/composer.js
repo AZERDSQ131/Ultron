@@ -12,6 +12,7 @@ import {
   truncateAfterLastUserTurn,
   truncateFromLastUserTurn,
   updateTurnActions,
+  attachSubAgentLink,
 } from "./thread.js";
 import { openArchiveDialog, openResumePanel } from "./archivePanel.js";
 import { loadStatus, updateContextGauge, openModelMenu, reloadModelPicker } from "./statusBar.js";
@@ -340,6 +341,24 @@ function openTaskMenu() {
 // Client-side only, same as reasoning mode — it's a per-turn instruction
 // (see taskModeDirective in graph.ts), not a chat-level setting worth
 // persisting server-side.
+const observeBanner = document.getElementById("observe-banner");
+const observeBack = document.getElementById("observe-back");
+
+/// Sub-agent conversations are read-only: nothing is listening on the other
+/// end, so offering an input would just silently do nothing useful.
+export function setObserveOnly(on, { parentTitle = "", task = "" } = {}) {
+  observeBanner.hidden = !on;
+  composer.hidden = on;
+  if (!on) return;
+  const detail = task ? ` — ${task}` : "";
+  observeBanner.querySelector(".observe-banner-text").textContent =
+    `Observation d'un sous-agent${parentTitle ? ` de « ${parentTitle} »` : ""}${detail}`;
+}
+
+export function onObserveBack(handler) {
+  observeBack.addEventListener("click", handler);
+}
+
 export function setTaskMode(mode) {
   state.taskMode = mode;
   taskBtn.dataset.mode = mode;
@@ -531,7 +550,10 @@ export async function streamTurn(body) {
         } else if (eventName === "tool_result") {
           const blocks = [...document.querySelectorAll(".tool-block pre")];
           const match = [...blocks].reverse().find((p) => p.dataset.name === data.name && p.textContent === "…");
-          if (match) match.textContent = data.content;
+          if (match) {
+            match.textContent = data.content;
+            attachSubAgentLink(match, data.content);
+          }
           if (TODO_TOOL_NAMES.has(data.name)) refreshTodos();
         } else if (eventName === "approval_required") {
           finishAssistant();

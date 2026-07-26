@@ -12,7 +12,7 @@
     "dev": "tsx src/interfaces/cli/index.ts",
     "remote": "tsx src/interfaces/cli/remote.ts",
     "web": "tsx src/interfaces/web/server.ts",
-    "build": "tsc -p tsconfig.json && cp -r src/interfaces/web/public dist/interfaces/web/public && cp src/interfaces/cli/ascii-art.txt dist/interfaces/cli/ascii-art.txt && chmod +x dist/interfaces/cli/index.js dist/interfaces/cli/remote.js",
+    "build": "tsc -p tsconfig.json && rm -rf dist/interfaces/web/public && cp -r src/interfaces/web/public dist/interfaces/web/public && cp src/interfaces/cli/ascii-art.txt dist/interfaces/cli/ascii-art.txt && chmod +x dist/interfaces/cli/index.js dist/interfaces/cli/remote.js",
     "start": "node dist/interfaces/cli/index.js",
     "start:remote": "node dist/interfaces/cli/remote.js",
     "start:web": "node dist/interfaces/web/server.js",

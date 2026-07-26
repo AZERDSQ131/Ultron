@@ -300,6 +300,39 @@ export function beginToolGroup(anchorBody, { live = true } = {}) {
   };
 }
 
+// A sub-agent tool result starts with [ultron:subagent chat=<id>] — see
+// parseSubAgentMarker in src/core/tools/agents.ts. Parsed here rather than only
+// read from the SSE event's field, so a replayed history gets its links too.
+const SUBAGENT_MARKER = /^\[ultron:subagent chat=([0-9a-f-]+)\]/;
+
+export function subAgentChatIdFrom(content) {
+  return SUBAGENT_MARKER.exec(String(content ?? "").trimStart())?.[1] ?? null;
+}
+
+/// Turns a spawn_agent block into a way into the conversation it created.
+/// Observation only — the sub-agent takes no input from anyone.
+export function attachSubAgentLink(pre, content) {
+  const chatId = subAgentChatIdFrom(content);
+  if (!chatId) return;
+  const block = pre.closest(".tool-block");
+  const summary = block?.querySelector("summary");
+  if (!summary || summary.querySelector(".subagent-open")) return;
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "subagent-open";
+  button.textContent = "Observer →";
+  button.title = "Ouvrir la conversation de ce sous-agent";
+  button.addEventListener("click", (event) => {
+    // The button lives inside a <summary>, so without this the click would
+    // also collapse/expand the block it sits in.
+    event.preventDefault();
+    event.stopPropagation();
+    window.dispatchEvent(new CustomEvent("subagent:open", { detail: { chatId } }));
+  });
+  summary.appendChild(button);
+}
+
 function addToolBlockTo(container, name, summary) {
   const scope = state.toolScopes[name] ?? "read";
   const details = document.createElement("details");

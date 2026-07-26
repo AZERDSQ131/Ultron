@@ -2447,3 +2447,60 @@ kbd {
   font-size: var(--fs-xs);
   color: var(--text-dim);
 }
+
+
+/* Sub-agent observation (see setObserveOnly in composer.js and
+   attachSubAgentLink in thread.js). A spawned run takes no input from anyone,
+   so its conversation replaces the composer with a way back to the parent
+   rather than an input that would silently do nothing. */
+.subagent-open {
+  margin-left: auto;
+  flex: none;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+}
+.subagent-open:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.observe-banner {
+  align-items: center;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  display: flex;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+}
+.observe-banner-text {
+  color: var(--text-dim);
+  flex: 1;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.observe-back {
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  cursor: pointer;
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+}
+.observe-back:hover {
+  background: var(--accent);
+  color: #fff;
+}

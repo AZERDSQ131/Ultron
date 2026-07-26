@@ -1,9 +1,9 @@
 import { api } from "./api.js";
 import { renderMarkdown } from "./markdown.js";
 import { state } from "./store.js";
-import { addTurn, beginToolGroup, addSystemNote, clearThread, updateTurnActions } from "./thread.js";
+import { addTurn, beginToolGroup, addSystemNote, clearThread, updateTurnActions, attachSubAgentLink } from "./thread.js";
 import { loadStatus } from "./statusBar.js";
-import { setGenerating, syncSecurityMode } from "./composer.js";
+import { setGenerating, syncSecurityMode, setObserveOnly } from "./composer.js";
 import { closeHealthView } from "./healthView.js";
 import { closeUsageView } from "./usageView.js";
 import { closeFinanceView } from "./financeView.js";
@@ -222,6 +222,10 @@ export async function selectChat(id) {
   const chat = getChat(id);
   activeChatTitle.textContent = chat ? chat.title : "ULTRON";
   syncSecurityMode(chat?.securityMode ?? "bypass");
+  setObserveOnly(Boolean(chat?.parentChatId), {
+    parentTitle: chat?.parentChatId ? (getChat(chat.parentChatId)?.title ?? "") : "",
+    task: chat?.subagentTask ?? "",
+  });
   try {
     const data = await api.chatMessages(id);
     // tool_call/tool_result entries (see listChatMessages in graph.ts)
@@ -251,7 +255,10 @@ export async function selectChat(id) {
         openToolBlock.dataset.name = message.name;
       } else if (message.role === "tool_result") {
         const match = openToolBlock && openToolBlock.dataset.name === message.name ? openToolBlock : null;
-        if (match) match.textContent = message.content;
+        if (match) {
+          match.textContent = message.content;
+          attachSubAgentLink(match, message.content);
+        }
         openToolBlock = null;
       }
     }
