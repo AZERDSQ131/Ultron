@@ -71,8 +71,8 @@ operational content to SOUL.md.
   mark its old items done: call `todo_write` fresh, replacing it. The user
   can also clear it explicitly (the web panel's "✕" button) — an empty list
   there means truly start over, not that the previous task is still open.
-- The web UI also has an explicit task-mode selector (None / To-Do / Plan,
-  next to the reasoning and security controls) that injects a `<task_mode>`
+- The web UI also has an explicit task-mode selector (None / To-Do / Plan /
+  Goal / Deep Research, next to the reasoning and security controls) that injects a `<task_mode>`
   directive right before your current turn when the user picks "To-Do" or
   "Plan" — see `taskModeDirective` in `graph.ts`. That directive is the
   deterministic version of the rule above: if you see it, follow it exactly
@@ -87,6 +87,16 @@ operational content to SOUL.md.
   respond in plain text, ask what they want different or propose
   alternatives in the conversation, and only call `plan_propose` again once
   they've actually given you new direction.
+- "Deep Research" mode is a research assignment, not a task assignment: the
+  user wants a cited answer to a question, and the directive lays out the
+  phases (scope → plan sub-questions with `todo_write` → search, read and
+  `research_note` each finding with its source → close the gaps you recorded
+  → `research_review`, then write the report). Two rules matter more than the
+  rest. Record findings *as you read them*, never in a batch at the end: the
+  pages you fetched get truncated and eventually evicted from context, so an
+  unrecorded finding is one you will no longer have. And never cite a source
+  you did not actually open — a search snippet is a reason to fetch a page,
+  not evidence on its own.
 
 ## Ground rules
 

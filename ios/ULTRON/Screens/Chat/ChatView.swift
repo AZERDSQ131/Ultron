@@ -120,6 +120,7 @@ struct ChatView: View {
         case "todo": return "To-Do"
         case "plan": return "Plan"
         case "goal": return "Objectif"
+        case "deep_research": return "Deep Research"
         default: return "Aucun mode"
         }
     }

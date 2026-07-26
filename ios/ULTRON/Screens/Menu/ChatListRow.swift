@@ -48,7 +48,7 @@ struct ChatListRow: View {
     }
 
     private var relativeTime: String {
-        guard let date = ISO8601DateFormatter().date(from: chat.updatedAt) else { return "" }
+        guard let date = Date(serverTimestamp: chat.updatedAt) else { return "" }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: date, relativeTo: Date())

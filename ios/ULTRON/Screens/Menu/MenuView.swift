@@ -8,6 +8,7 @@ struct MenuView: View {
     @State private var errorMessage: String?
     @State private var searchQuery = ""
     @State private var showSettings = false
+    @State private var expandedFolders: Set<String> = []
 
     private static let modules: [ModuleItem] = [
         .init(title: "Finance", icon: "dollarsign.circle.fill", tint: .green, destination: .finance),
@@ -40,26 +41,20 @@ struct MenuView: View {
                     Text("Aucune conversation pour l'instant.")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(groupedChats, id: \.title) { group in
-                    Section(group.title) {
+                ForEach(recentChats) { chat in
+                    chatRow(chat)
+                }
+            }
+
+            ForEach(folderGroups, id: \.title) { group in
+                Section {
+                    DisclosureGroup(isExpanded: expandedBinding(for: group.title)) {
                         ForEach(group.chats) { chat in
-                            NavigationLink(value: NavigationTarget.chat(chat.id)) {
-                                ChatListRow(chat: chat)
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task { await delete(chat) }
-                                } label: {
-                                    Label("Supprimer", systemImage: "trash")
-                                }
-                                Button {
-                                    Task { await archive(chat) }
-                                } label: {
-                                    Label("Archiver", systemImage: "archivebox")
-                                }
-                                .tint(.orange)
-                            }
+                            chatRow(chat)
                         }
+                    } label: {
+                        Label(group.title, systemImage: "folder")
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -91,6 +86,35 @@ struct MenuView: View {
     }
 
     @ViewBuilder
+    private func chatRow(_ chat: Chat) -> some View {
+        NavigationLink(value: NavigationTarget.chat(chat.id)) {
+            ChatListRow(chat: chat)
+        }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                Task { await delete(chat) }
+            } label: {
+                Label("Supprimer", systemImage: "trash")
+            }
+            Button {
+                Task { await archive(chat) }
+            } label: {
+                Label("Archiver", systemImage: "archivebox")
+            }
+            .tint(.orange)
+        }
+    }
+
+    private func expandedBinding(for title: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedFolders.contains(title) },
+            set: { isExpanded in
+                if isExpanded { expandedFolders.insert(title) } else { expandedFolders.remove(title) }
+            }
+        )
+    }
+
+    @ViewBuilder
     private func destinationView(for target: NavigationTarget) -> some View {
         switch target {
         case .chat(let id):
@@ -117,41 +141,39 @@ struct MenuView: View {
 
     private struct ChatGroup { let title: String; let chats: [Chat] }
 
-    private var groupedChats: [ChatGroup] {
+    /// Recent chats (today/yesterday) render flat, classic-style, at the top.
+    /// Anything older is bucketed into two collapsible folders shown below
+    /// them: "Semaine dernière" (2-7 days) and "Ancien" (everything past
+    /// that, folding what used to be a separate "Dernier mois" bucket in).
+    private var recentChats: [Chat] {
+        let calendar = Calendar.current
+        return visibleChats
+            .sorted(by: { date($0) > date($1) })
+            .filter { calendar.isDateInToday(date($0)) || calendar.isDateInYesterday(date($0)) }
+    }
+
+    private var folderGroups: [ChatGroup] {
         let calendar = Calendar.current
         let now = Date()
-        let formatter = ISO8601DateFormatter()
-
-        func date(_ chat: Chat) -> Date {
-            formatter.date(from: chat.updatedAt) ?? .distantPast
-        }
-
-        var today: [Chat] = [], yesterday: [Chat] = [], week: [Chat] = [], month: [Chat] = [], older: [Chat] = []
+        var week: [Chat] = [], older: [Chat] = []
         for chat in visibleChats.sorted(by: { date($0) > date($1) }) {
             let d = date(chat)
-            if calendar.isDateInToday(d) {
-                today.append(chat)
-            } else if calendar.isDateInYesterday(d) {
-                yesterday.append(chat)
+            guard !calendar.isDateInToday(d), !calendar.isDateInYesterday(d) else { continue }
+            let days = calendar.dateComponents([.day], from: d, to: now).day ?? .max
+            if days <= 7 {
+                week.append(chat)
             } else {
-                let days = calendar.dateComponents([.day], from: d, to: now).day ?? .max
-                if days <= 7 {
-                    week.append(chat)
-                } else if days <= 30 {
-                    month.append(chat)
-                } else {
-                    older.append(chat)
-                }
+                older.append(chat)
             }
         }
-
         var groups: [ChatGroup] = []
-        if !today.isEmpty { groups.append(.init(title: "Aujourd'hui", chats: today)) }
-        if !yesterday.isEmpty { groups.append(.init(title: "Hier", chats: yesterday)) }
-        if !week.isEmpty { groups.append(.init(title: "Dernière semaine", chats: week)) }
-        if !month.isEmpty { groups.append(.init(title: "Dernier mois", chats: month)) }
+        if !week.isEmpty { groups.append(.init(title: "Semaine dernière", chats: week)) }
         if !older.isEmpty { groups.append(.init(title: "Ancien", chats: older)) }
         return groups
+    }
+
+    private func date(_ chat: Chat) -> Date {
+        Date(serverTimestamp: chat.updatedAt) ?? .distantPast
     }
 
     private func load() async {
