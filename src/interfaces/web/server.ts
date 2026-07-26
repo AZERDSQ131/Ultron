@@ -13,6 +13,7 @@ import {
   messageContentToText,
   prepareEdit,
   prepareRetry,
+  readPromptDocuments,
   searchMessages,
   type TaskMode,
   type ToolApprovalDecision,
@@ -1429,6 +1430,13 @@ const server = createServer((req, res) => {
   }
   if (financeAccountMatch && financeAccountMatch[2] === "/transactions" && req.method === "POST") {
     handleFinanceAddTransaction(req, res, decodeURIComponent(financeAccountMatch[1])).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  // Read-only view of the two hand-written prompt documents. GET-only, and the
+  // DELETE /api/memory/:id route below is method-guarded, so "documents" can't
+  // be mistaken for an observation id.
+  if (req.method === "GET" && path === "/api/memory/documents") {
+    sendJson(res, 200, { documents: readPromptDocuments() });
     return;
   }
   if (req.method === "GET" && path === "/api/memory") {

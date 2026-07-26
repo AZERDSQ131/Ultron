@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateGraph, MessagesAnnotation, END, START, interrupt } from "@langchain/langgraph";
@@ -40,7 +40,8 @@ export function messageContentToText(content: unknown): string {
     .join("");
 }
 
-const soul = readFileSync(join(__dirname, "..", "..", "SOUL.md"), "utf-8");
+const soulPath = join(__dirname, "..", "..", "SOUL.md");
+const soul = readFileSync(soulPath, "utf-8");
 const agentNotes = readFileSync(join(__dirname, "..", "..", "AGENT.md"), "utf-8");
 const memoryPath = join(__dirname, "..", "..", "MEMORY.md");
 function debugLog(message: string): void {
@@ -58,6 +59,30 @@ ${agentNotes}`;
 
 function readMemory(): string {
   return readFileSync(memoryPath, "utf-8").trim();
+}
+
+export interface PromptDocument {
+  name: string;
+  path: string;
+  content: string;
+  updatedAt: string | null;
+}
+
+/// The two hand-written documents behind ULTRON's prompt, for read-only display
+/// in the clients. Read fresh from disk on every call rather than reusing the
+/// copies captured at module load: MEMORY.md is edited by hand (and by
+/// memory_write), so a cached copy would show stale content.
+export function readPromptDocuments(): PromptDocument[] {
+  return [
+    { name: "MEMORY.md", path: memoryPath },
+    { name: "SOUL.md", path: soulPath },
+  ].map(({ name, path }) => {
+    try {
+      return { name, path, content: readFileSync(path, "utf-8"), updatedAt: statSync(path).mtime.toISOString() };
+    } catch (err) {
+      return { name, path, content: `(unreadable: ${err instanceof Error ? err.message : String(err)})`, updatedAt: null };
+    }
+  });
 }
 
 // Only name + description per skill (the catalog), never the full body —

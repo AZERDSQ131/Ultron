@@ -117,6 +117,20 @@ struct UserModelObservation: Codable, Identifiable, Equatable {
     let content: String
     let chatId: String?
     let createdAt: String
+
+    var timestamp: Date? { Date(serverTimestamp: createdAt) }
+}
+
+/// One of the hand-written documents behind ULTRON's prompt (MEMORY.md,
+/// SOUL.md), served read-only by GET /api/memory/documents.
+struct PromptDocument: Codable, Identifiable, Equatable {
+    let name: String
+    let path: String
+    let content: String
+    let updatedAt: String?
+
+    var id: String { name }
+    var modified: Date? { updatedAt.flatMap { Date(serverTimestamp: $0) } }
 }
 
 // MARK: - Turn stream events (mirrors streamGraphTurn's SSE vocabulary)

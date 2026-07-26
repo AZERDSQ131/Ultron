@@ -370,6 +370,13 @@ final class ULTRONClient {
     struct MemoryResponse: Codable { let observations: [UserModelObservation]; let count: Int }
     func memoryObservations() async throws -> MemoryResponse { try await requestNoBody("GET", "/api/memory") }
 
+    struct PromptDocumentsResponse: Codable { let documents: [PromptDocument] }
+    /// MEMORY.md and SOUL.md, read fresh server-side on each call.
+    func promptDocuments() async throws -> [PromptDocument] {
+        let response: PromptDocumentsResponse = try await requestNoBody("GET", "/api/memory/documents")
+        return response.documents
+    }
+
     struct StatusOnly: Codable { let status: String }
     func clearMemory() async throws {
         let _: StatusOnly = try await requestNoBody("DELETE", "/api/memory")
