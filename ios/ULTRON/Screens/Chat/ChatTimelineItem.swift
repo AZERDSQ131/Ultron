@@ -6,14 +6,17 @@ import Foundation
 /// into one ToolGroup, mirroring thread.js's beginToolGroup on the web.
 enum ChatTimelineItem: Identifiable {
     case human(id: String, text: String)
-    case assistant(id: String, text: String)
+    // stats: the "model | X in | Y out | Zs | $coût" line from /verbose's
+    // TurnDoneStats, attached to the specific assistant turn it describes
+    // rather than kept as one shared value — see ChatTimelineBuilder.setStats.
+    case assistant(id: String, text: String, stats: String? = nil)
     case toolGroup(id: String, calls: [ToolCallEntry])
     case approval(id: String, calls: [PendingToolCall])
 
     var id: String {
         switch self {
         case .human(let id, _): return id
-        case .assistant(let id, _): return id
+        case .assistant(let id, _, _): return id
         case .toolGroup(let id, _): return id
         case .approval(let id, _): return id
         }
@@ -108,8 +111,18 @@ final class ChatTimelineBuilder {
     func appendText(_ delta: String) {
         guard let id = streamingAssistantId,
               let index = items.firstIndex(where: { $0.id == id }),
-              case .assistant(_, let text) = items[index] else { return }
-        items[index] = .assistant(id: id, text: text + delta)
+              case .assistant(_, let text, let stats) = items[index] else { return }
+        items[index] = .assistant(id: id, text: text + delta, stats: stats)
+    }
+
+    /// Attaches a /verbose stats line to the assistant turn currently
+    /// streaming, so it renders directly under that message in the scroll
+    /// view instead of a single detached line pinned near the composer.
+    func setStats(_ stats: String) {
+        guard let id = streamingAssistantId,
+              let index = items.firstIndex(where: { $0.id == id }),
+              case .assistant(_, let text, _) = items[index] else { return }
+        items[index] = .assistant(id: id, text: text, stats: stats)
     }
 
     func addToolCall(name: String, summary: String) {

@@ -80,7 +80,7 @@ struct SubAgentChatView: View {
     private func isVisible(_ item: ChatTimelineItem) -> Bool {
         switch item {
         case .human: return false
-        case .assistant(_, let text): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .assistant(_, let text, _): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .toolGroup, .approval: return true
         }
     }
@@ -90,7 +90,7 @@ struct SubAgentChatView: View {
         switch item {
         case .human(_, let text):
             HumanBubble(text: text)
-        case .assistant(_, let text):
+        case .assistant(_, let text, _):
             AssistantMessageView(text: text)
         case .toolGroup(_, let calls):
             ToolCallGroupView(calls: calls)

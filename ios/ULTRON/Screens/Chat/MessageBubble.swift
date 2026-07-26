@@ -17,11 +17,19 @@ struct HumanBubble: View {
 
 struct AssistantMessageView: View {
     let text: String
+    var stats: String?
 
     var body: some View {
-        HStack {
-            MarkdownText(raw: text)
-            Spacer(minLength: 40)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                MarkdownText(raw: text)
+                Spacer(minLength: 40)
+            }
+            if let stats {
+                Text(stats)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

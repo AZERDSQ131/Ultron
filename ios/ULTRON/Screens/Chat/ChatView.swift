@@ -19,7 +19,6 @@ struct ChatView: View {
     @State private var taskMode = "none"
     @State private var securityMode = "bypass"
     @State private var verbose = false
-    @State private var verboseStats: String?
     @State private var photoItem: PhotosPickerItem?
     @State private var isRecording = false
     @State private var recorder: AVAudioRecorder?
@@ -54,13 +53,6 @@ struct ChatView: View {
                 Text(errorMessage)
                     .font(.footnote)
                     .foregroundStyle(.red)
-                    .padding(.horizontal, 12)
-            }
-
-            if verbose, let verboseStats {
-                Text(verboseStats)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
                     .padding(.horizontal, 12)
             }
 
@@ -153,7 +145,7 @@ struct ChatView: View {
     /// value) — filtered out here rather than at the row level so the
     /// LazyVStack's inter-item spacing doesn't still leave a visible gap.
     private func isVisible(_ item: ChatTimelineItem) -> Bool {
-        guard case .assistant(_, let text) = item else { return true }
+        guard case .assistant(_, let text, _) = item else { return true }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && trimmed != "\"\"" && trimmed != "\""
     }
@@ -163,8 +155,8 @@ struct ChatView: View {
         switch item {
         case .human(_, let text):
             HumanBubble(text: text)
-        case .assistant(_, let text):
-            AssistantMessageView(text: text)
+        case .assistant(_, let text, let stats):
+            AssistantMessageView(text: text, stats: verbose ? stats : nil)
         case .toolGroup(_, let calls):
             ToolCallGroupView(calls: calls)
         case .approval(let id, let calls):
@@ -211,7 +203,6 @@ struct ChatView: View {
         guard !text.isEmpty else { return }
         composerText = ""
         timeline.addHumanMessage(text)
-        verboseStats = nil
         Task { await liveActivity.start(chatId: chatId, title: "ULTRON") }
         runStream(client.streamTurn(chatId: chatId, text: text, thinking: thinkingMode, taskMode: taskMode))
     }
@@ -333,7 +324,7 @@ struct ChatView: View {
                         timeline.addApproval(calls)
                         await liveActivity.noteApprovalRequired()
                     case .done(let stats):
-                        verboseStats = stats.stats
+                        timeline.setStats(stats.stats)
                         terminalEventReceived = true
                         await liveActivity.finish(success: true)
                     case .goal:
