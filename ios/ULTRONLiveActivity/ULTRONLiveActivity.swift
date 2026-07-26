@@ -33,13 +33,13 @@ struct ULTRONLiveActivity: Widget {
             } compactLeading: {
                 StatusIndicator(state: state)
             } compactTrailing: {
-                ElapsedLabel(state: state, tight: true)
+                ElapsedLabel(state: state)
             } minimal: {
                 // Only shown when another app's activity shares the island. With
                 // no running indicator left, falling through to StatusIndicator
                 // would render this presentation blank, so the counter stands in.
                 if state.status == .running {
-                    ElapsedLabel(state: state, tight: true)
+                    ElapsedLabel(state: state)
                 } else {
                     StatusIndicator(state: state)
                 }
@@ -83,17 +83,19 @@ private struct StatusIndicator: View {
 /// the status icon alone carries the outcome.
 private struct ElapsedLabel: View {
     let state: TaskState
-    /// Compact island only: hug the text and pull it toward the edge, instead of
-    /// centring it in a fixed box that left a visible gap on the right.
-    var tight = false
 
     var body: some View {
         if state.status == .running {
+            // Never call fixedSize() here: a timer Text has no fixed content, so
+            // its "ideal" width is the worst case (a full 59:59:59), which blows
+            // the compact island out to full width and pushes the label out of
+            // the visible area. Bound the width instead, and right-align inside
+            // that box — centring was what left a gap before the island's edge.
             Text(timerInterval: state.startedDate...state.startedDate.addingTimeInterval(3600), countsDown: false)
                 .font(.caption2.weight(.semibold).monospacedDigit())
                 .foregroundStyle(.blue)
-                .fixedSize()
-                .padding(.trailing, tight ? -3 : 0)
+                .lineLimit(1)
+                .frame(maxWidth: 44, alignment: .trailing)
         }
     }
 }
