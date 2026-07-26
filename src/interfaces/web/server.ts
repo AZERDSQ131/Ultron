@@ -10,6 +10,7 @@ import {
   estimateContextUsage,
   getPendingApproval,
   listChatMessages,
+  messageContentToText,
   prepareEdit,
   prepareRetry,
   searchMessages,
@@ -297,7 +298,8 @@ async function streamGraphTurn(
 
         if (type === "tool") {
           const toolName = (chunk as unknown as { name?: string }).name ?? "tool";
-          debugLog(`tool result chat=${chatId} name=${toolName} content=${JSON.stringify(String(chunk.content).slice(0, 500))}`);
+          const toolContent = messageContentToText(chunk.content) || String(chunk.content);
+          debugLog(`tool result chat=${chatId} name=${toolName} content=${JSON.stringify(toolContent.slice(0, 500))}`);
           const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
           if (pending) {
             sseWrite(res, "tool_call", { name: pending.name, summary: summarizeToolCall(pending.name, pending.args) });
@@ -305,8 +307,8 @@ async function streamGraphTurn(
             const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
             if (key !== undefined) pendingToolCalls.delete(key);
           }
-          sseWrite(res, "tool_result", { name: toolName, content: String(chunk.content) });
-          if (source === "app") publishLiveActivity(chatId, "running", `Résultat : ${toolName} — ${String(chunk.content).slice(0, 120)}`);
+          sseWrite(res, "tool_result", { name: toolName, content: toolContent });
+          if (source === "app") publishLiveActivity(chatId, "running", `Résultat : ${toolName} — ${toolContent.slice(0, 120)}`);
           continue;
         }
 
@@ -334,10 +336,11 @@ async function streamGraphTurn(
         if (usage?.output_tokens !== undefined) outputTokens = usage.output_tokens;
         if (usage?.input_tokens !== undefined) inputTokens = usage.input_tokens;
 
-        if (typeof chunk.content !== "string" || !chunk.content) continue;
-        generatedChars += chunk.content.length;
-        finalText += chunk.content;
-        sseWrite(res, "text", { delta: chunk.content });
+        const text = messageContentToText(chunk.content);
+        if (!text) continue;
+        generatedChars += text.length;
+        finalText += text;
+        sseWrite(res, "text", { delta: text });
         if (source === "app") publishLiveActivity(chatId, "running", `Réponse : ${finalText.slice(-140)}`);
       }
 
@@ -378,7 +381,7 @@ async function streamGraphTurn(
         // user message, not an approval-decision Command resume.
         if ("messages" in input) {
           const humanText = input.messages
-            .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+            .map((m) => messageContentToText(m.content) || JSON.stringify(m.content))
             .join("\n")
             .trim();
           if (humanText && finalText.trim()) void recordUserModelObservation(chatId, humanText, finalText);

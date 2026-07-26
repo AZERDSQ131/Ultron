@@ -22,6 +22,23 @@ import { log } from "./logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// ChatGPT's Responses API returns message content as an array of typed
+// blocks, while the chat UI and SSE contract use plain text. Keep this
+// conversion at the shared graph boundary so OpenAI and OpenAI-compatible
+// providers render identically.
+export function messageContentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (!part || typeof part !== "object") return "";
+      const text = (part as { text?: unknown }).text;
+      return typeof text === "string" ? text : "";
+    })
+    .join("");
+}
+
 const soul = readFileSync(join(__dirname, "..", "..", "SOUL.md"), "utf-8");
 const agentNotes = readFileSync(join(__dirname, "..", "..", "AGENT.md"), "utf-8");
 const memoryPath = join(__dirname, "..", "..", "MEMORY.md");
@@ -230,7 +247,7 @@ export async function estimateContextUsage(graph: ReturnType<typeof buildGraph>,
   const state = await graph.getState({ configurable: { thread_id: threadId } });
   const messages = state.values.messages ?? [];
   return estimateTokens(buildSystemPrompt(threadId)) + messages.reduce((sum: number, message: BaseMessage) => {
-    const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+    const content = messageContentToText(message.content);
     return sum + estimateTokens(content);
   }, 0);
 }
@@ -732,7 +749,7 @@ export async function listChatMessages(graph: ReturnType<typeof buildGraph>, thr
   for (const message of messages) {
     const type = message.getType();
     if (type === "human" || type === "ai") {
-      const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+      const content = messageContentToText(message.content) || JSON.stringify(message.content);
       if (content.trim()) out.push({ role: type, content });
       if (type === "ai") {
         for (const call of (message as AIMessage).tool_calls ?? []) {
@@ -740,7 +757,7 @@ export async function listChatMessages(graph: ReturnType<typeof buildGraph>, thr
         }
       }
     } else if (type === "tool") {
-      const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
+      const content = messageContentToText(message.content) || JSON.stringify(message.content);
       out.push({ role: "tool_result", name: (message as ToolMessage).name ?? "tool", content });
     }
   }
