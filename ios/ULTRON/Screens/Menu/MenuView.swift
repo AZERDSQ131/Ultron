@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MenuView: View {
     @Environment(ULTRONClient.self) private var client
@@ -11,10 +12,11 @@ struct MenuView: View {
     @State private var showSettings = false
     @State private var showCreateProject = false
     @State private var expandedFolders: Set<String> = []
-    // Drag & drop onto a project row turned out unreliable in a List
-    // (NavigationLink eats the gesture) — this swipe action is the robust
-    // fallback: pick a chat's project explicitly instead of dragging it.
+    // Explicit fallback alongside drag & drop below — pick a chat's project
+    // from a list instead of dragging it, for anyone who finds (or whose
+    // device finds) the drag gesture finicky to land precisely on a row.
     @State private var addingToProjectChat: Chat?
+    @State private var dropTargetProjectId: String?
 
     private static let modules: [ModuleItem] = [
         .init(title: "Finance", icon: "dollarsign.circle.fill", tint: .green, destination: .finance),
@@ -43,11 +45,23 @@ struct MenuView: View {
                     NavigationLink(value: NavigationTarget.project(project.id)) {
                         HStack {
                             ZStack {
-                                Circle().fill(Color(hex: project.color).opacity(0.18)).frame(width: 28, height: 28)
+                                Circle().fill(Color(hex: project.color).opacity(dropTargetProjectId == project.id ? 0.4 : 0.18)).frame(width: 28, height: 28)
                                 Text(project.icon).font(.footnote)
                             }
                             Text(project.name).foregroundStyle(.primary)
                         }
+                    }
+                    .listRowBackground(dropTargetProjectId == project.id ? Color(hex: project.color).opacity(0.12) : nil)
+                    .onDrop(of: [.plainText], isTargeted: Binding(
+                        get: { dropTargetProjectId == project.id },
+                        set: { isTargeted in dropTargetProjectId = isTargeted ? project.id : (dropTargetProjectId == project.id ? nil : dropTargetProjectId) }
+                    )) { providers in
+                        guard let provider = providers.first else { return false }
+                        _ = provider.loadObject(ofClass: NSString.self) { reading, _ in
+                            guard let chatId = reading as? String else { return }
+                            Task { @MainActor in await moveChat(chatId, toProject: project.id) }
+                        }
+                        return true
                     }
                 }
                 Button {
@@ -139,6 +153,13 @@ struct MenuView: View {
         NavigationLink(value: NavigationTarget.chat(chat.id)) {
             ChatListRow(chat: chat)
         }
+        // .onDrag/.onDrop (NSItemProvider) rather than the newer
+        // .draggable/.dropDestination (Transferable) — the latter never
+        // initiated a drag at all on a List row wrapped in a NavigationLink,
+        // even with the NavigationLink hidden behind the row content; this
+        // older pair is the combination actually proven to coexist with
+        // List's own tap/scroll gesture recognizers.
+        .onDrag { NSItemProvider(object: chat.id as NSString) }
         .swipeActions(edge: .trailing) {
             Button {
                 addingToProjectChat = chat
