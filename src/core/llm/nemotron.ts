@@ -1,4 +1,5 @@
 import { ChatOpenAI } from "@langchain/openai";
+import { createHash } from "node:crypto";
 import type { MessageContent } from "@langchain/core/messages";
 import { config } from "../../config.js";
 import { getOpenAIAuthRegistry } from "../memory/openaiAuth.js";
@@ -36,12 +37,44 @@ function toPlainText(content: MessageContent): string {
 // instead of fighting that mismatch here.
 type OpenAIClientConfiguration = NonNullable<ConstructorParameters<typeof ChatOpenAI>[0]>["configuration"];
 
+function codexSafeId(id: string, ids: Map<string, string>): string {
+  if (id.length <= 64) return id;
+  const existing = ids.get(id);
+  if (existing) return existing;
+  const digest = createHash("sha256").update(id).digest("hex").slice(0, 8);
+  const safe = `${id.slice(0, 55)}-${digest}`;
+  ids.set(id, safe);
+  return safe;
+}
+
+function normalizeCodexRequestBody(body: string): string {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (!payload || typeof payload !== "object" || !Array.isArray((payload as { input?: unknown }).input)) return body;
+
+  const ids = new Map<string, string>();
+  const normalize = (value: unknown, key?: string): unknown => {
+    if (typeof value === "string" && (key === "id" || key === "call_id" || key === "tool_call_id")) return codexSafeId(value, ids);
+    if (Array.isArray(value)) return value.map((item) => normalize(item));
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [childKey, normalize(childValue, childKey)]));
+  };
+
+  (payload as { input: unknown[] }).input = normalize((payload as { input: unknown[] }).input) as unknown[];
+  return JSON.stringify(payload);
+}
+
 function openaiOAuthFetch(): NonNullable<OpenAIClientConfiguration>["fetch"] {
   return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const { accessToken, accountId } = await getValidAuth(getOpenAIAuthRegistry(config.databasePath));
     const headers = new Headers(init?.headers);
     for (const [name, value] of Object.entries(codexAuthHeaders(accessToken, accountId))) headers.set(name, value);
-    return fetch(input, { ...init, headers });
+    const requestBody = typeof init?.body === "string" ? normalizeCodexRequestBody(init.body) : init?.body;
+    return fetch(input, { ...init, headers, body: requestBody });
   }) as unknown as NonNullable<OpenAIClientConfiguration>["fetch"];
 }
 
