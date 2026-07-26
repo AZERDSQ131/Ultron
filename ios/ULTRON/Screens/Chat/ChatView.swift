@@ -37,7 +37,7 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(timeline.items) { item in
+                        ForEach(timeline.items.filter(isVisible)) { item in
                             row(for: item).id(item.id)
                         }
                         Color.clear.frame(height: 1).id("bottom")
@@ -142,6 +142,16 @@ struct ChatView: View {
         case "accept_edit": return "Accept edit"
         default: return "Bypass"
         }
+    }
+
+    /// The model sometimes emits an assistant turn between tool calls whose
+    /// visible content is empty or a bare `""` (a stringified empty JSON
+    /// value) — filtered out here rather than at the row level so the
+    /// LazyVStack's inter-item spacing doesn't still leave a visible gap.
+    private func isVisible(_ item: ChatTimelineItem) -> Bool {
+        guard case .assistant(_, let text) = item else { return true }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed != "\"\"" && trimmed != "\""
     }
 
     @ViewBuilder
