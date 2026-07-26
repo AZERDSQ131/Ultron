@@ -26,6 +26,27 @@ struct ToolCallEntry: Identifiable, Equatable {
     let summary: String
     var result: String?
     var scope: String? // filled in from GET /api/tools when available
+
+    /// A spawn_agent result starts with `[ultron:subagent chat=<id>]` — see
+    /// parseSubAgentMarker in src/core/tools/agents.ts. Parsed from the result
+    /// text rather than carried in a separate field so replayed history links
+    /// too, which is the case that matters: you look at what a sub-agent did
+    /// after the fact.
+    var subAgentChatId: String? {
+        guard let result else { return nil }
+        let prefix = "[ultron:subagent chat="
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix(prefix), let end = trimmed.firstIndex(of: "]") else { return nil }
+        let id = trimmed[trimmed.index(trimmed.startIndex, offsetBy: prefix.count)..<end]
+        return id.isEmpty ? nil : String(id)
+    }
+}
+
+/// Route for observing a sub-agent's conversation. A dedicated type rather than
+/// pushing a bare String, which would collide with any other string destination.
+struct SubAgentRoute: Hashable {
+    let chatId: String
+    let title: String
 }
 
 @MainActor

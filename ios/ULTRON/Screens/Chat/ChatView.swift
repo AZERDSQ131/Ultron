@@ -107,6 +107,9 @@ struct ChatView: View {
         .sheet(isPresented: $showPermissionPicker) {
             PermissionPickerSheet(chatId: chatId, selected: $securityMode)
         }
+        .navigationDestination(for: SubAgentRoute.self) { route in
+            SubAgentChatView(route: route)
+        }
         .task { await bootstrap() }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }

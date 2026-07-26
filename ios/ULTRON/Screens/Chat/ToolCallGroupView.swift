@@ -35,6 +35,13 @@ struct ToolCallGroupView: View {
                         Text(call.summary)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                        if let chatId = call.subAgentChatId {
+                            NavigationLink(value: SubAgentRoute(chatId: chatId, title: call.summary.isEmpty ? "Sous-agent" : call.summary)) {
+                                Label("Observer ce sous-agent", systemImage: "arrow.up.right.square")
+                                    .font(.caption.weight(.medium))
+                            }
+                            .buttonStyle(.borderless)
+                        }
                         if let result = call.result {
                             Text(result)
                                 .font(.system(.caption, design: .monospaced))

@@ -17,6 +17,10 @@ struct Chat: Codable, Identifiable, Equatable {
     // The project folder this chat is filed under, if any (chats.project_id
     // server-side). nil for chats not assigned to a project.
     var projectId: String?
+    // Set when this conversation is a sub-agent run spawned from another chat
+    // (spawn_agent). Observation only — see SubAgentChatView.
+    let parentChatId: String?
+    let subagentTask: String?
 }
 
 // Mirrors src/core/memory/projects.ts's Project interface.
