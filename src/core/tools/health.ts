@@ -75,7 +75,7 @@ export const healthIngest = tool(
 );
 
 export const healthQuery = tool(
-  async ({ from, to, metric, aggregate }: { from: string; to: string; metric?: HealthMetric; aggregate?: "raw" | "avg" | "sum" | "min" | "max" | "trend" | "scores" }) => {
+  async ({ from, to, metric, aggregate }: { from: string; to: string; metric?: HealthMetric | null; aggregate?: "raw" | "avg" | "sum" | "min" | "max" | "trend" | "scores" | null }) => {
     const days = health.getRange(from, to);
     if (!days.length) return `No health data recorded between ${from} and ${to}.`;
 
@@ -153,8 +153,8 @@ export const healthQuery = tool(
     schema: z.object({
       from: z.string().describe("Start date, YYYY-MM-DD, inclusive."),
       to: z.string().describe("End date, YYYY-MM-DD, inclusive."),
-      metric: z.enum(METRICS as [HealthMetric, ...HealthMetric[]]).optional().describe("Required unless aggregate is 'raw' or 'scores'."),
-      aggregate: z.enum(["raw", "avg", "sum", "min", "max", "trend", "scores"]).optional().describe("Defaults to 'raw'."),
+      metric: z.enum(METRICS as [HealthMetric, ...HealthMetric[]]).nullable().optional().describe("Required unless aggregate is 'raw' or 'scores'."),
+      aggregate: z.enum(["raw", "avg", "sum", "min", "max", "trend", "scores"]).nullable().optional().describe("Defaults to 'raw'."),
     }),
   },
 );
@@ -164,9 +164,9 @@ export const healthQuery = tool(
 // required for the biological-age estimate in health_query's 'scores' mode
 // (see bioAge.ts); sleep target feeds getSleepDebt().
 export const healthSetProfile = tool(
-  async ({ birthdate, sleepTargetHours }: { birthdate?: string; sleepTargetHours?: number }) => {
-    if (birthdate === undefined && sleepTargetHours === undefined) return "error: provide at least one of birthdate or sleepTargetHours.";
-    const profile = health.setProfile({ birthdate, sleepTargetHours });
+  async ({ birthdate, sleepTargetHours }: { birthdate?: string | null; sleepTargetHours?: number | null }) => {
+    if (birthdate == null && sleepTargetHours == null) return "error: provide at least one of birthdate or sleepTargetHours.";
+    const profile = health.setProfile({ birthdate: birthdate ?? undefined, sleepTargetHours: sleepTargetHours ?? undefined });
     return `Profile updated: birthdate=${profile.birthdate ?? "unset"}, sleepTargetHours=${profile.sleepTargetHours}.`;
   },
   {
@@ -176,13 +176,13 @@ export const healthSetProfile = tool(
       "(used for sleep-debt tracking). Call this when the user tells you their birthdate or a sleep goal in " +
       "conversation, not preemptively.",
     schema: z.object({
-      birthdate: z.string().optional().describe("YYYY-MM-DD."),
-      sleepTargetHours: z.number().optional().describe("Personal nightly sleep target in hours."),
+      birthdate: z.string().nullable().optional().describe("YYYY-MM-DD."),
+      sleepTargetHours: z.number().nullable().optional().describe("Personal nightly sleep target in hours."),
     }),
   },
 );
 
-function periodToRange(period: "week" | "month" | undefined, from?: string, to?: string): { from: string; to: string } {
+function periodToRange(period: "week" | "month" | null | undefined, from?: string | null, to?: string | null): { from: string; to: string } {
   if (from && to) return { from, to };
   const days = period === "month" ? 30 : 7;
   const toDate = new Date().toISOString().slice(0, 10);
@@ -195,7 +195,7 @@ function periodToRange(period: "week" | "month" | undefined, from?: string, to?:
 // later, the existing schedule_task tool can call this without any new
 // code.
 export const healthReport = tool(
-  async ({ period, from, to }: { period?: "week" | "month"; from?: string; to?: string }) => {
+  async ({ period, from, to }: { period?: "week" | "month" | null; from?: string | null; to?: string | null }) => {
     const range = periodToRange(period, from, to);
     const days = health.getRange(range.from, range.to);
     if (!days.length) return `No health data recorded between ${range.from} and ${range.to}.`;
@@ -230,22 +230,22 @@ export const healthReport = tool(
       "anomalies, records, biological age if set up). Only call this when the user actually asks for a summary/" +
       "report — never push one proactively or on a schedule by default.",
     schema: z.object({
-      period: z.enum(["week", "month"]).optional().describe("Shorthand for the last 7 or 30 days. Ignored if from/to given."),
-      from: z.string().optional().describe("Explicit start date YYYY-MM-DD, overrides period."),
-      to: z.string().optional().describe("Explicit end date YYYY-MM-DD, overrides period."),
+      period: z.enum(["week", "month"]).nullable().optional().describe("Shorthand for the last 7 or 30 days. Ignored if from/to given."),
+      from: z.string().nullable().optional().describe("Explicit start date YYYY-MM-DD, overrides period."),
+      to: z.string().nullable().optional().describe("Explicit end date YYYY-MM-DD, overrides period."),
     }),
   },
 );
 
 export const healthExport = tool(
-  async ({ path }: { path?: string }) => {
+  async ({ path }: { path?: string | null }) => {
     const resolved = await exportHealthHistory(health, path ?? "health-history.md");
     return `Health history exported to ${resolved}.`;
   },
   {
     name: "health_export",
     description: "Export the full health history to a Markdown file (e.g. to share with a doctor). Only call when explicitly asked.",
-    schema: z.object({ path: z.string().optional().describe("Relative or absolute path; defaults to health-history.md next to the database.") }),
+    schema: z.object({ path: z.string().nullable().optional().describe("Relative or absolute path; defaults to health-history.md next to the database.") }),
   },
 );
 

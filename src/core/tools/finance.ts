@@ -15,7 +15,7 @@ const finance = getFinanceRegistry(config.databasePath);
 // health-log counterpart which at least has a fixed schema to write into.
 
 export const financeAddAccount = tool(
-  async ({ name, type, currency }: { name: string; type: AccountType; currency?: string }) => {
+  async ({ name, type, currency }: { name: string; type: AccountType; currency?: string | null }) => {
     if (finance.findAccountByName(name)) return `error: an account named "${name}" already exists`;
     const account = finance.createAccount(name, type, currency ?? "EUR");
     return `Account created: ${account.name} (${account.type}, ${account.currency}).`;
@@ -27,15 +27,15 @@ export const financeAddAccount = tool(
     schema: z.object({
       name: z.string().describe("Short display name, e.g. 'Crédit Agricole Courant', 'Livret A'."),
       type: z.enum(["checking", "savings", "investment", "crypto", "loan", "other"]),
-      currency: z.string().optional().describe("ISO currency code, defaults to EUR."),
+      currency: z.string().nullable().optional().describe("ISO currency code, defaults to EUR."),
     }),
   },
 );
 
 export const financeRecordBalance = tool(
-  async ({ account, balance, date }: { account?: string; balance: number; date?: string }) => {
+  async ({ account, balance, date }: { account?: string | null; balance: number; date?: string | null }) => {
     const resolved = finance.getOrCreateAccount(account?.trim() || DEFAULT_ACCOUNT_NAME);
-    const snapshot = finance.recordBalance(resolved.id, balance, date);
+    const snapshot = finance.recordBalance(resolved.id, balance, date ?? undefined);
     return `Balance recorded for ${resolved.name}: ${balance} on ${snapshot.date}.`;
   },
   {
@@ -43,17 +43,17 @@ export const financeRecordBalance = tool(
     description:
       "Record the user's current balance for an account — their own stated figure, not a computed one. Call this proactively whenever the user tells you a balance, even casually ('j'ai 1200€ sur mon compte', 'il me reste 300 balles'), not just when explicitly asked to log it. If they don't name a specific account, it goes to their default account — don't ask which account unless they've previously set up more than one.",
     schema: z.object({
-      account: z.string().optional().describe("Account name, if the user names one. Omit for their single default account."),
+      account: z.string().nullable().optional().describe("Account name, if the user names one. Omit for their single default account."),
       balance: z.number(),
-      date: z.string().optional().describe("YYYY-MM-DD, defaults to today."),
+      date: z.string().nullable().optional().describe("YYYY-MM-DD, defaults to today."),
     }),
   },
 );
 
 export const financeAddTransaction = tool(
-  async ({ account, description, amount, date, category }: { account?: string; description: string; amount: number; date?: string; category?: string }) => {
+  async ({ account, description, amount, date, category }: { account?: string | null; description: string; amount: number; date?: string | null; category?: string | null }) => {
     const resolved = finance.getOrCreateAccount(account?.trim() || DEFAULT_ACCOUNT_NAME);
-    finance.addTransaction(resolved.id, description, amount, date, category ?? null);
+    finance.addTransaction(resolved.id, description, amount, date ?? undefined, category ?? null);
     return `Logged on ${resolved.name}: ${description} (${amount >= 0 ? "+" : ""}${amount}).`;
   },
   {
@@ -61,10 +61,10 @@ export const financeAddTransaction = tool(
     description:
       "Log a single income or expense. Amount is signed: negative for any expense/purchase/withdrawal, positive for income/salary/deposit/gift received. Call this proactively whenever the user mentions spending or earning money, even briefly ('j'ai payé 15€ pour le resto', 'j'ai reçu mon salaire, 1800€', 'plein d'essence 60 balles') — not just when explicitly asked to log it. Guess a short, sensible category yourself (e.g. 'groceries', 'transport', 'salary', 'rent', 'leisure') from the description; use null only if truly nothing fits. If no account is named, it goes to the user's single default account.",
     schema: z.object({
-      account: z.string().optional().describe("Account name, if the user names one. Omit for their single default account."),
+      account: z.string().nullable().optional().describe("Account name, if the user names one. Omit for their single default account."),
       description: z.string().describe("Short description of what this was, e.g. 'Courses Carrefour', 'Salaire juillet'."),
       amount: z.number().describe("Negative for an expense, positive for income."),
-      date: z.string().optional().describe("YYYY-MM-DD, defaults to today."),
+      date: z.string().nullable().optional().describe("YYYY-MM-DD, defaults to today."),
       category: z.string().nullable().optional().describe("Short category you infer from the description, e.g. 'groceries', 'salary', 'rent'."),
     }),
   },
