@@ -49,6 +49,13 @@ export interface Chat {
   securityMode: SecurityMode;
   archivedAt: string | null;
   exportPath: string | null;
+  /// Set when this conversation is a sub-agent run spawned from another chat
+  /// (spawn_agent, src/core/tools/agents.ts). Sub-agent chats stay listed and
+  /// openable — a conversation reachable from nowhere was a real bug once (see
+  /// the 2026-07-20 sidebar note in CLAUDE.md) — they're just badged.
+  parentChatId: string | null;
+  /// The task the parent handed it, used as the observation view's subtitle.
+  subagentTask: string | null;
 }
 
 interface ChatRow {
@@ -60,6 +67,8 @@ interface ChatRow {
   security_mode?: string | null;
   archived_at?: string | null;
   export_path?: string | null;
+  parent_chat_id?: string | null;
+  subagent_task?: string | null;
 }
 
 function toChat(row: ChatRow): Chat {
@@ -72,6 +81,8 @@ function toChat(row: ChatRow): Chat {
     securityMode: (row.security_mode as SecurityMode | null) ?? DEFAULT_SECURITY_MODE,
     archivedAt: row.archived_at ?? null,
     exportPath: row.export_path ?? null,
+    parentChatId: row.parent_chat_id ?? null,
+    subagentTask: row.subagent_task ?? null,
   };
 }
 
@@ -101,6 +112,8 @@ export class ChatRegistry {
     try { this.db.exec("ALTER TABLE chats ADD COLUMN archived_at TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN export_path TEXT"); } catch { /* already migrated */ }
     try { this.db.exec("ALTER TABLE chats ADD COLUMN created_via TEXT"); } catch { /* already migrated */ }
+    try { this.db.exec("ALTER TABLE chats ADD COLUMN parent_chat_id TEXT"); } catch { /* already migrated */ }
+    try { this.db.exec("ALTER TABLE chats ADD COLUMN subagent_task TEXT"); } catch { /* already migrated */ }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS chat_focus (
         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -182,11 +195,44 @@ export class ChatRegistry {
 
   create(title: string = DEFAULT_CHAT_TITLE, scheduleId: string | null = null, createdVia: ChatOrigin | null = null): Chat {
     const now = new Date().toISOString();
-    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, scheduleId, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
+    const chat: Chat = { id: randomUUID(), title, createdAt: now, updatedAt: now, scheduleId, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null, parentChatId: null, subagentTask: null };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at, schedule_id, created_via) VALUES (?, ?, ?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, chat.scheduleId, createdVia);
     return chat;
+  }
+
+  /// A conversation owned by a sub-agent run. Inherits the parent's security
+  /// mode so a spawned run can't silently be more permissive than the chat that
+  /// asked for it.
+  createSubAgent(parentChatId: string, title: string, task: string): Chat {
+    const now = new Date().toISOString();
+    const securityMode = this.getSecurityMode(parentChatId);
+    const chat: Chat = {
+      id: randomUUID(),
+      title,
+      createdAt: now,
+      updatedAt: now,
+      scheduleId: null,
+      securityMode,
+      archivedAt: null,
+      exportPath: null,
+      parentChatId,
+      subagentTask: task,
+    };
+    this.db
+      .prepare(
+        "INSERT INTO chats (id, title, created_at, updated_at, security_mode, created_via, parent_chat_id, subagent_task) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, securityMode, "cli", parentChatId, task);
+    return chat;
+  }
+
+  listSubAgents(parentChatId: string): Chat[] {
+    const rows = this.db
+      .prepare("SELECT * FROM chats WHERE parent_chat_id = ? ORDER BY created_at ASC")
+      .all(parentChatId) as unknown as ChatRow[];
+    return rows.map(toChat);
   }
 
   // Registers a thread_id that may already have checkpoint history (e.g.
@@ -196,7 +242,7 @@ export class ChatRegistry {
     const existing = this.get(id);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const chat: Chat = { id, title, createdAt: now, updatedAt: now, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null };
+    const chat: Chat = { id, title, createdAt: now, updatedAt: now, scheduleId: null, securityMode: DEFAULT_SECURITY_MODE, archivedAt: null, exportPath: null, parentChatId: null, subagentTask: null };
     this.db
       .prepare("INSERT INTO chats (id, title, created_at, updated_at, created_via) VALUES (?, ?, ?, ?, ?)")
       .run(chat.id, chat.title, chat.createdAt, chat.updatedAt, createdVia);

@@ -32,6 +32,7 @@ import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../cor
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getResearchRegistry } from "../../core/memory/research.js";
+import { abortSubAgents } from "../../core/tools/agents.js";
 import { getChatEventRegistry } from "../../core/memory/chatEvents.js";
 import { buildContinuationPrompt, gatherCodeContext, gatherHealthContext, judgeGoal } from "../../core/goalJudge.js";
 import { disableConsoleEcho } from "../../core/logger.js";
@@ -246,6 +247,9 @@ async function main() {
     stopping = true;
     appendTranscript(uiDim("\n[ultron] stopping...\n"));
     abortController?.abort();
+    // Explicit rather than relying on the abort signal reaching every nested
+    // tool call: Ctrl+C has to stop delegated work too, recursively.
+    abortSubAgents(currentChatId);
     cancelActiveInput?.();
     clearInterval(eventPollTimer);
   });

@@ -260,10 +260,15 @@ function taskModeReminder(mode: TaskMode, state: TodoState, threadId?: string): 
   return `[ultron:task_mode=todo] Reminder: call todo_write now, before any other tool call, laying out the sub-tasks of this request. Do this before searching, fetching, or running anything else.`;
 }
 
-function buildSystemPrompt(threadId?: string, taskMode: TaskMode = "none"): string {
+// `subAgent` drops the two blocks that describe *the user* rather than the
+// task: a spawned run works on an assignment it was handed, has nobody to adapt
+// its tone to, and shouldn't spend context on passively-learned observations or
+// health data. Same reasoning that already keeps MEMORY.md's <memory> block out
+// of reach of a delegated run's purpose.
+function buildSystemPrompt(threadId?: string, taskMode: TaskMode = "none", subAgent = false): string {
   const todayNote = readTodayNote();
-  const userModelSummary = userModelRegistryForPrompt.renderForPrompt();
-  const healthSummary = healthRegistryForPrompt.renderForPrompt();
+  const userModelSummary = subAgent ? "" : userModelRegistryForPrompt.renderForPrompt();
+  const healthSummary = subAgent ? "" : healthRegistryForPrompt.renderForPrompt();
   return `${BASE_SYSTEM_PROMPT}
 
 ---
@@ -570,7 +575,7 @@ export function buildGraph() {
       const currentTodoState = todoState(taskMode, threadId, state.messages);
       const taskReminder = taskModeReminder(taskMode, currentTodoState, threadId);
       const messages = [
-        { role: "system" as const, content: buildSystemPrompt(threadId, taskMode) },
+        { role: "system" as const, content: buildSystemPrompt(threadId, taskMode, runConfig.configurable?.subAgent === true) },
         ...history,
         // Appended after the full history, right before invoking the model,
         // so it's the most recent thing the model sees — see

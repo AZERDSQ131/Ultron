@@ -8,6 +8,7 @@ import { scheduleTask } from "./schedules.js";
 import { todoWrite, todoUpdate, todoRead } from "./todos.js";
 import { planPropose } from "./plan.js";
 import { researchNote, researchReview } from "./research.js";
+import { spawnAgent } from "./agents.js";
 import { memoryWrite } from "./memory.js";
 import { skillRead } from "./skills.js";
 import { openApp, runAppleScript } from "./macos.js";
@@ -36,6 +37,7 @@ export const tools: StructuredToolInterface[] = [
   planPropose,
   researchNote,
   researchReview,
+  spawnAgent,
   memoryWrite,
   skillRead,
   openApp,
@@ -78,6 +80,9 @@ export const toolScopes: Record<string, ToolScope> = {
   plan_propose: "write",
   research_note: "write",
   research_review: "read",
+  // A sub-agent inherits its parent's security mode and can call anything the
+  // parent can, so the spawn itself is as consequential as the work inside it.
+  spawn_agent: "write",
   memory_write: "write",
   skill_read: "read",
   // Launches a process — a real effect, but bounded to "open this app"

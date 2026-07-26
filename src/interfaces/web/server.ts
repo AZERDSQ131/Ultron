@@ -31,6 +31,7 @@ import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../cor
 import { ScheduleRegistry } from "../../core/memory/schedules.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getResearchRegistry } from "../../core/memory/research.js";
+import { abortSubAgents, parseSubAgentMarker } from "../../core/tools/agents.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getHealthRegistry, pickLatestWithData, type HealthExportPayload, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
@@ -361,7 +362,13 @@ async function streamGraphTurn(
             const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
             if (key !== undefined) pendingToolCalls.delete(key);
           }
-          sseWrite(res, "tool_result", { name: toolName, content: toolContent });
+          sseWrite(res, "tool_result", {
+            name: toolName,
+            content: toolContent,
+            // Lets a spawn_agent block become a link to the conversation it
+            // created (see parseSubAgentMarker).
+            subagentChatId: parseSubAgentMarker(toolContent),
+          });
           if (tracksLiveActivity(source)) {
             streamingParagraph = "";
             liveActivities.noteTool(chatId, `${toolName} → ${toolContent.slice(0, 120)}`);
@@ -639,7 +646,10 @@ async function handleStop(res: ServerResponse, chatId: string | undefined): Prom
   if (!requireChat(res, chatId)) return;
   const wasActive = activeAborts.has(chatId);
   activeAborts.get(chatId)?.abort();
-  sendJson(res, 200, { stopped: wasActive });
+  // Delegated work has to stop too, recursively — otherwise Stop silences the
+  // transcript while sub-agents keep running and burning tokens invisibly.
+  const stoppedSubAgents = abortSubAgents(chatId);
+  sendJson(res, 200, { stopped: wasActive, stoppedSubAgents });
 }
 
 async function handleCompact(req: IncomingMessage, res: ServerResponse): Promise<void> {
