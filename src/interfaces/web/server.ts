@@ -26,6 +26,7 @@ import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { autoTitleChat } from "../../core/chatTitler.js";
 import { getUserModelRegistry } from "../../core/memory/userModel.js";
 import { CLI_CHAT_SCOPE, getChatRegistry, LEGACY_CHAT_ID, type ChatOrigin, type SecurityMode } from "../../core/memory/chats.js";
+import { getProjectRegistry } from "../../core/memory/projects.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { ScheduleRegistry } from "../../core/memory/schedules.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
@@ -62,6 +63,7 @@ function debugLog(message: string): void {
 let graph = buildGraph();
 const fallbackContextWindowTokens = config.contextWindowTokens;
 const chats = getChatRegistry(config.databasePath);
+const projects = getProjectRegistry(config.databasePath);
 const schedules = new ScheduleRegistry(config.databasePath);
 const todos = getTodoRegistry(config.databasePath);
 const research = getResearchRegistry(config.databasePath);
@@ -175,11 +177,54 @@ async function handleListChats(res: ServerResponse): Promise<void> {
   // origin: "cli" | "app" — lets a client (the mobile app) show
   // which interface a conversation came from without duplicating getOrigin's
   // logic.
+  const chatProjects = projects.allChatProjects();
   const withOrigin = chats.list().map((chat) => ({
     ...chat,
     origin: originLabel(chats.getOrigin(chat.id)),
+    projectId: chatProjects.get(chat.id) ?? null,
   }));
   sendJson(res, 200, { chats: withOrigin });
+}
+
+async function handleListProjects(res: ServerResponse): Promise<void> {
+  sendJson(res, 200, { projects: projects.list() });
+}
+
+async function handleCreateProject(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const payload = await readJson<{ name?: string; icon?: string; color?: string }>(req);
+  if (!payload?.name?.trim()) {
+    sendJson(res, 400, { error: "name is required" });
+    return;
+  }
+  const project = projects.create(payload.name.trim(), payload.icon?.trim() || "📁", payload.color?.trim() || "#6E6E73");
+  sendJson(res, 200, { project });
+}
+
+async function handleUpdateProject(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
+  if (!projects.get(id)) {
+    sendJson(res, 404, { error: "unknown project" });
+    return;
+  }
+  const payload = await readJson<{ name?: string; icon?: string; color?: string }>(req);
+  const project = projects.update(id, payload ?? {});
+  sendJson(res, 200, { project });
+}
+
+async function handleDeleteProject(res: ServerResponse, id: string): Promise<void> {
+  projects.delete(id);
+  sendJson(res, 200, { deleted: true });
+}
+
+async function handleSetChatProject(req: IncomingMessage, res: ServerResponse, chatId: string): Promise<void> {
+  if (!requireChat(res, chatId)) return;
+  const payload = await readJson<{ projectId?: string | null }>(req);
+  const projectId = payload?.projectId ?? null;
+  if (projectId && !projects.get(projectId)) {
+    sendJson(res, 404, { error: "unknown project" });
+    return;
+  }
+  projects.setChatProject(chatId, projectId);
+  sendJson(res, 200, { chat: { ...chats.get(chatId), projectId } });
 }
 
 async function handleCreateChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1143,10 +1188,31 @@ async function handleStatus(res: ServerResponse, chatId: string | undefined): Pr
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
-  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/events|\/todos|\/archive|\/resume|\/export|\/upload)?$/);
+  const chatMatch = path.match(/^\/api\/chats\/([^/]+)(\/messages|\/events|\/todos|\/archive|\/resume|\/export|\/upload|\/project)?$/);
 
   if (req.method === "GET" && path === "/api/chats") {
     handleListChats(res).catch((err) => console.error("[ultron-web] list chats failed:", err));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/projects") {
+    handleListProjects(res).catch((err) => console.error("[ultron-web] list projects failed:", err));
+    return;
+  }
+  if (req.method === "POST" && path === "/api/projects") {
+    handleCreateProject(req, res).catch((err) => console.error("[ultron-web] create project failed:", err));
+    return;
+  }
+  const projectMatch = path.match(/^\/api\/projects\/([^/]+)$/);
+  if (projectMatch && req.method === "PATCH") {
+    handleUpdateProject(req, res, decodeURIComponent(projectMatch[1])).catch((err) => console.error("[ultron-web] update project failed:", err));
+    return;
+  }
+  if (projectMatch && req.method === "DELETE") {
+    handleDeleteProject(res, decodeURIComponent(projectMatch[1])).catch((err) => console.error("[ultron-web] delete project failed:", err));
+    return;
+  }
+  if (chatMatch && chatMatch[2] === "/project" && req.method === "PATCH") {
+    handleSetChatProject(req, res, decodeURIComponent(chatMatch[1])).catch((err) => console.error("[ultron-web] set chat project failed:", err));
     return;
   }
   if (req.method === "GET" && path === "/api/chats/archived") {
