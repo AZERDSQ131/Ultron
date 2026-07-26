@@ -286,12 +286,7 @@ final class LiveActivityManager {
     }
 
     private func currentState(status: TaskState.Status) -> TaskState {
-        TaskState(
-            status: status,
-            entries: entries,
-            startedAt: startedAt,
-            ringStartedAt: Date().timeIntervalSince1970
-        )
+        TaskState(status: status, entries: entries, startedAt: startedAt)
     }
 
     private func push(status: TaskState.Status, throttled: Bool) async {

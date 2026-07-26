@@ -21,7 +21,6 @@ interface LiveActivityContentState {
   status: LiveActivityStatus;
   entries: LiveActivityEntry[];
   startedAt: number;
-  ringStartedAt: number;
 }
 
 export interface LiveActivityTurnState {
@@ -282,7 +281,6 @@ export class LiveActivityRegistry {
         status: turn.status,
         entries: turn.entries,
         startedAt: turn.startedAt,
-        ringStartedAt: nowSeconds(),
       };
 
       await Promise.all(

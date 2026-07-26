@@ -144,12 +144,13 @@ opening).
   tool in this environment); the user should click through the golden path once on a real device
   or simulator.
 - **Live Activity / Dynamic Island** — `ULTRONLiveActivity` is a WidgetKit extension with
-  compact/minimal/expanded/Lock Screen layouts. Compact reads at a glance: blue ring on the left
-  while the agent works, green check on success, red cross on failure, orange raised hand when a
-  tool needs approval; elapsed time on the right while running only. The ring is a
-  `ProgressView(timerInterval:)` anchored on `ContentState.ringStartedAt` — ActivityKit ignores
-  SwiftUI animations that repeat indefinitely, so an indeterminate `ProgressView` renders frozen
-  and a timer-driven ring is the only indicator that actually moves. Long-pressing expands to the
+  compact/minimal/expanded/Lock Screen layouts. Compact reads at a glance: nothing on the left
+  while running (an indeterminate `ProgressView` would render frozen — ActivityKit ignores
+  SwiftUI animations that repeat indefinitely — so there's no spinner there any more, just the
+  chrono on the right, a `Text(timerInterval:)` anchored on `ContentState.startedAt` which is the
+  one indicator that keeps moving on its own without a push per frame); once the turn lands, a
+  green check on success or a red cross on failure, orange raised hand when a tool needs approval.
+  Long-pressing expands to the
   tail of the conversation: `ContentState.entries` are typed (`message`/`tool`/`status`), one icon
   per kind, and a streaming reply rewrites a single line in place instead of appending an entry per
   token.

@@ -36,13 +36,9 @@ struct ULTRONTaskActivityAttributes: ActivityAttributes {
         let entries: [Entry]
         /// Unix epoch seconds — deliberately not `Date`, so the server can emit
         /// plain JSON numbers without having to match a Codable date strategy.
+        /// Backs the compact/expanded chrono (`Text(timerInterval:)`), which is
+        /// what shows the turn is progressing now that there's no spinner.
         let startedAt: Double
-        /// Re-anchored on every update. The compact indicator is a
-        /// `ProgressView(timerInterval:)` ring over this window: ActivityKit
-        /// ignores indefinitely repeating SwiftUI animations, so a timer-driven
-        /// ring is the only "spinner" that actually moves without one push per
-        /// frame.
-        let ringStartedAt: Double
     }
 
     let chatId: String
@@ -50,25 +46,5 @@ struct ULTRONTaskActivityAttributes: ActivityAttributes {
 }
 
 extension ULTRONTaskActivityAttributes.ContentState {
-    /// How long the ring takes to fill before it sits full. Long enough that a
-    /// slow tool call still looks like progress, short enough that the motion
-    /// is visible.
-    static let ringWindow: TimeInterval = 60
-
-    static func running(entries: [Entry], startedAt: Double) -> Self {
-        Self(status: .running, entries: entries, startedAt: startedAt, ringStartedAt: Date().timeIntervalSince1970)
-    }
-
     var startedDate: Date { Date(timeIntervalSince1970: startedAt) }
-
-    var ringInterval: ClosedRange<Date> {
-        let start = Date(timeIntervalSince1970: ringStartedAt)
-        return start...start.addingTimeInterval(Self.ringWindow)
-    }
-
-    /// The last thing that happened, used as the one-line summary on the Lock
-    /// Screen and at the top of the expanded view.
-    var headline: String {
-        entries.last?.text ?? "Traitement en cours"
-    }
 }

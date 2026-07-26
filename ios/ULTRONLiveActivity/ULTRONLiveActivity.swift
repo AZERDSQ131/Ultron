@@ -15,11 +15,9 @@ struct ULTRONLiveActivity: Widget {
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     StatusIndicator(state: state)
-                        .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     ElapsedLabel(state: state)
-                        .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(context.attributes.title)
@@ -43,26 +41,16 @@ struct ULTRONLiveActivity: Widget {
     }
 }
 
-/// Left side of the Dynamic Island: a blue ring while the agent works, then a
-/// green check or a red cross once the turn lands.
+/// Left side of the Dynamic Island: nothing while the agent works (the chrono
+/// on the right already says "in progress"), then a green check or a red
+/// cross once the turn lands.
 private struct StatusIndicator: View {
     let state: TaskState
 
     var body: some View {
         switch state.status {
         case .running:
-            // ActivityKit ignores SwiftUI animations that repeat indefinitely,
-            // so an indeterminate `ProgressView()` renders frozen here. A
-            // timer-interval ring is the only indicator that keeps moving on
-            // its own, without one push per frame.
-            ProgressView(timerInterval: state.ringInterval, countsDown: false) {
-                EmptyView()
-            } currentValueLabel: {
-                EmptyView()
-            }
-            .progressViewStyle(.circular)
-            .tint(.blue)
-            .frame(width: 18, height: 18)
+            EmptyView()
         case .waitingForApproval:
             Image(systemName: "hand.raised.fill")
                 .font(.system(size: 15, weight: .semibold))
@@ -91,7 +79,7 @@ private struct ElapsedLabel: View {
             Text(timerInterval: state.startedDate...state.startedDate.addingTimeInterval(3600), countsDown: false)
                 .font(.caption2.weight(.semibold).monospacedDigit())
                 .foregroundStyle(.blue)
-                .frame(maxWidth: 44)
+                .fixedSize()
         }
     }
 }
