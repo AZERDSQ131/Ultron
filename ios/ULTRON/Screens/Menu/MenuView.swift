@@ -126,25 +126,31 @@ struct MenuView: View {
             formatter.date(from: chat.updatedAt) ?? .distantPast
         }
 
-        var today: [Chat] = [], yesterday: [Chat] = [], week: [Chat] = [], older: [Chat] = []
+        var today: [Chat] = [], yesterday: [Chat] = [], week: [Chat] = [], month: [Chat] = [], older: [Chat] = []
         for chat in visibleChats.sorted(by: { date($0) > date($1) }) {
             let d = date(chat)
             if calendar.isDateInToday(d) {
                 today.append(chat)
             } else if calendar.isDateInYesterday(d) {
                 yesterday.append(chat)
-            } else if let days = calendar.dateComponents([.day], from: d, to: now).day, days <= 7 {
-                week.append(chat)
             } else {
-                older.append(chat)
+                let days = calendar.dateComponents([.day], from: d, to: now).day ?? .max
+                if days <= 7 {
+                    week.append(chat)
+                } else if days <= 30 {
+                    month.append(chat)
+                } else {
+                    older.append(chat)
+                }
             }
         }
 
         var groups: [ChatGroup] = []
         if !today.isEmpty { groups.append(.init(title: "Aujourd'hui", chats: today)) }
         if !yesterday.isEmpty { groups.append(.init(title: "Hier", chats: yesterday)) }
-        if !week.isEmpty { groups.append(.init(title: "7 derniers jours", chats: week)) }
-        if !older.isEmpty { groups.append(.init(title: "Plus ancien", chats: older)) }
+        if !week.isEmpty { groups.append(.init(title: "Dernière semaine", chats: week)) }
+        if !month.isEmpty { groups.append(.init(title: "Dernier mois", chats: month)) }
+        if !older.isEmpty { groups.append(.init(title: "Ancien", chats: older)) }
         return groups
     }
 
