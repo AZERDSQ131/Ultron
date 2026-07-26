@@ -132,6 +132,35 @@ final class ULTRONClient {
         return response.chat
     }
 
+    // MARK: - Projects
+
+    struct ProjectsResponse: Codable { let projects: [Project] }
+    func listProjects() async throws -> [Project] {
+        let response: ProjectsResponse = try await requestNoBody("GET", "/api/projects")
+        return response.projects
+    }
+
+    struct ProjectBody: Encodable { let name: String?; let icon: String?; let color: String? }
+    struct ProjectResponse: Codable { let project: Project }
+    func createProject(name: String, icon: String, color: String) async throws -> Project {
+        let response: ProjectResponse = try await request("POST", "/api/projects", body: ProjectBody(name: name, icon: icon, color: color))
+        return response.project
+    }
+
+    func updateProject(_ id: String, name: String? = nil, icon: String? = nil, color: String? = nil) async throws -> Project {
+        let response: ProjectResponse = try await request("PATCH", "/api/projects/\(id)", body: ProjectBody(name: name, icon: icon, color: color))
+        return response.project
+    }
+
+    func deleteProject(_ id: String) async throws {
+        let _: DeletedResponse = try await requestNoBody("DELETE", "/api/projects/\(id)")
+    }
+
+    struct SetChatProjectBody: Encodable { let projectId: String? }
+    func setChatProject(_ chatId: String, projectId: String?) async throws {
+        let _: ChatResponse = try await request("PATCH", "/api/chats/\(chatId)/project", body: SetChatProjectBody(projectId: projectId))
+    }
+
     struct MessagesResponse: Codable { let messages: [ChatMessage]; let running: Bool }
     func messages(for chatId: String) async throws -> MessagesResponse {
         try await requestNoBody("GET", "/api/chats/\(chatId)/messages")

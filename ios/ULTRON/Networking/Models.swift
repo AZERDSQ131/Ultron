@@ -14,6 +14,18 @@ struct Chat: Codable, Identifiable, Equatable {
     // from, computed server-side (ChatRegistry.getOrigin). Only present on
     // GET /api/chats today.
     let origin: String?
+    // The project folder this chat is filed under, if any (chats.project_id
+    // server-side). nil for chats not assigned to a project.
+    var projectId: String?
+}
+
+// Mirrors src/core/memory/projects.ts's Project interface.
+struct Project: Codable, Identifiable, Equatable {
+    let id: String
+    var name: String
+    var icon: String
+    var color: String
+    let createdAt: String
 }
 
 struct Schedule: Codable, Identifiable, Equatable {
