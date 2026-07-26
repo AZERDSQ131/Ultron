@@ -65,7 +65,7 @@ struct TokensView: View {
         let costPerRequest = totals.requests > 0 ? totals.costUsd / Double(totals.requests) : 0
         let averageLatency = totals.requests > 0 ? totals.elapsedMs / totals.requests : 0
 
-        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+        return LazyVGrid(columns: dashboardTwoColumns, spacing: 12) {
             StatTile(
                 label: "Tokens",
                 value: compact(totals.totalTokens),
@@ -103,7 +103,7 @@ struct TokensView: View {
         let points = chartPoints(byDay)
         let busiest = byDay.max { $0.totalTokens < $1.totalTokens }
 
-        return Card("Activité par jour") {
+        return DashboardCard("Activité par jour") {
             Picker("Métrique", selection: $metric) {
                 ForEach(Metric.allCases) { Text($0.label).tag($0) }
             }
@@ -159,7 +159,7 @@ struct TokensView: View {
         let total = max(1, totals.totalTokens)
         let inputShare = Double(totals.inputTokens) / Double(total)
 
-        return Card("Répartition entrée / sortie") {
+        return DashboardCard("Répartition entrée / sortie") {
             GeometryReader { geometry in
                 HStack(spacing: 2) {
                     Rectangle()
@@ -172,9 +172,9 @@ struct TokensView: View {
             .frame(height: 10)
 
             HStack {
-                legendDot(Color.blue.opacity(0.45), "Entrée \(percent(inputShare))")
+                legendDot(Color.blue.opacity(0.45), "Entrée \(dashboardPercent(inputShare))")
                 Spacer()
-                legendDot(Color.blue, "Sortie \(percent(1 - inputShare))")
+                legendDot(Color.blue, "Sortie \(dashboardPercent(1 - inputShare))")
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -199,7 +199,7 @@ struct TokensView: View {
         let maxTokens = max(1, rows.map(\.totalTokens).max() ?? 1)
         let totalTokens = max(1, rows.reduce(0) { $0 + $1.totalTokens })
 
-        return Card("Détail") {
+        return DashboardCard("Détail") {
             Picker("Dimension", selection: $dimension) {
                 ForEach(Dimension.allCases) { Text($0.label).tag($0) }
             }
@@ -237,7 +237,7 @@ struct TokensView: View {
     private func recentCard(_ recent: [UsageRecord]) -> some View {
         let shown = showAllRecent ? recent : Array(recent.prefix(8))
 
-        return Card("Derniers appels") {
+        return DashboardCard("Derniers appels") {
             ForEach(Array(shown.enumerated()), id: \.element.id) { index, record in
                 if index > 0 { Divider() }
                 RecentRowView(record: record)
@@ -350,67 +350,7 @@ private func duration(_ ms: Int) -> String {
     return "\(minutes / 60) h \(minutes % 60) min"
 }
 
-private func percent(_ share: Double) -> String {
-    "\(Int((share * 100).rounded())) %"
-}
-
 // MARK: - Reusable pieces
-
-private struct Card<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: Content
-
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.6)
-            content
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-    }
-}
-
-private struct StatTile: View {
-    let label: String
-    let value: String
-    let detail: String
-    let systemImage: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .font(.caption2)
-                    .foregroundStyle(tint)
-                Text(label)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            Text(value)
-                .font(.title3.weight(.semibold).monospacedDigit())
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
-            Text(detail)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-    }
-}
 
 private struct BreakdownRowView: View {
     let title: String
@@ -428,7 +368,7 @@ private struct BreakdownRowView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
-                Text(percent(share))
+                Text(dashboardPercent(share))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }

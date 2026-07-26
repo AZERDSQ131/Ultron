@@ -14,6 +14,7 @@
 		18AC8BF9B81C068B670B6A13 /* ServerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */; };
 		30253060622F786A541A7CFE /* OpenAILoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A11F30FD0AC57BB7234030 /* OpenAILoginSheet.swift */; };
 		33C50FE6D8FE5AF06383C0D3 /* FinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D208BF5036689DC38E4D5D66 /* FinanceView.swift */; };
+		396BE6F555614F20CCDBA264 /* DashboardCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54CAE4F4A37E3AEE15D00E6A /* DashboardCards.swift */; };
 		5665C4CF81E0522F1B769BE9 /* ApprovalCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CC5A83F5B96CA4B171D1FA4 /* ApprovalCardView.swift */; };
 		5B993B28A93DBED0954A5B2C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBBD24E385B1E6D4D6D6C33 /* Models.swift */; };
 		65D1B812D4EE448BA6E446DB /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3EAEBD27A4DCE4BE000D08 /* LiveActivityManager.swift */; };
@@ -66,6 +67,7 @@
 		0F4F420A115FEC9D7D4F817E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
 		4CD4075F78007B0D68D2B906 /* ChatTimelineItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTimelineItem.swift; sourceTree = "<group>"; };
+		54CAE4F4A37E3AEE15D00E6A /* DashboardCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardCards.swift; sourceTree = "<group>"; };
 		6F692CFFA71D1A83D443C9E2 /* ULTRONApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONApp.swift; sourceTree = "<group>"; };
 		72BA5E1EB207C3A2D95CFEE7 /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
 		7716CB8679EF2D7CAF945FEE /* ULTRONTaskActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONTaskActivityAttributes.swift; sourceTree = "<group>"; };
@@ -83,7 +85,7 @@
 		CB8647223A289CCEAC3A8B9F /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		CFFC97450AA2A233265FE7E9 /* ComposerPickers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPickers.swift; sourceTree = "<group>"; };
 		D208BF5036689DC38E4D5D66 /* FinanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceView.swift; sourceTree = "<group>"; };
-		D31CB21B015ABB8FC21CFB45 /* ULTRON.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ULTRON.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D31CB21B015ABB8FC21CFB45 /* ULTRON.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ULTRON.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E8688BB904F427BE4D29CAFE /* ChatListRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListRow.swift; sourceTree = "<group>"; };
 		E8A11F30FD0AC57BB7234030 /* OpenAILoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAILoginSheet.swift; sourceTree = "<group>"; };
 		EA3EAEBD27A4DCE4BE000D08 /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
@@ -116,6 +118,7 @@
 			isa = PBXGroup;
 			children = (
 				F2C46AA73C1D757CCD734F9B /* Chat */,
+				402D3E444B1BA667AC68FD38 /* Components */,
 				2017C10AD3729CAD00BD3144 /* Finance */,
 				176B8AB22742853C0D98E083 /* Health */,
 				C97D357FF868829D3D50CDFF /* Memory */,
@@ -158,6 +161,14 @@
 				916B37C28223EF861389AC45 /* SchedulesView.swift */,
 			);
 			path = Schedules;
+			sourceTree = "<group>";
+		};
+		402D3E444B1BA667AC68FD38 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				54CAE4F4A37E3AEE15D00E6A /* DashboardCards.swift */,
+			);
+			path = Components;
 			sourceTree = "<group>";
 		};
 		4AB54670B10F151A0059BB65 /* Menu */ = {
@@ -322,6 +333,14 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					3D9774150E67F6E90BA0AA71 = {
+						DevelopmentTeam = 8M5UCCN46W;
+					};
+					526D9D7574104AA9B42702B2 = {
+						DevelopmentTeam = 8M5UCCN46W;
+					};
+				};
 			};
 			buildConfigurationList = DBC0CF1854D890B49D8198F6 /* Build configuration list for PBXProject "ULTRON" */;
 			developmentRegion = en;
@@ -354,6 +373,7 @@
 				D0DEC311CE415B15EB9545F0 /* ChatView.swift in Sources */,
 				CC20C09B781D43567E843531 /* ComposerBar.swift in Sources */,
 				17C445D2EB6412B6F8FCF291 /* ComposerPickers.swift in Sources */,
+				396BE6F555614F20CCDBA264 /* DashboardCards.swift in Sources */,
 				33C50FE6D8FE5AF06383C0D3 /* FinanceView.swift in Sources */,
 				8219F8A79D84F70F840D7546 /* HealthView.swift in Sources */,
 				65D1B812D4EE448BA6E446DB /* LiveActivityManager.swift in Sources */,
