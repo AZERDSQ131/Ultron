@@ -36,15 +36,18 @@ struct MenuView: View {
 
             Section {
                 ForEach(projects) { project in
-                    NavigationLink(value: NavigationTarget.project(project.id)) {
-                        HStack {
-                            ZStack {
-                                Circle().fill(Color(hex: project.color).opacity(0.18)).frame(width: 28, height: 28)
-                                Text(project.icon).font(.footnote)
-                            }
-                            Text(project.name).foregroundStyle(.primary)
+                    HStack {
+                        ZStack {
+                            Circle().fill(Color(hex: project.color).opacity(0.18)).frame(width: 28, height: 28)
+                            Text(project.icon).font(.footnote)
                         }
+                        Text(project.name).foregroundStyle(.primary)
                     }
+                    .contentShape(Rectangle())
+                    .background(
+                        NavigationLink(value: NavigationTarget.project(project.id)) { EmptyView() }
+                            .opacity(0)
+                    )
                     .dropDestination(for: String.self) { chatIds, _ in
                         guard let chatId = chatIds.first else { return false }
                         Task { await moveChat(chatId, toProject: project.id) }
@@ -118,13 +121,26 @@ struct MenuView: View {
         .task { await load() }
     }
 
+    // NavigationLink's own tap gesture takes priority over everything else
+    // in a List row, including .draggable's long-press-then-drag gesture —
+    // wrapping the link (rather than the row content) is what let the tap
+    // recognizer swallow every drag attempt before it could even start.
+    // The row content now carries the drag, with the NavigationLink hidden
+    // behind it purely to still make the row tappable.
     @ViewBuilder
     private func chatRow(_ chat: Chat) -> some View {
-        NavigationLink(value: NavigationTarget.chat(chat.id)) {
-            ChatListRow(chat: chat)
-        }
-        .draggable(chat.id)
-        .swipeActions(edge: .trailing) {
+        ChatListRow(chat: chat)
+            .contentShape(Rectangle())
+            .background(
+                NavigationLink(value: NavigationTarget.chat(chat.id)) { EmptyView() }
+                    .opacity(0)
+            )
+            .draggable(chat.id) {
+                ChatListRow(chat: chat)
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(.regularMaterial))
+            }
+            .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 Task { await delete(chat) }
             } label: {
