@@ -15,6 +15,40 @@ export interface ModelInfo {
   contextWindowTokens?: number;
   provider?: LlmProvider;
   reasoningOptions?: ThinkingMode[];
+  availability?: "free" | "partner" | "downloadable" | "unknown";
+}
+
+type NvidiaAvailability = NonNullable<ModelInfo["availability"]>;
+let nvidiaAvailabilityPromise: Promise<Map<string, NvidiaAvailability>> | undefined;
+
+function nvidiaCatalogName(modelId: string): string {
+  return modelId.split("/").at(-1) ?? modelId;
+}
+
+async function fetchNvidiaAvailability(): Promise<Map<string, NvidiaAvailability>> {
+  const pages = await Promise.all(
+    Array.from({ length: 8 }, (_, page) => fetch(`https://build.nvidia.com/models?page=${page}`, { signal: AbortSignal.timeout(10_000) }).then((response) => response.ok ? response.text() : "").catch(() => "")),
+  );
+  const availability = new Map<string, NvidiaAvailability>();
+  for (const raw of pages) {
+    const html = raw.replaceAll(/\\"/g, '"');
+    const starts = [...html.matchAll(/\{"resourceType":"ENDPOINT","resourceId":"[^"]+\/([^"]+)",/g)].map((match) => match.index ?? 0);
+    for (let index = 0; index < starts.length; index++) {
+      const block = html.slice(starts[index], starts[index + 1] ?? html.length);
+      const name = block.match(/"name":"([^"]+)"/)?.[1];
+      const values = block.match(/"key":"nimType","values":\[([^\]]+)\]/)?.[1];
+      if (!name || !values) continue;
+      const labels = [...values.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+      const status = labels.includes("Free Endpoint") ? "free" : labels.includes("Partner Endpoint") ? "partner" : labels.includes("Download Available") ? "downloadable" : undefined;
+      if (status) availability.set(name, status);
+    }
+  }
+  return availability;
+}
+
+function getNvidiaAvailability(): Promise<Map<string, NvidiaAvailability>> {
+  nvidiaAvailabilityPromise ??= fetchNvidiaAvailability();
+  return nvidiaAvailabilityPromise;
 }
 
 async function fetchNvidiaModels(): Promise<ModelInfo[]> {
@@ -26,6 +60,7 @@ async function fetchNvidiaModels(): Promise<ModelInfo[]> {
   const payload = (await response.json()) as {
     data?: { id?: unknown; max_model_len?: unknown; max_context_length?: unknown }[];
   };
+  const availability = await getNvidiaAvailability();
   return (payload.data ?? [])
     .map((model) => {
       if (typeof model.id !== "string" || !model.id) return undefined;
@@ -38,13 +73,17 @@ async function fetchNvidiaModels(): Promise<ModelInfo[]> {
             : undefined;
       return {
         id: model.id,
+        availability: availability.get(nvidiaCatalogName(model.id)) ?? "unknown",
         ...(contextWindowTokens && Number.isSafeInteger(contextWindowTokens) && contextWindowTokens > 0
           ? { contextWindowTokens }
           : {}),
       };
     })
-    .filter((model): model is ModelInfo => Boolean(model))
-    .sort((a, b) => a.id.localeCompare(b.id));
+    .filter((model): model is NonNullable<typeof model> => Boolean(model))
+    .sort((a, b) => {
+      const rank: Record<NvidiaAvailability, number> = { free: 0, partner: 1, downloadable: 2, unknown: 3 };
+      return (rank[a.availability] - rank[b.availability]) || a.id.localeCompare(b.id);
+    });
 }
 
 // DeepSeek's API doesn't need live discovery — the account only ever exposes

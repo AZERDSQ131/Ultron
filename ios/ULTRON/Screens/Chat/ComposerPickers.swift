@@ -32,7 +32,12 @@ struct ModelPickerSheet: View {
                                 dismiss()
                             } label: {
                                 HStack {
-                                    Text(model.id)
+                        Text(model.id)
+                        if group.provider == "nvidia" {
+                            Text(model.availability == "free" ? "Free" : model.availability == "partner" ? "Partner" : model.availability == "downloadable" ? "Download" : "Unknown")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                                     Spacer()
                                     if model.id == current {
                                         Image(systemName: "checkmark").foregroundStyle(.tint)

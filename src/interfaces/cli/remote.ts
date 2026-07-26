@@ -188,7 +188,7 @@ async function main() {
     flushRender();
     try {
       const data = await apiGet("/api/models/grouped");
-      const groups: { provider: LlmProvider; models: { id: string; contextWindowTokens?: number }[] }[] = data.groups;
+      const groups: { provider: LlmProvider; models: { id: string; contextWindowTokens?: number; availability?: "free" | "partner" | "downloadable" | "unknown" }[] }[] = data.groups;
       const flat: ModelChoice[] = groups.flatMap((g) => g.models.map((m) => ({ ...m, provider: g.provider })));
       if (flat.length === 0) {
         appendTranscript(chalk.yellow("[ultron] no models available.\n\n"));

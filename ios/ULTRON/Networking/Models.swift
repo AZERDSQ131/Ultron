@@ -57,10 +57,11 @@ struct ModelInfo: Codable, Identifiable, Equatable {
     let id: String
     let provider: String?
     let contextLength: Int?
+    let availability: String?
 
     enum CodingKeys: String, CodingKey {
         case id, provider
-        case contextLength = "contextLength"
+        case contextLength = "contextLength", availability
     }
 }
 

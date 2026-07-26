@@ -96,6 +96,12 @@ function renderModelOptions(query = "") {
     context.textContent = model.contextWindowTokens ? `${model.contextWindowTokens.toLocaleString()} context` : "context unknown";
     const meta = document.createElement("span");
     meta.className = "model-option-meta";
+    if (model.provider === "nvidia") {
+      const availability = document.createElement("small");
+      availability.textContent = model.availability === "free" ? "Free endpoint" : model.availability === "partner" ? "Partner endpoint" : model.availability === "downloadable" ? "Downloadable" : "Availability unknown";
+      availability.className = `model-availability ${model.availability ?? "unknown"}`;
+      meta.append(availability);
+    }
     meta.append(context);
     option.append(check, name, meta);
     option.addEventListener("click", async () => {

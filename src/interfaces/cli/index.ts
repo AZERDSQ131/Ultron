@@ -152,7 +152,7 @@ async function main() {
     flushRender();
     try {
       const grouped = await listModelsByProvider();
-      const flat: ModelChoice[] = grouped.flatMap((g) => g.models.map((m) => ({ id: m.id, contextWindowTokens: m.contextWindowTokens, provider: g.provider })));
+      const flat: ModelChoice[] = grouped.flatMap((g) => g.models.map((m) => ({ ...m, provider: g.provider })));
       if (flat.length === 0) {
         appendTranscript(chalk.yellow("[ultron] no models available.\n\n"));
         return;

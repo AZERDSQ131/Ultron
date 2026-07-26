@@ -539,6 +539,7 @@ export function readInput(
 export interface ModelChoice {
   id: string;
   contextWindowTokens?: number;
+  availability?: "free" | "partner" | "downloadable" | "unknown";
   provider: LlmProvider;
 }
 
@@ -573,8 +574,9 @@ export function pickModel(
         const marker = index === selected ? chalk.greenBright("›") : " ";
         const label = index === selected ? chalk.cyanBright.bold(model.id) : model.id;
         const context = model.contextWindowTokens ? ` ${uiDim(`· ${model.contextWindowTokens.toLocaleString()} tokens`)}` : "";
+        const availability = model.provider === "nvidia" ? ` ${uiDim(model.availability === "free" ? "· free" : model.availability === "partner" ? "· partner" : model.availability === "downloadable" ? "· downloadable" : "· availability unknown")}` : "";
         const current = model.id === currentModel && model.provider === currentProvider ? ` ${uiDim("(current)")}` : "";
-        rowLines.push(`  ${marker} ${label}${context}${current}`);
+        rowLines.push(`  ${marker} ${label}${context}${availability}${current}`);
       });
       const rows = rowLines.length ? rowLines.join("\n") : uiDim("  no matching models");
       const count = matches.length > MAX_VISIBLE_MODELS ? ` · showing ${MAX_VISIBLE_MODELS}/${matches.length}` : "";
