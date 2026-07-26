@@ -4,10 +4,12 @@ struct MenuView: View {
     @Environment(ULTRONClient.self) private var client
 
     @State private var chats: [Chat] = []
+    @State private var projects: [Project] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var searchQuery = ""
     @State private var showSettings = false
+    @State private var showCreateProject = false
     @State private var expandedFolders: Set<String> = []
 
     private static let modules: [ModuleItem] = [
@@ -30,6 +32,32 @@ struct MenuView: View {
                     }
                     .listRowBackground(module.tint.opacity(0.08))
                 }
+            }
+
+            Section {
+                ForEach(projects) { project in
+                    NavigationLink(value: NavigationTarget.project(project.id)) {
+                        HStack {
+                            ZStack {
+                                Circle().fill(Color(hex: project.color).opacity(0.18)).frame(width: 28, height: 28)
+                                Text(project.icon).font(.footnote)
+                            }
+                            Text(project.name).foregroundStyle(.primary)
+                        }
+                    }
+                    .dropDestination(for: String.self) { chatIds, _ in
+                        guard let chatId = chatIds.first else { return false }
+                        Task { await moveChat(chatId, toProject: project.id) }
+                        return true
+                    }
+                }
+                Button {
+                    showCreateProject = true
+                } label: {
+                    Label("Nouveau projet", systemImage: "plus.circle")
+                }
+            } header: {
+                Text("Projets")
             }
 
             Section("Conversations") {
@@ -81,6 +109,11 @@ struct MenuView: View {
         .sheet(isPresented: $showSettings) {
             NavigationStack { ServerSettingsView() }
         }
+        .sheet(isPresented: $showCreateProject) {
+            ProjectEditorSheet { name, icon, color in
+                Task { await createProject(name: name, icon: icon, color: color) }
+            }
+        }
         .refreshable { await load() }
         .task { await load() }
     }
@@ -90,6 +123,7 @@ struct MenuView: View {
         NavigationLink(value: NavigationTarget.chat(chat.id)) {
             ChatListRow(chat: chat)
         }
+        .draggable(chat.id)
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 Task { await delete(chat) }
@@ -131,12 +165,18 @@ struct MenuView: View {
             MemoryView()
         case .schedules:
             SchedulesView()
+        case .project(let id):
+            ProjectView(projectId: id, onChange: { await load() })
         }
     }
 
+    // Chats already filed under a project are only shown inside that
+    // project's own view (ProjectView), not duplicated in the flat
+    // recent/folder lists here.
     private var visibleChats: [Chat] {
-        guard !searchQuery.isEmpty else { return chats }
-        return chats.filter { $0.title.localizedCaseInsensitiveContains(searchQuery) }
+        let unfiled = chats.filter { $0.projectId == nil }
+        guard !searchQuery.isEmpty else { return unfiled }
+        return unfiled.filter { $0.title.localizedCaseInsensitiveContains(searchQuery) }
     }
 
     private struct ChatGroup { let title: String; let chats: [Chat] }
@@ -181,7 +221,26 @@ struct MenuView: View {
         defer { isLoading = false }
         do {
             chats = try await client.listChats()
+            projects = try await client.listProjects()
             errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func createProject(name: String, icon: String, color: String) async {
+        do {
+            _ = try await client.createProject(name: name, icon: icon, color: color)
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func moveChat(_ chatId: String, toProject projectId: String) async {
+        do {
+            try await client.setChatProject(chatId, projectId: projectId)
+            await load()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -225,6 +284,7 @@ private struct ModuleItem: Identifiable {
 
 enum NavigationTarget: Hashable {
     case chat(String)
+    case project(String)
     case finance
     case health
     case tokens

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		032272955396F23D728EC7EF /* ULTRONLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9E66981DDF98B9DA69A395C /* ULTRONLiveActivity.swift */; };
 		0B03CA8BC058FDBFFD1E7953 /* SkillsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83596178D98A9E33F0AF9548 /* SkillsView.swift */; };
+		105F81191EA40EF3BD0957FD /* ProjectEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01487461D43FC71831683C44 /* ProjectEditorSheet.swift */; };
 		122DF68831FB220B26755932 /* SchedulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 916B37C28223EF861389AC45 /* SchedulesView.swift */; };
 		17C445D2EB6412B6F8FCF291 /* ComposerPickers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFFC97450AA2A233265FE7E9 /* ComposerPickers.swift */; };
 		18AC8BF9B81C068B670B6A13 /* ServerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */; };
@@ -25,6 +26,7 @@
 		88336A728B065E4831C48ECA /* ULTRONTaskActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7716CB8679EF2D7CAF945FEE /* ULTRONTaskActivityAttributes.swift */; };
 		8AC17074B995AD0EDE0F8CAA /* ULTRONClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF3E074F58F965547A5789B1 /* ULTRONClient.swift */; };
 		985A255DBC6FD88F89D3C52B /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F1D61F79F3F60C24BC6823C /* MemoryView.swift */; };
+		9D88656E4ADC750AA22C4178 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A9ECA9526AB0CC2C6C5A207 /* Color+Hex.swift */; };
 		A4D4E18C76BBD600119F51AE /* ToolCallGroupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFFEFE62F5DF0F546B166C85 /* ToolCallGroupView.swift */; };
 		A78DF93F9EA98781039A72F7 /* SSEParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C689B11B12F99960CC4BC8BA /* SSEParser.swift */; };
 		CABBE5EDDDCCB567C6553749 /* TokensView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54BC0F0E0693727E7B30013 /* TokensView.swift */; };
@@ -34,6 +36,7 @@
 		D462FB15BEF76EBC6709CE7F /* ULTRONLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE65F465F790EEA716326B12 /* ULTRONLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DBAF552F5921CCFCE5FE7384 /* ChatTimelineItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CD4075F78007B0D68D2B906 /* ChatTimelineItem.swift */; };
 		DC67A7830CD58EFDD674471F /* MenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74322351DC92D86FE55DB70 /* MenuView.swift */; };
+		E3007F9D4E3A265930B9B88D /* ProjectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D680408EDAC422FB809AF51 /* ProjectView.swift */; };
 		F9914A45D2E60B4C65368A59 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9220BBD1B70581A4BF6EEF /* RootView.swift */; };
 		FF135458A99BBEB7D9D7DEE8 /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */; };
 /* End PBXBuildFile section */
@@ -63,10 +66,12 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		01487461D43FC71831683C44 /* ProjectEditorSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectEditorSheet.swift; sourceTree = "<group>"; };
 		0F1D61F79F3F60C24BC6823C /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
 		0F4F420A115FEC9D7D4F817E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
 		4CD4075F78007B0D68D2B906 /* ChatTimelineItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTimelineItem.swift; sourceTree = "<group>"; };
+		4D680408EDAC422FB809AF51 /* ProjectView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectView.swift; sourceTree = "<group>"; };
 		54CAE4F4A37E3AEE15D00E6A /* DashboardCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardCards.swift; sourceTree = "<group>"; };
 		6F692CFFA71D1A83D443C9E2 /* ULTRONApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONApp.swift; sourceTree = "<group>"; };
 		72BA5E1EB207C3A2D95CFEE7 /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
@@ -76,6 +81,7 @@
 		8CC5A83F5B96CA4B171D1FA4 /* ApprovalCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalCardView.swift; sourceTree = "<group>"; };
 		916B37C28223EF861389AC45 /* SchedulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulesView.swift; sourceTree = "<group>"; };
 		92CA83DC64AE3FC92AB76E64 /* ServerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettingsView.swift; sourceTree = "<group>"; };
+		9A9ECA9526AB0CC2C6C5A207 /* Color+Hex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
 		AF3E074F58F965547A5789B1 /* ULTRONClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONClient.swift; sourceTree = "<group>"; };
 		BC9220BBD1B70581A4BF6EEF /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		C21F1A36BC53D6520F9EC32D /* ComposerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerBar.swift; sourceTree = "<group>"; };
@@ -176,6 +182,8 @@
 			children = (
 				E8688BB904F427BE4D29CAFE /* ChatListRow.swift */,
 				F74322351DC92D86FE55DB70 /* MenuView.swift */,
+				01487461D43FC71831683C44 /* ProjectEditorSheet.swift */,
+				4D680408EDAC422FB809AF51 /* ProjectView.swift */,
 			);
 			path = Menu;
 			sourceTree = "<group>";
@@ -237,6 +245,7 @@
 			isa = PBXGroup;
 			children = (
 				252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */,
+				9A9ECA9526AB0CC2C6C5A207 /* Color+Hex.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -302,8 +311,6 @@
 				C332EFE522A3B581B68AD3E6 /* PBXTargetDependency */,
 			);
 			name = ULTRON;
-			packageProductDependencies = (
-			);
 			productName = ULTRON;
 			productReference = D31CB21B015ABB8FC21CFB45 /* ULTRON.app */;
 			productType = "com.apple.product-type.application";
@@ -319,8 +326,6 @@
 			dependencies = (
 			);
 			name = ULTRONLiveActivity;
-			packageProductDependencies = (
-			);
 			productName = ULTRONLiveActivity;
 			productReference = FE65F465F790EEA716326B12 /* ULTRONLiveActivity.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -393,6 +398,9 @@
 				7FBF5E273511AEA0B5FB4132 /* ULTRONApp.swift in Sources */,
 				8AC17074B995AD0EDE0F8CAA /* ULTRONClient.swift in Sources */,
 				88336A728B065E4831C48ECA /* ULTRONTaskActivityAttributes.swift in Sources */,
+				105F81191EA40EF3BD0957FD /* ProjectEditorSheet.swift in Sources */,
+				E3007F9D4E3A265930B9B88D /* ProjectView.swift in Sources */,
+				9D88656E4ADC750AA22C4178 /* Color+Hex.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
