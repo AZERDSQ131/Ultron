@@ -15,9 +15,11 @@ struct ULTRONLiveActivity: Widget {
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     StatusIndicator(state: state)
+                        .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     ElapsedLabel(state: state)
+                        .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(context.attributes.title)
@@ -31,9 +33,16 @@ struct ULTRONLiveActivity: Widget {
             } compactLeading: {
                 StatusIndicator(state: state)
             } compactTrailing: {
-                ElapsedLabel(state: state)
+                ElapsedLabel(state: state, tight: true)
             } minimal: {
-                StatusIndicator(state: state)
+                // Only shown when another app's activity shares the island. With
+                // no running indicator left, falling through to StatusIndicator
+                // would render this presentation blank, so the counter stands in.
+                if state.status == .running {
+                    ElapsedLabel(state: state, tight: true)
+                } else {
+                    StatusIndicator(state: state)
+                }
             }
             .widgetURL(URL(string: "ultron://chat/\(context.attributes.chatId)"))
             .keylineTint(accent(for: state.status))
@@ -41,9 +50,10 @@ struct ULTRONLiveActivity: Widget {
     }
 }
 
-/// Left side of the Dynamic Island: nothing while the agent works (the chrono
-/// on the right already says "in progress"), then a green check or a red
-/// cross once the turn lands.
+/// Left side of the Dynamic Island: nothing while the agent works, then a green
+/// check or a red cross once the turn lands. A running turn is carried by the
+/// elapsed counter on the right alone — an indicator here read as noise on
+/// device.
 private struct StatusIndicator: View {
     let state: TaskState
 
@@ -73,6 +83,9 @@ private struct StatusIndicator: View {
 /// the status icon alone carries the outcome.
 private struct ElapsedLabel: View {
     let state: TaskState
+    /// Compact island only: hug the text and pull it toward the edge, instead of
+    /// centring it in a fixed box that left a visible gap on the right.
+    var tight = false
 
     var body: some View {
         if state.status == .running {
@@ -80,6 +93,7 @@ private struct ElapsedLabel: View {
                 .font(.caption2.weight(.semibold).monospacedDigit())
                 .foregroundStyle(.blue)
                 .fixedSize()
+                .padding(.trailing, tight ? -3 : 0)
         }
     }
 }
@@ -147,8 +161,9 @@ private struct LockScreenView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+            // Collapses to nothing while running, rather than reserving an empty
+            // gutter where the indicator used to be.
             StatusIndicator(state: state)
-                .frame(width: 22)
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(title)

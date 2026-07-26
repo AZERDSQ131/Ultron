@@ -36,8 +36,9 @@ struct ULTRONTaskActivityAttributes: ActivityAttributes {
         let entries: [Entry]
         /// Unix epoch seconds — deliberately not `Date`, so the server can emit
         /// plain JSON numbers without having to match a Codable date strategy.
-        /// Backs the compact/expanded chrono (`Text(timerInterval:)`), which is
-        /// what shows the turn is progressing now that there's no spinner.
+        /// Drives the elapsed counter, which counts up on its own and so keeps
+        /// moving even while the app is suspended and nothing can update the
+        /// activity.
         let startedAt: Double
     }
 
@@ -47,4 +48,10 @@ struct ULTRONTaskActivityAttributes: ActivityAttributes {
 
 extension ULTRONTaskActivityAttributes.ContentState {
     var startedDate: Date { Date(timeIntervalSince1970: startedAt) }
+
+    /// The last thing that happened, used as the one-line summary on the Lock
+    /// Screen and at the top of the expanded view.
+    var headline: String {
+        entries.last?.text ?? "Traitement en cours"
+    }
 }

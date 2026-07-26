@@ -145,15 +145,15 @@ opening).
   or simulator.
 - **Live Activity / Dynamic Island** — `ULTRONLiveActivity` is a WidgetKit extension with
   compact/minimal/expanded/Lock Screen layouts. Compact reads at a glance: nothing on the left
-  while running (an indeterminate `ProgressView` would render frozen — ActivityKit ignores
-  SwiftUI animations that repeat indefinitely — so there's no spinner there any more, just the
-  chrono on the right, a `Text(timerInterval:)` anchored on `ContentState.startedAt` which is the
-  one indicator that keeps moving on its own without a push per frame); once the turn lands, a
-  green check on success or a red cross on failure, orange raised hand when a tool needs approval.
-  Long-pressing expands to the
-  tail of the conversation: `ContentState.entries` are typed (`message`/`tool`/`status`), one icon
-  per kind, and a streaming reply rewrites a single line in place instead of appending an entry per
-  token.
+  while the agent works, green check on success, red cross on failure, orange raised hand when a
+  tool needs approval; the elapsed counter on the right is what says "still running" and goes blank
+  once the turn lands. A blue `ProgressView(timerInterval:)` ring was built for the left side first
+  — ActivityKit ignores SwiftUI animations that repeat indefinitely, so an indeterminate
+  `ProgressView` renders frozen and a timer-driven ring was the only thing that actually moved —
+  then removed on the user's explicit request after seeing it on device. Long-pressing expands to
+  the tail of the conversation: `ContentState.entries` are typed (`message`/`tool`/`status`), one
+  icon per kind, and a streaming reply rewrites a single line in place instead of appending an
+  entry per token.
 - **Live Activity background continuation** — `LiveActivityRegistry`
   (`src/core/memory/liveActivities.ts`) keeps each app-originated turn's state in an in-memory map
   keyed by chat, written whether or not APNs is reachable, and exposed over
