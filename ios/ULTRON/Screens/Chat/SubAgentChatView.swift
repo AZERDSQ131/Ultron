@@ -16,6 +16,7 @@ struct SubAgentChatView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var task: String?
+    @State private var nested: SubAgentRoute?
 
     var body: some View {
         ScrollView {
@@ -44,6 +45,9 @@ struct SubAgentChatView: View {
         }
         .navigationTitle(route.title)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $nested) { child in
+            NavigationStack { SubAgentChatView(route: child) }
+        }
         .refreshable { await load() }
         .task { await load() }
     }
@@ -93,7 +97,8 @@ struct SubAgentChatView: View {
         case .assistant(_, let text, _):
             AssistantMessageView(text: text)
         case .toolGroup(_, let calls):
-            ToolCallGroupView(calls: calls)
+            // A sub-agent can spawn its own, so keep the chain walkable.
+            ToolCallGroupView(calls: calls) { nested = $0 }
         case .approval(_, let calls):
             // Observation only, so an approval can't be acted on from here.
             ToolCallGroupView(calls: calls.map { ToolCallEntry(name: $0.name, summary: "en attente d'approbation") })

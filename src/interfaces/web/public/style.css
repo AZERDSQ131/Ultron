@@ -2454,8 +2454,10 @@ kbd {
    so its conversation replaces the composer with a way back to the parent
    rather than an input that would silently do nothing. */
 .subagent-open {
-  margin-left: auto;
-  flex: none;
+  display: block;
+  margin: 4px 0 2px;
+  width: 100%;
+  text-align: left;
   background: var(--accent-soft);
   border: 1px solid var(--accent);
   border-radius: 999px;

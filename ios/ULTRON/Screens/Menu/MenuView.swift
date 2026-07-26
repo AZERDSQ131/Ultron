@@ -42,15 +42,18 @@ struct MenuView: View {
 
             Section {
                 ForEach(projects) { project in
-                    NavigationLink(value: NavigationTarget.project(project.id)) {
-                        HStack {
-                            ZStack {
-                                Circle().fill(Color(hex: project.color).opacity(dropTargetProjectId == project.id ? 0.4 : 0.18)).frame(width: 28, height: 28)
-                                Text(project.icon).font(.footnote)
-                            }
-                            Text(project.name).foregroundStyle(.primary)
+                    HStack {
+                        ZStack {
+                            Circle().fill(Color(hex: project.color).opacity(dropTargetProjectId == project.id ? 0.4 : 0.18)).frame(width: 28, height: 28)
+                            Text(project.icon).font(.footnote)
                         }
+                        Text(project.name).foregroundStyle(.primary)
                     }
+                    .contentShape(Rectangle())
+                    .background(
+                        NavigationLink(value: NavigationTarget.project(project.id)) { EmptyView() }
+                            .opacity(0)
+                    )
                     .listRowBackground(dropTargetProjectId == project.id ? Color(hex: project.color).opacity(0.12) : nil)
                     .onDrop(of: [.plainText], isTargeted: Binding(
                         get: { dropTargetProjectId == project.id },
@@ -127,58 +130,52 @@ struct MenuView: View {
                 Task { await createProject(name: name, icon: icon, color: color) }
             }
         }
-        .confirmationDialog(
-            "Ajouter à un projet",
-            isPresented: Binding(get: { addingToProjectChat != nil }, set: { if !$0 { addingToProjectChat = nil } }),
-            titleVisibility: .visible,
-            presenting: addingToProjectChat
-        ) { chat in
-            if projects.isEmpty {
-                Button("Créer un projet") { showCreateProject = true }
-            } else {
-                ForEach(projects) { project in
-                    Button("\(project.icon) \(project.name)") {
-                        Task { await moveChat(chat.id, toProject: project.id) }
-                    }
-                }
-            }
-            Button("Annuler", role: .cancel) {}
+        .sheet(item: $addingToProjectChat) { chat in
+            ProjectPickerSheet(
+                projects: projects,
+                onPicked: { projectId in Task { await moveChat(chat.id, toProject: projectId) } },
+                onCreateNew: { showCreateProject = true }
+            )
         }
         .refreshable { await load() }
         .task { await load() }
     }
 
+    // NavigationLink wraps the row content directly by default, and its own
+    // tap gesture wins over everything else in a List row — that's what
+    // ate two different drag/drop attempts (.draggable/.dropDestination,
+    // then a visibly-wrapped .onDrag/.onDrop) before this one did anything
+    // at all. The NavigationLink now sits hidden (opacity 0) behind the row
+    // content instead of wrapping it, so .onDrag on the content itself gets
+    // first shot at the touch.
     @ViewBuilder
     private func chatRow(_ chat: Chat) -> some View {
-        NavigationLink(value: NavigationTarget.chat(chat.id)) {
-            ChatListRow(chat: chat)
-        }
-        // .onDrag/.onDrop (NSItemProvider) rather than the newer
-        // .draggable/.dropDestination (Transferable) — the latter never
-        // initiated a drag at all on a List row wrapped in a NavigationLink,
-        // even with the NavigationLink hidden behind the row content; this
-        // older pair is the combination actually proven to coexist with
-        // List's own tap/scroll gesture recognizers.
-        .onDrag { NSItemProvider(object: chat.id as NSString) }
-        .swipeActions(edge: .trailing) {
-            Button {
-                addingToProjectChat = chat
-            } label: {
-                Label("Ajouter", systemImage: "plus")
+        ChatListRow(chat: chat)
+            .contentShape(Rectangle())
+            .background(
+                NavigationLink(value: NavigationTarget.chat(chat.id)) { EmptyView() }
+                    .opacity(0)
+            )
+            .onDrag { NSItemProvider(object: chat.id as NSString) }
+            .swipeActions(edge: .trailing) {
+                Button {
+                    addingToProjectChat = chat
+                } label: {
+                    Label("Ajouter", systemImage: "plus")
+                }
+                .tint(.blue)
+                Button(role: .destructive) {
+                    Task { await delete(chat) }
+                } label: {
+                    Label("Supprimer", systemImage: "trash")
+                }
+                Button {
+                    Task { await archive(chat) }
+                } label: {
+                    Label("Archiver", systemImage: "archivebox")
+                }
+                .tint(.orange)
             }
-            .tint(.blue)
-            Button(role: .destructive) {
-                Task { await delete(chat) }
-            } label: {
-                Label("Supprimer", systemImage: "trash")
-            }
-            Button {
-                Task { await archive(chat) }
-            } label: {
-                Label("Archiver", systemImage: "archivebox")
-            }
-            .tint(.orange)
-        }
     }
 
     private func expandedBinding(for title: String) -> Binding<Bool> {

@@ -28,6 +28,7 @@ struct ChatView: View {
     @State private var showTaskModePicker = false
     @State private var showPermissionPicker = false
 
+    @State private var observedSubAgent: SubAgentRoute?
     @State private var pendingApprovalId: String?
     @State private var streamTask: Task<Void, Never>?
 
@@ -99,8 +100,10 @@ struct ChatView: View {
         .sheet(isPresented: $showPermissionPicker) {
             PermissionPickerSheet(chatId: chatId, selected: $securityMode)
         }
-        .navigationDestination(for: SubAgentRoute.self) { route in
-            SubAgentChatView(route: route)
+        // A sheet rather than a pushed destination: observation is a detour, and
+        // a sheet needs no navigationDestination registration to survive.
+        .sheet(item: $observedSubAgent) { route in
+            NavigationStack { SubAgentChatView(route: route) }
         }
         .task { await bootstrap() }
         .onChange(of: photoItem) { _, item in
@@ -158,7 +161,7 @@ struct ChatView: View {
         case .assistant(_, let text, let stats):
             AssistantMessageView(text: text, stats: verbose ? stats : nil)
         case .toolGroup(_, let calls):
-            ToolCallGroupView(calls: calls)
+            ToolCallGroupView(calls: calls) { observedSubAgent = $0 }
         case .approval(let id, let calls):
             ApprovalCardView(calls: calls) { decisions in
                 pendingApprovalId = id

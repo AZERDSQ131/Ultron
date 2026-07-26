@@ -315,22 +315,20 @@ export function attachSubAgentLink(pre, content) {
   const chatId = subAgentChatIdFrom(content);
   if (!chatId) return;
   const block = pre.closest(".tool-block");
-  const summary = block?.querySelector("summary");
-  if (!summary || summary.querySelector(".subagent-open")) return;
+  if (!block || block.nextElementSibling?.classList.contains("subagent-open")) return;
 
+  // Deliberately a sibling *after* the block rather than inside its <summary>:
+  // a button in a summary competes with the disclosure toggle for the click,
+  // and putting it in the collapsed body would hide the one thing worth
+  // reaching here behind an extra expand.
   const button = document.createElement("button");
   button.type = "button";
   button.className = "subagent-open";
-  button.textContent = "Observer →";
-  button.title = "Ouvrir la conversation de ce sous-agent";
-  button.addEventListener("click", (event) => {
-    // The button lives inside a <summary>, so without this the click would
-    // also collapse/expand the block it sits in.
-    event.preventDefault();
-    event.stopPropagation();
+  button.textContent = "Observer la conversation du sous-agent →";
+  button.addEventListener("click", () => {
     window.dispatchEvent(new CustomEvent("subagent:open", { detail: { chatId } }));
   });
-  summary.appendChild(button);
+  block.after(button);
 }
 
 function addToolBlockTo(container, name, summary) {

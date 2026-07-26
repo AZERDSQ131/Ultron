@@ -47,9 +47,11 @@ struct ToolCallEntry: Identifiable, Equatable {
 
 /// Route for observing a sub-agent's conversation. A dedicated type rather than
 /// pushing a bare String, which would collide with any other string destination.
-struct SubAgentRoute: Hashable {
+struct SubAgentRoute: Hashable, Identifiable {
     let chatId: String
     let title: String
+
+    var id: String { chatId }
 }
 
 @MainActor

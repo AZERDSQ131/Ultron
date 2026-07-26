@@ -37,6 +37,7 @@
 		D462FB15BEF76EBC6709CE7F /* ULTRONLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE65F465F790EEA716326B12 /* ULTRONLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DBAF552F5921CCFCE5FE7384 /* ChatTimelineItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CD4075F78007B0D68D2B906 /* ChatTimelineItem.swift */; };
 		DC67A7830CD58EFDD674471F /* MenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74322351DC92D86FE55DB70 /* MenuView.swift */; };
+		EECD139B01B1A17E014E5203 /* ProjectPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56085BB6814D9FC4FC5CF9DE /* ProjectPickerSheet.swift */; };
 		F23DE61B36F609A625EBB161 /* SubAgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05ECE15CD7791231990F9070 /* SubAgentChatView.swift */; };
 		F9914A45D2E60B4C65368A59 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9220BBD1B70581A4BF6EEF /* RootView.swift */; };
 		FF135458A99BBEB7D9D7DEE8 /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */; };
@@ -73,6 +74,7 @@
 		252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
 		4CD4075F78007B0D68D2B906 /* ChatTimelineItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTimelineItem.swift; sourceTree = "<group>"; };
 		54CAE4F4A37E3AEE15D00E6A /* DashboardCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardCards.swift; sourceTree = "<group>"; };
+		56085BB6814D9FC4FC5CF9DE /* ProjectPickerSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectPickerSheet.swift; sourceTree = "<group>"; };
 		6F692CFFA71D1A83D443C9E2 /* ULTRONApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONApp.swift; sourceTree = "<group>"; };
 		72BA5E1EB207C3A2D95CFEE7 /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
 		7716CB8679EF2D7CAF945FEE /* ULTRONTaskActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ULTRONTaskActivityAttributes.swift; sourceTree = "<group>"; };
@@ -186,6 +188,7 @@
 				F74322351DC92D86FE55DB70 /* MenuView.swift */,
 				F0005CE173276E22DA638A04 /* ProjectEditorSheet.swift */,
 				96CB5F87E177DABA54C682E0 /* ProjectView.swift */,
+				56085BB6814D9FC4FC5CF9DE /* ProjectPickerSheet.swift */,
 			);
 			path = Menu;
 			sourceTree = "<group>";
@@ -314,8 +317,6 @@
 				C332EFE522A3B581B68AD3E6 /* PBXTargetDependency */,
 			);
 			name = ULTRON;
-			packageProductDependencies = (
-			);
 			productName = ULTRON;
 			productReference = D31CB21B015ABB8FC21CFB45 /* ULTRON.app */;
 			productType = "com.apple.product-type.application";
@@ -331,8 +332,6 @@
 			dependencies = (
 			);
 			name = ULTRONLiveActivity;
-			packageProductDependencies = (
-			);
 			productName = ULTRONLiveActivity;
 			productReference = FE65F465F790EEA716326B12 /* ULTRONLiveActivity.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -409,6 +408,7 @@
 				7FBF5E273511AEA0B5FB4132 /* ULTRONApp.swift in Sources */,
 				8AC17074B995AD0EDE0F8CAA /* ULTRONClient.swift in Sources */,
 				88336A728B065E4831C48ECA /* ULTRONTaskActivityAttributes.swift in Sources */,
+				EECD139B01B1A17E014E5203 /* ProjectPickerSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
