@@ -192,17 +192,104 @@ struct FinanceSummary: Codable, Equatable {
 
 // MARK: - Health
 
-struct DaySummary: Codable, Identifiable, Equatable {
+/// One day of the health export. Every metric is `Double?` on purpose: the
+/// server hands back whatever the export contained, nulls included, and typing
+/// counts as `Int` would make the whole payload fail to decode the first time
+/// one arrives as a float.
+struct HealthDay: Codable, Identifiable, Equatable {
     let date: String
-    let recoveryScore: Double?
-    let activityScore: Double?
-    var id: String { date }
+    let steps: Double?
+    let activeEnergyKcal: Double?
+    let distanceKm: Double?
+    let exerciseMinutes: Double?
+    let flightsClimbed: Double?
+    let workoutCount: Double?
+    let restingHR: Double?
+    let walkingHR: Double?
+    let sleepDurationSec: Double?
+    let sleepAsleepSec: Double?
+    let hrvAvg: Double?
+    let respiratoryRateAvg: Double?
+    let recovery: Double?
+    let activity: Double?
 
-    enum CodingKeys: String, CodingKey {
-        case date
-        case recoveryScore = "recovery"
-        case activityScore = "activity"
+    var id: String { date }
+    var day: Date? { Date(healthDate: date) }
+
+    /// Time actually asleep over time in bed.
+    var sleepEfficiencyPct: Double? {
+        guard let sleepAsleepSec, let sleepDurationSec, sleepDurationSec > 0 else { return nil }
+        return sleepAsleepSec / sleepDurationSec * 100
     }
+
+    var hasAnyMetric: Bool {
+        [steps, activeEnergyKcal, restingHR, hrvAvg, sleepDurationSec].contains { $0 != nil }
+    }
+}
+
+struct HealthLatestScores: Codable, Equatable {
+    let date: String
+    let recovery: Double
+    let activity: Double
+}
+
+/// All-time bests plus the current streak. Each record is absent rather than
+/// null when no day in the history carries that metric.
+struct HealthRecords: Codable, Equatable {
+    struct DatedValue: Codable, Equatable {
+        let date: String
+        let value: Double
+    }
+
+    struct SleepNight: Codable, Equatable {
+        let date: String
+        let durationSec: Double
+    }
+
+    let bestSleepNight: SleepNight?
+    let lowestRestingHR: DatedValue?
+    let mostSteps: DatedValue?
+    let currentActivityStreakDays: Int
+}
+
+struct HealthMeal: Codable, Identifiable, Equatable {
+    let id: Int
+    let date: String
+    let timestamp: String
+    let description: String
+    let estimatedCalories: Double?
+    let proteinG: Double?
+    let carbsG: Double?
+    let fatG: Double?
+    let photoUrl: String?
+}
+
+struct HealthExercise: Codable, Identifiable, Equatable {
+    let id: Int
+    let date: String
+    let timestamp: String
+    let description: String
+    let exerciseType: String?
+    let durationMinutes: Double?
+    let intensity: String?
+    let estimatedCaloriesBurned: Double?
+    let photoUrl: String?
+}
+
+extension Date {
+    /// Health rows are keyed by a plain `YYYY-MM-DD` bucket, not a timestamp.
+    init?(healthDate: String) {
+        guard let date = Date.healthDayParser.date(from: healthDate) else { return nil }
+        self = date
+    }
+
+    fileprivate static let healthDayParser: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .iso8601)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 }
 
 // These three were typed as plain scalars while the server has always sent
@@ -232,11 +319,16 @@ struct HealthBioAge: Codable, Equatable {
 
 struct HealthSummary: Codable, Equatable {
     let hasData: Bool
-    let days: [DaySummary]?
+    let from: String?
+    let to: String?
+    let days: [HealthDay]?
+    let records: HealthRecords?
     let sleepDebt: HealthSleepDebt?
     let anomalies: [HealthAnomaly]?
-    let latestScores: JSONValue?
+    let latestScores: HealthLatestScores?
     let bioAge: HealthBioAge?
+    let meals: [HealthMeal]?
+    let exercises: [HealthExercise]?
 }
 
 // MARK: - Usage
