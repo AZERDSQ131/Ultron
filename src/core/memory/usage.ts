@@ -61,6 +61,7 @@ export interface UsageBreakdownRow {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  elapsedMs: number;
 }
 
 export interface UsageDayRow {
@@ -69,10 +70,11 @@ export interface UsageDayRow {
   outputTokens: number;
   requests: number;
   costUsd: number;
+  elapsedMs: number;
 }
 
 export interface UsageSummary {
-  totals: { requests: number; inputTokens: number; outputTokens: number; costUsd: number };
+  totals: { requests: number; inputTokens: number; outputTokens: number; costUsd: number; elapsedMs: number };
   byProvider: UsageBreakdownRow[];
   byModel: UsageBreakdownRow[];
   byKind: UsageBreakdownRow[];
@@ -135,33 +137,33 @@ export class UsageRegistry {
 
     const totalsRow = this.db
       .prepare(
-        `SELECT COUNT(*) AS requests, COALESCE(SUM(input_tokens),0) AS inputTokens, COALESCE(SUM(output_tokens),0) AS outputTokens, COALESCE(SUM(cost_usd),0) AS costUsd
+        `SELECT COUNT(*) AS requests, COALESCE(SUM(input_tokens),0) AS inputTokens, COALESCE(SUM(output_tokens),0) AS outputTokens, COALESCE(SUM(cost_usd),0) AS costUsd, COALESCE(SUM(elapsed_ms),0) AS elapsedMs
          FROM usage_log ${whereClause}`,
       )
-      .get(...params) as unknown as { requests: number; inputTokens: number; outputTokens: number; costUsd: number };
+      .get(...params) as unknown as { requests: number; inputTokens: number; outputTokens: number; costUsd: number; elapsedMs: number };
 
     const breakdown = (column: "provider" | "model" | "kind"): UsageBreakdownRow[] =>
       (
         this.db
           .prepare(
-            `SELECT ${column} AS key, COUNT(*) AS requests, COALESCE(SUM(input_tokens),0) AS inputTokens, COALESCE(SUM(output_tokens),0) AS outputTokens, COALESCE(SUM(cost_usd),0) AS costUsd
+            `SELECT ${column} AS key, COUNT(*) AS requests, COALESCE(SUM(input_tokens),0) AS inputTokens, COALESCE(SUM(output_tokens),0) AS outputTokens, COALESCE(SUM(cost_usd),0) AS costUsd, COALESCE(SUM(elapsed_ms),0) AS elapsedMs
              FROM usage_log ${whereClause}
              GROUP BY ${column}
              ORDER BY (SUM(input_tokens) + SUM(output_tokens)) DESC`,
           )
-          .all(...params) as unknown as { key: string; requests: number; inputTokens: number; outputTokens: number; costUsd: number }[]
-      ).map((r) => ({ key: r.key, requests: r.requests, inputTokens: r.inputTokens, outputTokens: r.outputTokens, costUsd: r.costUsd }));
+          .all(...params) as unknown as { key: string; requests: number; inputTokens: number; outputTokens: number; costUsd: number; elapsedMs: number }[]
+      ).map((r) => ({ key: r.key, requests: r.requests, inputTokens: r.inputTokens, outputTokens: r.outputTokens, costUsd: r.costUsd, elapsedMs: r.elapsedMs }));
 
     const byDay = (
       this.db
         .prepare(
-          `SELECT substr(created_at, 1, 10) AS date, COUNT(*) AS requests, COALESCE(SUM(input_tokens),0) AS inputTokens, COALESCE(SUM(output_tokens),0) AS outputTokens, COALESCE(SUM(cost_usd),0) AS costUsd
+          `SELECT substr(created_at, 1, 10) AS date, COUNT(*) AS requests, COALESCE(SUM(input_tokens),0) AS inputTokens, COALESCE(SUM(output_tokens),0) AS outputTokens, COALESCE(SUM(cost_usd),0) AS costUsd, COALESCE(SUM(elapsed_ms),0) AS elapsedMs
            FROM usage_log ${whereClause}
            GROUP BY date
            ORDER BY date ASC`,
         )
-        .all(...params) as unknown as { date: string; requests: number; inputTokens: number; outputTokens: number; costUsd: number }[]
-    ).map((r) => ({ date: r.date, requests: r.requests, inputTokens: r.inputTokens, outputTokens: r.outputTokens, costUsd: r.costUsd }));
+        .all(...params) as unknown as { date: string; requests: number; inputTokens: number; outputTokens: number; costUsd: number; elapsedMs: number }[]
+    ).map((r) => ({ date: r.date, requests: r.requests, inputTokens: r.inputTokens, outputTokens: r.outputTokens, costUsd: r.costUsd, elapsedMs: r.elapsedMs }));
 
     const recent = (
       this.db.prepare(`SELECT * FROM usage_log ${whereClause} ORDER BY id DESC LIMIT ?`).all(...params, recentLimit) as unknown as UsageRow[]

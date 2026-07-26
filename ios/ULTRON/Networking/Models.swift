@@ -216,61 +216,99 @@ struct HealthSummary: Codable, Equatable {
 
 // MARK: - Usage
 
-struct UsageByKind: Codable, Identifiable, Equatable {
-    let kind: String
+// Mirrors UsageSummary in src/core/memory/usage.ts. The endpoint has always
+// returned every breakdown; this used to decode only the totals and byKind and
+// silently drop the rest, which is why the Tokens screen had so little to show.
+
+struct UsageTotals: Codable, Equatable {
+    let requests: Int
     let inputTokens: Int
     let outputTokens: Int
-    let estimatedCost: Double
-    var id: String { kind }
+    let costUsd: Double
+    let elapsedMs: Int
 
-    enum CodingKeys: String, CodingKey {
-        case kind = "key"
-        case inputTokens
-        case outputTokens
-        case estimatedCost = "costUsd"
+    var totalTokens: Int { inputTokens + outputTokens }
+}
+
+/// One row of a provider / model / call-kind breakdown.
+struct UsageBreakdownRow: Codable, Identifiable, Equatable {
+    let key: String
+    let requests: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let costUsd: Double
+    let elapsedMs: Int
+
+    var id: String { key }
+    var totalTokens: Int { inputTokens + outputTokens }
+    var averageElapsedMs: Int { requests > 0 ? elapsedMs / requests : 0 }
+}
+
+struct UsageDay: Codable, Identifiable, Equatable {
+    let date: String
+    let requests: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let costUsd: Double
+    let elapsedMs: Int
+
+    var id: String { date }
+    var totalTokens: Int { inputTokens + outputTokens }
+
+    /// `date` is a plain `YYYY-MM-DD` bucket, not a timestamp.
+    var day: Date? { UsageDay.parser.date(from: date) }
+
+    private static let parser: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .iso8601)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+}
+
+struct UsageRecord: Codable, Identifiable, Equatable {
+    let id: Int
+    let createdAt: String
+    let provider: String
+    let model: String
+    let kind: String
+    let chatId: String?
+    let inputTokens: Int
+    let outputTokens: Int
+    let elapsedMs: Int
+    let costUsd: Double
+
+    var totalTokens: Int { inputTokens + outputTokens }
+    var timestamp: Date? { Date(serverTimestamp: createdAt) }
+}
+
+extension Date {
+    /// The server stamps every row with `new Date().toISOString()`, which carries
+    /// milliseconds. A bare `ISO8601DateFormatter` is configured for
+    /// `.withInternetDateTime` only and returns nil on those, so fractional
+    /// seconds have to be opted into — with a plain fallback for any value that
+    /// doesn't have them.
+    init?(serverTimestamp: String) {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFraction.date(from: serverTimestamp) {
+            self = date
+            return
+        }
+        guard let date = ISO8601DateFormatter().date(from: serverTimestamp) else { return nil }
+        self = date
     }
 }
 
 struct UsageSummary: Codable, Equatable {
     let hasData: Bool
-    let totalInputTokens: Int?
-    let totalOutputTokens: Int?
-    let totalEstimatedCost: Double?
-    let byKind: [UsageByKind]?
-
-    private struct Totals: Codable {
-        let inputTokens: Int
-        let outputTokens: Int
-        let costUsd: Double
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case hasData
-        case totals
-        case byKind
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        hasData = try container.decode(Bool.self, forKey: .hasData)
-        let totals = try container.decodeIfPresent(Totals.self, forKey: .totals)
-        totalInputTokens = totals?.inputTokens
-        totalOutputTokens = totals?.outputTokens
-        totalEstimatedCost = totals?.costUsd
-        byKind = try container.decodeIfPresent([UsageByKind].self, forKey: .byKind)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(hasData, forKey: .hasData)
-        if let totalInputTokens, let totalOutputTokens, let totalEstimatedCost {
-            try container.encode(
-                Totals(inputTokens: totalInputTokens, outputTokens: totalOutputTokens, costUsd: totalEstimatedCost),
-                forKey: .totals
-            )
-        }
-        try container.encodeIfPresent(byKind, forKey: .byKind)
-    }
+    let totals: UsageTotals?
+    let byProvider: [UsageBreakdownRow]?
+    let byModel: [UsageBreakdownRow]?
+    let byKind: [UsageBreakdownRow]?
+    let byDay: [UsageDay]?
+    let recent: [UsageRecord]?
 }
 
 // MARK: - Generic JSON passthrough (for raw tool-call args / flexible payloads)
