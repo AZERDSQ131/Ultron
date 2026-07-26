@@ -247,22 +247,56 @@ struct ChatView: View {
     }
 
     private func startRecording() {
+        let session = AVAudioSession.sharedInstance()
+
+        // `.spokenAudio` is a *playback* mode (long-form spoken content); pairing
+        // it with the `.record` category is rejected as OSStatus -50 (badParam).
+        // `.default` is the correct mode for plain capture.
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.record, mode: .spokenAudio, options: [.allowBluetooth])
+            try session.setCategory(.record, mode: .default, options: [.allowBluetooth])
             try session.setActive(true)
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("ultron-voice-\(UUID().uuidString).m4a")
-            recorder = try AVAudioRecorder(url: url, settings: [
+        } catch {
+            errorMessage = "Impossible d'activer la session audio : \(Self.audioErrorDetail(error))"
+            return
+        }
+
+        // Follow the hardware's own rate instead of asking for one it may not
+        // support, and pass it as a Double — AVSampleRateKey expects a
+        // floating-point value, and an integer here is the other way to get -50.
+        let sampleRate = session.sampleRate > 0 ? session.sampleRate : 44_100
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ultron-voice-\(UUID().uuidString).m4a")
+        do {
+            let recorder = try AVAudioRecorder(url: url, settings: [
                 AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 44_100,
+                AVSampleRateKey: sampleRate,
                 AVNumberOfChannelsKey: 1,
                 AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
             ])
-            recorder?.record()
+            guard recorder.record() else {
+                deactivateAudioSession()
+                errorMessage = "Le microphone n'a pas démarré l'enregistrement."
+                return
+            }
+            self.recorder = recorder
             isRecording = true
         } catch {
-            errorMessage = "Impossible de démarrer le microphone : \(error.localizedDescription)"
+            deactivateAudioSession()
+            errorMessage = "Impossible de démarrer le microphone : \(Self.audioErrorDetail(error))"
         }
+    }
+
+    /// Leaving the session active keeps the app in the `.record` category, which
+    /// ducks and blocks other audio on the device until something releases it.
+    private func deactivateAudioSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// CoreAudio surfaces failures as bare OSStatus codes whose
+    /// `localizedDescription` is the useless "The operation couldn't be
+    /// completed". Keep the numeric code so a residual failure is identifiable.
+    private static func audioErrorDetail(_ error: Error) -> String {
+        let nsError = error as NSError
+        return "\(nsError.localizedDescription) [\(nsError.domain) \(nsError.code)]"
     }
 
     private func finishRecording() {
@@ -270,6 +304,7 @@ struct ChatView: View {
         recorder.stop()
         self.recorder = nil
         isRecording = false
+        deactivateAudioSession()
         let url = recorder.url
         Task {
             do {
