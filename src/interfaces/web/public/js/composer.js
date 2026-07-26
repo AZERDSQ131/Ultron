@@ -33,9 +33,9 @@ const stopBtn = document.getElementById("stop-btn");
 const thinkingBtn = document.getElementById("thinking-btn");
 const thinkingBtnLabel = document.getElementById("thinking-btn-label");
 const thinkingMenu = document.getElementById("thinking-menu");
-const thinkingOptions = [...thinkingMenu.querySelectorAll(".thinking-option")];
+let thinkingOptions = [...thinkingMenu.querySelectorAll(".thinking-option")];
 const thinkingSelectSettings = document.getElementById("thinking-select-settings");
-const THINKING_LABELS = { full: "Full", low: "Low", off: "Off" };
+const THINKING_LABELS = { full: "High", default: "Default", low: "Low", medium: "Medium", high: "High", max: "Max", off: "Off" };
 const taskBtn = document.getElementById("task-btn");
 const taskBtnLabel = document.getElementById("task-btn-label");
 const taskMenu = document.getElementById("task-menu");
@@ -259,6 +259,33 @@ export function setThinkingMode(mode) {
     opt.setAttribute("aria-selected", String(active));
   }
 }
+
+function renderReasoningProfile(profile) {
+  const options = profile?.options?.length ? profile.options : ["off"];
+  thinkingMenu.innerHTML = "";
+  thinkingSelectSettings.innerHTML = "";
+  thinkingOptions = options.map((mode) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "thinking-option";
+    button.dataset.value = mode;
+    button.setAttribute("role", "option");
+    button.innerHTML = `<span class="thinking-option-title">${THINKING_LABELS[mode] ?? mode}</span><span class="thinking-option-desc">${profile?.supported ? "Provider endpoint option" : "No configurable reasoning exposed"}</span>`;
+    button.addEventListener("click", () => { setThinkingMode(mode); closeThinkingMenu(); thinkingBtn.focus(); });
+    thinkingMenu.appendChild(button);
+    return button;
+  });
+  for (const mode of options) {
+    const option = document.createElement("option");
+    option.value = mode;
+    option.textContent = THINKING_LABELS[mode] ?? mode;
+    thinkingSelectSettings.appendChild(option);
+  }
+  setThinkingMode(options.includes(state.thinkingMode) ? state.thinkingMode : profile?.defaultMode ?? options[0]);
+  thinkingBtn.title = profile?.note ?? "Reasoning mode";
+}
+
+window.addEventListener("reasoning:changed", (event) => renderReasoningProfile(event.detail));
 
 thinkingBtn.addEventListener("click", () => {
   thinkingMenu.hidden ? openThinkingMenu() : closeThinkingMenu();
@@ -622,13 +649,14 @@ async function runCommand(raw) {
 
   if (command === "/think") {
     const mode = arg.toLowerCase();
+    const options = state.reasoningProfile?.options ?? ["off", "low", "full"];
     if (!mode) {
-      addSystemNote(`[ultron] reasoning mode: ${state.thinkingMode} (use /think on, /think low or /think off).`);
+      addSystemNote(`[ultron] reasoning mode: ${state.thinkingMode} (available: ${options.join(", ")}). ${state.reasoningProfile?.note ?? ""}`);
       return;
     }
-    const next = mode === "on" || mode === "full" ? "full" : mode === "low" ? "low" : mode === "off" ? "off" : undefined;
+    const next = mode === "on" || mode === "full" ? (state.reasoningProfile?.defaultMode ?? "full") : options.includes(mode) ? mode : undefined;
     if (!next) {
-      addSystemNote("[ultron] use /think on, /think low or /think off.", true);
+      addSystemNote(`[ultron] available reasoning modes: ${options.join(", ")}.`, true);
       return;
     }
     setThinkingMode(next);

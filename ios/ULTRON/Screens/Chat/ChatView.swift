@@ -15,6 +15,7 @@ struct ChatView: View {
     @State private var modelId = ""
     @State private var providerId = ""
     @State private var thinkingMode = "full"
+    @State private var reasoningProfile: ReasoningProfile?
     @State private var taskMode = "none"
     @State private var securityMode = "bypass"
     @State private var verbose = false
@@ -93,11 +94,12 @@ struct ChatView: View {
                 Task {
                     if provider != previousProvider { try? await client.setProvider(provider) }
                     _ = try? await client.setModel(model)
+                    await loadReasoningProfile()
                 }
             }
         }
         .sheet(isPresented: $showThinkingModePicker) {
-            ThinkingModePickerSheet(selected: $thinkingMode) { _ in }
+            ThinkingModePickerSheet(selected: $thinkingMode, profile: reasoningProfile) { _ in }
         }
         .sheet(isPresented: $showTaskModePicker) {
             TaskModePickerSheet(selected: $taskMode) { _ in }
@@ -125,6 +127,10 @@ struct ChatView: View {
     private var thinkingModeLabel: String {
         switch thinkingMode {
         case "low": return "Réduit"
+        case "default": return "Par défaut"
+        case "medium": return "Medium"
+        case "high": return "High"
+        case "max": return "Max"
         case "off": return "Sans raisonnement"
         default: return "Complet"
         }
@@ -168,8 +174,21 @@ struct ChatView: View {
             let grouped = try await client.groupedModels()
             modelId = grouped.current
             providerId = grouped.currentProvider
+            await loadReasoningProfile()
         } catch {
             // Non-fatal: model label just stays empty until picked.
+        }
+    }
+
+    private func loadReasoningProfile() async {
+        guard !providerId.isEmpty, !modelId.isEmpty else { return }
+        do {
+            let profile = try await client.reasoningProfile(provider: providerId, model: modelId)
+            reasoningProfile = profile
+            if !profile.options.contains(thinkingMode) { thinkingMode = profile.defaultMode ?? profile.options.first ?? "off" }
+        } catch {
+            reasoningProfile = nil
+            thinkingMode = "off"
         }
     }
 

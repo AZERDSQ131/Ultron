@@ -462,9 +462,14 @@ export async function getPendingApproval(
 }
 
 export function buildGraph() {
-  const fullThinkingModel = createNemotronModel("full");
-  const lowThinkingModel = createNemotronModel("low");
-  const noThinkingModel = createNemotronModel("off");
+  const thinkingModels = new Map<ThinkingMode, ReturnType<typeof createNemotronModel>>();
+  const getThinkingModel = (mode: ThinkingMode) => {
+    const cached = thinkingModels.get(mode);
+    if (cached) return cached;
+    const model = createNemotronModel(mode);
+    thinkingModels.set(mode, model);
+    return model;
+  };
   // Shared, disk-backed, and keyed by thread_id — the CLI and the web
   // interface both call buildGraph() and point at the same database file,
   // so they read and write the same conversation state instead of each
@@ -496,7 +501,7 @@ export function buildGraph() {
       const availableTools = currentTodoState === "active" || currentTodoState === "plan_denied"
         ? tools.filter((tool) => !taskToolNames.has(tool.name))
         : tools;
-      const baseModel = thinkingMode === "off" ? noThinkingModel : thinkingMode === "low" ? lowThinkingModel : fullThinkingModel;
+      const baseModel = getThinkingModel(thinkingMode);
       const model = availableTools.length ? baseModel.bindTools(availableTools) : baseModel;
       debugLog(`agent start thread=${String(runConfig.configurable?.thread_id ?? "unknown")} thinking=${thinkingMode} messages=${state.messages.length}`);
 

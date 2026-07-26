@@ -26,6 +26,7 @@ import { getHealthRegistry, pickLatestWithData, sparkline, type HealthMetric } f
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
 import { detectAnomalies } from "../../core/health/trends.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
+import { getReasoningProfile } from "../../core/llm/reasoning.js";
 import { CLI_CHAT_SCOPE, getChatRegistry } from "../../core/memory/chats.js";
 import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../core/memory/exporter.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
@@ -128,6 +129,8 @@ async function main() {
   let abortController: AbortController | undefined;
   let stopping = false;
   let thinkingMode: ThinkingMode = "full";
+  let reasoningOptions: ThinkingMode[] = ["off", "low", "full"];
+  let reasoningNote = "";
   let taskMode: TaskMode = "none";
   let verbose = false;
   const fallbackContextWindowTokens = config.contextWindowTokens;
@@ -135,6 +138,13 @@ async function main() {
   const applyModelContext = (model: { contextWindowTokens?: number } | undefined): void => {
     config.contextWindowTokens = model?.contextWindowTokens ?? fallbackContextWindowTokens;
   };
+  const refreshReasoningProfile = async (): Promise<void> => {
+    const profile = await getReasoningProfile(config.provider, config.nemotronModel);
+    reasoningOptions = profile.options;
+    reasoningNote = profile.note;
+    if (!reasoningOptions.includes(thinkingMode)) thinkingMode = profile.defaultMode ?? reasoningOptions[0] ?? "off";
+  };
+  await refreshReasoningProfile();
 
   const changeModel = async (contextLine: string): Promise<void> => {
     appendTranscript(uiDim("[ultron] loading models…\n"));
@@ -156,6 +166,7 @@ async function main() {
       const resolvedSelected = await resolveModelContext(selected);
       if (resolvedSelected.provider !== config.provider) setActiveProvider(resolvedSelected.provider);
       setActiveModel(resolvedSelected.id);
+      await refreshReasoningProfile();
       applyModelContext(resolvedSelected);
       graph = buildGraph();
       const contextLabel = resolvedSelected.contextWindowTokens
@@ -175,6 +186,7 @@ async function main() {
       return;
     }
     setActiveProvider(next);
+    await refreshReasoningProfile();
     graph = buildGraph();
     try {
       const models = await listAvailableModels();
@@ -571,7 +583,7 @@ async function main() {
             continue;
           }
           case "/think":
-            appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
+            appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (available: ${reasoningOptions.join(", ")}). ${reasoningNote}\n\n`));
             continue;
           case "/task":
             appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal).\n\n`));
@@ -604,10 +616,9 @@ async function main() {
             if (command.startsWith("/think ")) {
               const mode = command.slice("/think ".length).trim();
               if (mode === "on" || mode === "full") thinkingMode = "full";
-              else if (mode === "low") thinkingMode = "low";
-              else if (mode === "off") thinkingMode = "off";
+              else if (reasoningOptions.includes(mode as ThinkingMode)) thinkingMode = mode as ThinkingMode;
               else {
-                appendTranscript(chalk.yellow("[ultron] use /think on, /think low or /think off.\n\n"));
+                appendTranscript(chalk.yellow(`[ultron] available reasoning modes: ${reasoningOptions.join(", ")}.\n\n`));
                 continue;
               }
               appendTranscript(uiDim(`[ultron] reasoning mode set to ${thinkingMode}.\n\n`));

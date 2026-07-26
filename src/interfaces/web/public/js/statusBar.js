@@ -32,6 +32,7 @@ export async function loadStatus() {
     const data = await api.status(state.activeChatId);
     activeModel = data.model;
     activeProvider = data.provider ?? activeProvider;
+    await loadReasoningProfile(activeProvider, activeModel);
     modelLabel.textContent = data.model;
     activeModelName.textContent = data.model;
     settingsModel.textContent = data.model;
@@ -44,6 +45,21 @@ export async function loadStatus() {
   } catch {
     modelLabel.textContent = "offline";
     return undefined;
+  }
+}
+
+export async function loadReasoningProfile(provider = activeProvider, model = activeModel) {
+  if (!provider || !model) return undefined;
+  try {
+    const profile = await api.reasoning(provider, model);
+    state.reasoningProfile = profile;
+    window.dispatchEvent(new CustomEvent("reasoning:changed", { detail: profile }));
+    return profile;
+  } catch {
+    const profile = { provider, model, supported: false, options: ["off"], defaultMode: null, note: "Profil de raisonnement indisponible." };
+    state.reasoningProfile = profile;
+    window.dispatchEvent(new CustomEvent("reasoning:changed", { detail: profile }));
+    return profile;
   }
 }
 

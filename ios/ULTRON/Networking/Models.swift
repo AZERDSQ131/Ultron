@@ -64,6 +64,15 @@ struct ModelInfo: Codable, Identifiable, Equatable {
     }
 }
 
+struct ReasoningProfile: Codable, Equatable {
+    let provider: String
+    let model: String
+    let supported: Bool
+    let options: [String]
+    let defaultMode: String?
+    let note: String
+}
+
 struct ModelGroup: Codable, Equatable {
     let provider: String
     let models: [ModelInfo]

@@ -189,6 +189,12 @@ final class ULTRONClient {
     struct GroupedModelsResponse: Codable { let current: String; let currentProvider: String; let groups: [ModelGroup] }
     func groupedModels() async throws -> GroupedModelsResponse { try await requestNoBody("GET", "/api/models/grouped") }
 
+    func reasoningProfile(provider: String, model: String) async throws -> ReasoningProfile {
+        let p = provider.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? provider
+        let m = model.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? model
+        return try await requestNoBody("GET", "/api/reasoning?provider=\(p)&model=\(m)")
+    }
+
     struct SetModelBody: Encodable { let model: String }
     struct SetModelResponse: Codable { let model: String }
     func setModel(_ model: String) async throws -> SetModelResponse {

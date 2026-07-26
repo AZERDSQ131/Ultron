@@ -118,13 +118,14 @@ struct TaskModePickerSheet: View {
 struct ThinkingModePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var selected: String
+    let profile: ReasoningProfile?
     let onPicked: (String) -> Void
 
-    private let modes: [(value: String, label: String, icon: String)] = [
-        ("full", "Complet", "brain"),
-        ("low", "Réduit", "brain.head.profile"),
-        ("off", "Désactivé", "brain.head.profile.fill"),
-    ]
+    private var modes: [(value: String, label: String, icon: String)] {
+        (profile?.options ?? ["off"]).map { mode in
+            (mode, mode == "off" ? "Désactivé" : mode.capitalized, mode == "off" ? "brain.head.profile.fill" : "brain")
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -145,6 +146,9 @@ struct ThinkingModePickerSheet: View {
                 .foregroundStyle(.primary)
             }
             .navigationTitle("Raisonnement")
+            .safeAreaInset(edge: .bottom) {
+                if let note = profile?.note { Text(note).font(.footnote).foregroundStyle(.secondary).padding() }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Fermer") { dismiss() }

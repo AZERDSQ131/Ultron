@@ -6,6 +6,7 @@ export const state = {
   generating: false,
   verbose: false,
   thinkingMode: "full",
+  reasoningProfile: null,
   taskMode: "none",
   securityMode: "bypass",
   activeChatId: null,

@@ -1,6 +1,7 @@
 import { config, PROVIDER_CYCLE, type LlmProvider } from "../../config.js";
 import { getOpenAIAuthRegistry } from "../memory/openaiAuth.js";
 import { getValidAuth, codexAuthHeaders, CHATGPT_CODEX_BASE_URL, CODEX_CLIENT_VERSION } from "./openaiAuth.js";
+import type { ThinkingMode } from "./reasoning.js";
 
 // Shared by the local CLI (src/interfaces/cli/index.ts), the web server
 // (src/interfaces/web/server.ts, which the remote CLI's /model
@@ -13,6 +14,7 @@ export interface ModelInfo {
   id: string;
   contextWindowTokens?: number;
   provider?: LlmProvider;
+  reasoningOptions?: ThinkingMode[];
 }
 
 async function fetchNvidiaModels(): Promise<ModelInfo[]> {
@@ -50,8 +52,8 @@ async function fetchNvidiaModels(): Promise<ModelInfo[]> {
 // catalog behind /v1/models.
 function deepseekModels(): ModelInfo[] {
   return [
-    { id: "deepseek-v4-flash", contextWindowTokens: 128_000 },
-    { id: "deepseek-v4-pro", contextWindowTokens: 128_000 },
+    { id: "deepseek-v4-flash", contextWindowTokens: 1_000_000, reasoningOptions: ["off", "high", "max"] },
+    { id: "deepseek-v4-pro", contextWindowTokens: 1_000_000, reasoningOptions: ["off", "high", "max"] },
   ];
 }
 
@@ -77,6 +79,9 @@ async function fetchGroqModels(): Promise<ModelInfo[]> {
       id: model.id as string,
       ...(typeof model.context_window === "number" && model.context_window > 0
         ? { contextWindowTokens: model.context_window }
+        : {}),
+      ...(Array.isArray(model.supported_features) && model.supported_features.includes("reasoning")
+        ? { reasoningOptions: /^openai\/gpt-oss/.test(model.id as string) ? ["low", "medium", "high"] as ThinkingMode[] : ["off", "default"] as ThinkingMode[] }
         : {}),
     }))
     .sort((a, b) => a.id.localeCompare(b.id));

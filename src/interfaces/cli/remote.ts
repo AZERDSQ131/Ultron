@@ -170,8 +170,17 @@ async function main() {
   let abortController: AbortController | undefined;
   let stopping = false;
   let thinkingMode: ThinkingMode = "full";
+  let reasoningOptions: ThinkingMode[] = ["off", "low", "full"];
+  let reasoningNote = "";
   let taskMode: TaskMode = "none";
   let verbose = false;
+  const refreshReasoningProfile = async (): Promise<void> => {
+    const profile = await apiGet(`/api/reasoning?provider=${encodeURIComponent(providerName)}&model=${encodeURIComponent(modelName)}`);
+    reasoningOptions = profile.options ?? ["off"];
+    reasoningNote = profile.note ?? "";
+    if (!reasoningOptions.includes(thinkingMode)) thinkingMode = profile.defaultMode ?? reasoningOptions[0] ?? "off";
+  };
+  await refreshReasoningProfile();
 
   const changeModel = async (contextLine: string): Promise<void> => {
     appendTranscript(uiDim("[ultron] loading models…\n"));
@@ -191,6 +200,7 @@ async function main() {
       if (selected.provider !== providerName) await apiPatch("/api/provider", { provider: selected.provider });
       await apiPatch("/api/model", { model: selected.id });
       const status = await refreshStatus();
+      await refreshReasoningProfile();
       appendTranscript(uiDim(`[ultron] model set to ${selected.provider}/${selected.id} · context ${status.maxTokens.toLocaleString()} tokens.\n\n`));
     } catch (error) {
       appendTranscript(chalk.red(`[ultron] could not list models: ${error instanceof Error ? error.message : String(error)}\n\n`));
@@ -223,6 +233,7 @@ async function main() {
       }
       await apiPatch("/api/provider", { provider: next });
       await refreshStatus();
+      await refreshReasoningProfile();
       printBanner(modelName);
       appendTranscript(uiDim(`[ultron] provider set to ${next} (model: ${modelName}).\n\n`));
     } catch (error) {
@@ -457,7 +468,7 @@ async function main() {
             continue;
           }
           case "/think":
-            appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (use /think on|low|off).\n\n`));
+            appendTranscript(uiDim(`[ultron] reasoning mode: ${thinkingMode} (available: ${reasoningOptions.join(", ")}). ${reasoningNote}\n\n`));
             continue;
           case "/task":
             appendTranscript(uiDim(`[ultron] task mode: ${taskMode} (use /task none|todo|plan|goal).\n\n`));
@@ -489,9 +500,8 @@ async function main() {
             if (command.startsWith("/think ")) {
               const mode = command.slice("/think ".length).trim();
               if (mode === "on" || mode === "full") thinkingMode = "full";
-              else if (mode === "low") thinkingMode = "low";
-              else if (mode === "off") thinkingMode = "off";
-              else { appendTranscript(chalk.yellow("[ultron] use /think on, /think low or /think off.\n\n")); continue; }
+              else if (reasoningOptions.includes(mode as ThinkingMode)) thinkingMode = mode as ThinkingMode;
+              else { appendTranscript(chalk.yellow(`[ultron] available reasoning modes: ${reasoningOptions.join(", ")}.\n\n`)); continue; }
               appendTranscript(uiDim(`[ultron] reasoning mode set to ${thinkingMode}.\n\n`));
               continue;
             }

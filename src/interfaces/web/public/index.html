@@ -88,22 +88,9 @@
         <div class="thinking-control">
           <button type="button" id="thinking-btn" class="thinking-btn" title="Reasoning mode" aria-haspopup="listbox" aria-expanded="false">
             <span class="thinking-btn-icon" aria-hidden="true">◆</span>
-            <span id="thinking-btn-label">Full</span>
+            <span id="thinking-btn-label">Reasoning</span>
           </button>
-          <div id="thinking-menu" class="thinking-menu" role="listbox" aria-label="Reasoning mode" hidden>
-            <button type="button" class="thinking-option" data-value="full" role="option">
-              <span class="thinking-option-title">Full reasoning</span>
-              <span class="thinking-option-desc">Thinks before every reply</span>
-            </button>
-            <button type="button" class="thinking-option" data-value="low" role="option">
-              <span class="thinking-option-title">Low effort</span>
-              <span class="thinking-option-desc">Faster, lighter reasoning</span>
-            </button>
-            <button type="button" class="thinking-option" data-value="off" role="option">
-              <span class="thinking-option-title">Off</span>
-              <span class="thinking-option-desc">No reasoning pass</span>
-            </button>
-          </div>
+          <div id="thinking-menu" class="thinking-menu" role="listbox" aria-label="Reasoning mode" hidden></div>
         </div>
         <div class="task-control">
           <button type="button" id="task-btn" class="task-btn" title="Task mode" aria-haspopup="listbox" aria-expanded="false">
@@ -230,11 +217,7 @@
           <h3>Model</h3>
           <div class="field-row">
             <label for="thinking-select-settings">Reasoning</label>
-            <select id="thinking-select-settings">
-              <option value="full">Full</option>
-              <option value="low">Low effort</option>
-              <option value="off">Off</option>
-            </select>
+            <select id="thinking-select-settings"></select>
           </div>
           <div class="field-row">
             <label for="verbose-toggle">Verbose stats</label>

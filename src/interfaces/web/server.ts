@@ -19,6 +19,7 @@ import {
 import { config, setActiveModel, setActiveProvider, hasProviderCredentials, PROVIDER_CYCLE } from "../../config.js";
 import type { ThinkingMode } from "../../core/llm/nemotron.js";
 import { listAvailableModels, listModelsByProvider, resolveModelContext, type ModelInfo } from "../../core/llm/models.js";
+import { getReasoningProfile } from "../../core/llm/reasoning.js";
 import { formatTurnStats, recordUsage } from "../../core/llm/usage.js";
 import { recordUserModelObservation } from "../../core/userModelExtractor.js";
 import { autoTitleChat } from "../../core/chatTitler.js";
@@ -1003,6 +1004,16 @@ async function handleModelsGrouped(res: ServerResponse): Promise<void> {
   sendJson(res, 200, { current: config.nemotronModel, currentProvider: config.provider, groups });
 }
 
+async function handleReasoning(url: URL, res: ServerResponse): Promise<void> {
+  const provider = url.searchParams.get("provider") ?? config.provider;
+  const model = url.searchParams.get("model") ?? config.nemotronModel;
+  if (provider !== "nvidia" && provider !== "deepseek" && provider !== "groq" && provider !== "openai") {
+    sendJson(res, 400, { error: "invalid provider" });
+    return;
+  }
+  sendJson(res, 200, await getReasoningProfile(provider, model));
+}
+
 async function handleSetModel(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const payload = await readJson<{ model?: string }>(req);
   const model = payload?.model?.trim();
@@ -1220,6 +1231,10 @@ const server = createServer((req, res) => {
   }
   if (req.method === "GET" && path === "/api/models/grouped") {
     handleModelsGrouped(res).catch((err) => sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/reasoning") {
+    handleReasoning(url, res).catch((err) => sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) }));
     return;
   }
   if (req.method === "PATCH" && path === "/api/model") {
