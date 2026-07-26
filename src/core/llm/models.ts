@@ -80,6 +80,7 @@ async function fetchNvidiaModels(): Promise<ModelInfo[]> {
       };
     })
     .filter((model): model is NonNullable<typeof model> => Boolean(model))
+    .filter((model) => model.availability === "free")
     .sort((a, b) => {
       const rank: Record<NvidiaAvailability, number> = { free: 0, partner: 1, downloadable: 2, unknown: 3 };
       return (rank[a.availability] - rank[b.availability]) || a.id.localeCompare(b.id);

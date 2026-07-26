@@ -113,11 +113,14 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
     // as temperature and top_p for GPT-5.x models. Keep the defaults for the
     // OpenAI-compatible providers, but omit them from Codex requests.
     ...(provider !== "openai" ? { temperature: 1.0, topP: 0.95 } : {}),
-    ...(provider === "nvidia" ? { modelKwargs: { chat_template_kwargs: {
-      enable_thinking: thinking,
-      ...(mode === "low" ? { low_effort: true } : {}),
-      ...(mode === "max" ? { reasoning_effort: "max" } : {}),
-    } } } : {}),
+    ...(provider === "nvidia" ? { modelKwargs: { chat_template_kwargs: /^deepseek-ai\/deepseek-v4/.test(config.nemotronModel)
+      ? { thinking, ...(thinking ? { reasoning_effort: mode === "max" ? "max" : "high" } : {}) }
+      : {
+          enable_thinking: thinking,
+          ...(mode === "low" ? { low_effort: true } : {}),
+          ...(mode === "high" ? { reasoning_effort: "high" } : {}),
+          ...(mode === "max" ? { reasoning_effort: "max" } : {}),
+        } } } : {}),
     ...(provider === "deepseek" ? { modelKwargs: {
       thinking: { type: thinking ? "enabled" : "disabled" },
       ...(thinking ? { reasoning_effort: mode === "max" ? "max" : "high" } : {}),

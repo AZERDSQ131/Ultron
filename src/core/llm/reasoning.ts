@@ -34,13 +34,15 @@ async function nvidiaProfile(model: string): Promise<ReasoningProfile> {
     const modelPath = model.split("/").map(encodeURIComponent).join("/");
     const response = await fetch(`https://build.nvidia.com/${modelPath}/modelcard`, { signal: AbortSignal.timeout(5_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const html = await response.text();
-    const declaresThinking = /enable_thinking|reasoning[_ ]?(?:model|llm|capabilit|effort)|thinking[_ ]mode/i.test(html);
+    const html = (await response.text()).replaceAll(/\\(["'])/g, "$1");
+    const declaresThinking = /enable_thinking|reasoning_effort|chat_template_kwargs[^\n]{0,240}thinking/i.test(html);
     const options: ThinkingMode[] = ["off"];
     if (declaresThinking) {
       if (/low_effort/i.test(html)) options.push("low");
-      options.push("high");
+      const supportsHigh = /reasoning_effort[\s\S]{0,240}["']high["']/i.test(html);
+      if (supportsHigh) options.push("high");
       if (/reasoning_effort.{0,240}\bmax\b/i.test(html)) options.push("max");
+      if (options.length === 1) options.push("default");
     }
     const result = declaresThinking
       ? profile("nvidia", model, options, options.includes("high") ? "high" : options[1], "Options détectées dans la fiche NVIDIA de ce modèle.")
