@@ -3,8 +3,8 @@ import type { MessageContent } from "@langchain/core/messages";
 import { config } from "../../config.js";
 import { getOpenAIAuthRegistry } from "../memory/openaiAuth.js";
 import { getValidAuth, codexAuthHeaders, CHATGPT_CODEX_BASE_URL } from "./openaiAuth.js";
-
-export type ThinkingMode = "off" | "low" | "full";
+import { normalizeThinkingMode, type ThinkingMode } from "./reasoning.js";
+export type { ThinkingMode } from "./reasoning.js";
 
 // langchain-core's default getNumTokens tries to load a tiktoken encoding
 // for `this.modelName` before falling back to a chars/4 estimate — for any
@@ -46,7 +46,8 @@ function openaiOAuthFetch(): NonNullable<OpenAIClientConfiguration>["fetch"] {
 }
 
 export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOpenAI {
-  const thinking = thinkingMode !== "off";
+  const mode = normalizeThinkingMode(thinkingMode);
+  const thinking = mode !== "off";
   const provider = config.provider;
   if (provider === "deepseek" && !config.deepseekApiKey) {
     throw new Error("DEEPSEEK_API_KEY is not set — cannot use the DeepSeek provider (see .env.example).");
@@ -75,21 +76,24 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
   const model = new ChatOpenAI({
     model: config.nemotronModel,
     apiKey,
-    temperature: 1.0,
-    topP: 0.95,
-    // Neither DeepSeek's nor Groq's nor the ChatGPT-account-scoped Responses
-    // API has an equivalent to NVIDIA NIM's chat_template_kwargs knob —
-    // thinkingMode only shapes reasoning depth on NVIDIA-hosted models.
-    ...(provider === "nvidia"
-      ? {
-          modelKwargs: {
-            chat_template_kwargs: {
-              enable_thinking: thinking,
-              ...(thinkingMode === "low" ? { low_effort: true } : {}),
-            },
-          },
-        }
-      : {}),
+    // The ChatGPT/Codex Responses endpoint rejects sampling parameters such
+    // as temperature and top_p for GPT-5.x models. Keep the defaults for the
+    // OpenAI-compatible providers, but omit them from Codex requests.
+    ...(provider !== "openai" ? { temperature: 1.0, topP: 0.95 } : {}),
+    ...(provider === "nvidia" ? { modelKwargs: { chat_template_kwargs: {
+      enable_thinking: thinking,
+      ...(mode === "low" ? { low_effort: true } : {}),
+      ...(mode === "max" ? { reasoning_effort: "max" } : {}),
+    } } } : {}),
+    ...(provider === "deepseek" ? { modelKwargs: {
+      thinking: { type: thinking ? "enabled" : "disabled" },
+      ...(thinking ? { reasoning_effort: mode === "max" ? "max" : "high" } : {}),
+    } } : {}),
+    ...(provider === "groq" ? { modelKwargs: {
+      ...(/^openai\/gpt-oss/.test(config.nemotronModel)
+        ? { reasoning_effort: mode === "low" ? "low" : mode === "high" || mode === "max" ? "high" : "medium" }
+        : config.nemotronModel === "qwen/qwen3.6-27b" ? { reasoning_effort: thinking ? "default" : "none" } : {}),
+    } } : {}),
     // The ChatGPT-account-scoped backend speaks OpenAI's Responses API
     // shape, not chat-completions — see src/core/llm/openaiAuth.ts's header
     // comment for the verified endpoint/token details. It also rejects any
@@ -97,7 +101,7 @@ export function createNemotronModel(thinkingMode: ThinkingMode = "full"): ChatOp
     // (confirmed live: {"detail":"Store must be set to false"}) — the
     // Codex CLI never asks it to retain responses since it keeps its own
     // conversation state locally, same as ULTRON's own checkpointer does.
-    ...(provider === "openai" ? { useResponsesApi: true, modelKwargs: { store: false } } : {}),
+    ...(provider === "openai" ? { useResponsesApi: true, modelKwargs: { store: false, reasoning: { effort: mode === "off" ? "none" : "medium" } } } : {}),
     configuration: {
       baseURL,
       ...(provider === "openai" ? { fetch: openaiOAuthFetch() } : {}),
