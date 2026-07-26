@@ -85,11 +85,14 @@ struct TaskModePickerSheet: View {
     @Binding var selected: String
     let onPicked: (String) -> Void
 
-    private let modes: [(value: String, label: String, icon: String)] = [
-        ("none", "Aucun", "circle"),
-        ("todo", "To-Do", "checklist"),
-        ("plan", "Plan", "list.bullet.clipboard"),
-        ("goal", "Objectif", "target"),
+    // Values are the wire `TaskMode` (graph.ts) — "deep_research", not
+    // "research": the shorthand only exists in the CLI and web /task commands.
+    private let modes: [(value: String, label: String, icon: String, detail: String)] = [
+        ("none", "Aucun", "circle", "Réponse directe, sans planification imposée"),
+        ("todo", "To-Do", "checklist", "Tâche à plusieurs étapes — tient une liste de sous-tâches"),
+        ("plan", "Plan", "list.bullet.clipboard", "Tâche complexe — propose un plan et attend ton accord"),
+        ("goal", "Objectif", "target", "Tâche autonome — continue jusqu'à ce que l'objectif soit atteint"),
+        ("deep_research", "Deep Research", "text.magnifyingglass", "Question de fond — découpe en sous-questions, lit les sources, puis rédige un rapport cité"),
     ]
 
     var body: some View {
@@ -100,9 +103,15 @@ struct TaskModePickerSheet: View {
                     onPicked(mode.value)
                     dismiss()
                 } label: {
-                    HStack {
-                        Label(mode.label, systemImage: mode.icon)
-                        Spacer()
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label(mode.label, systemImage: mode.icon)
+                            Text(mode.detail)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
                         if selected == mode.value {
                             Image(systemName: "checkmark").foregroundStyle(.tint)
                         }
