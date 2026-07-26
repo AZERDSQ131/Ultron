@@ -143,14 +143,33 @@ opening).
   modules. Full tap-through of every screen wasn't automated (no reliable simulator UI-automation
   tool in this environment); the user should click through the golden path once on a real device
   or simulator.
-- **Live Activity** — `ULTRONLiveActivity` is a WidgetKit extension with compact/minimal/expanded/
-  Lock Screen layouts. `LiveActivityManager` starts one for each mobile turn, mirrors text/tool/
-  approval/done events locally, and registers the ActivityKit push token with
-  `POST /api/live-activities/register`. The server persists tokens and sends ActivityKit/APNs
-  updates for mobile turns; app-originated turns continue server-side after the SSE client closes
-  so iOS suspension doesn't abort the work. Configure `APNS_KEY_ID`, `APNS_TEAM_ID`,
-  `APNS_PRIVATE_KEY_PATH` (or `APNS_PRIVATE_KEY`), `APNS_ENVIRONMENT` and `APNS_BUNDLE_ID` on the
-  server for remote updates. Without APNs credentials, foreground/local updates still work.
+- **Live Activity / Dynamic Island** — `ULTRONLiveActivity` is a WidgetKit extension with
+  compact/minimal/expanded/Lock Screen layouts. Compact reads at a glance: blue ring on the left
+  while the agent works, green check on success, red cross on failure, orange raised hand when a
+  tool needs approval; elapsed time on the right while running only. The ring is a
+  `ProgressView(timerInterval:)` anchored on `ContentState.ringStartedAt` — ActivityKit ignores
+  SwiftUI animations that repeat indefinitely, so an indeterminate `ProgressView` renders frozen
+  and a timer-driven ring is the only indicator that actually moves. Long-pressing expands to the
+  tail of the conversation: `ContentState.entries` are typed (`message`/`tool`/`status`), one icon
+  per kind, and a streaming reply rewrites a single line in place instead of appending an entry per
+  token.
+- **Live Activity background continuation** — `LiveActivityRegistry`
+  (`src/core/memory/liveActivities.ts`) keeps each app-originated turn's state in an in-memory map
+  keyed by chat, written whether or not APNs is reachable, and exposed over
+  `GET /api/live-activities/state`. In memory on purpose: it only describes work the current
+  process is running. Finished turns stay queryable for 30 minutes so an app suspended through the
+  end of a turn can still learn the outcome. `LiveActivityManager.reconcile()` polls it when the
+  app becomes active, and `resolveAfterStreamFailure()` on a dead SSE socket — the server
+  deliberately keeps running app-originated turns after the client closes, so a transport failure
+  says nothing about the outcome and must not flash a red cross over work that succeeded.
+- **Live Activity push, blocked on account tier** — remote updates need `APNS_KEY_ID`,
+  `APNS_TEAM_ID`, `APNS_PRIVATE_KEY_PATH` (or `APNS_PRIVATE_KEY`), `APNS_ENVIRONMENT` and
+  `APNS_BUNDLE_ID` on the server. The user's Apple Developer account is the free tier, which cannot
+  sign the Push Notifications capability, so `Activity.request(pushType: .token)` fails and
+  `LiveActivityManager` falls back to a local-only activity. The APNs code path is complete and
+  payload-aligned with `ContentState`, but it stays dark until the account is paid. Consequence,
+  accepted: with the app suspended the activity freezes on its last known state past the ~30s
+  background task assertion, and only snaps to the real outcome when the app is active again.
 - Deferred, same as everywhere else: Agents/Schedules panel, Goal mode (CLI-only today), file/photo
   upload from mobile.
 
