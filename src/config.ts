@@ -1,7 +1,13 @@
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getOpenAIAuthRegistry } from "./core/memory/openaiAuth.js";
+
+// ULTRON keeps its provider credentials in the project .env file. Override
+// stale shell exports so switching providers in the web UI always uses the
+// matching key from that file instead of an unrelated previously exported
+// provider credential.
+loadEnv({ override: true });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, "..");
