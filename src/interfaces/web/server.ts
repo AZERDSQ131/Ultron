@@ -149,15 +149,11 @@ function sseWrite(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function publishLiveActivity(
-  chatId: string,
-  status: "running" | "completed" | "failed" | "waitingForApproval",
-  latestAction: string,
-  options: { force?: boolean; end?: boolean } = {},
-): void {
-  void liveActivities.publish(chatId, status, latestAction, options).catch((error) => {
-    debugLog(`live activity update failed chat=${chatId}: ${error instanceof Error ? error.message : String(error)}`);
-  });
+// Live Activity tracking is only meaningful for turns the mobile app started —
+// it is the only client that owns one. See LiveActivityRegistry for why the
+// state is kept even when APNs is unavailable.
+function tracksLiveActivity(source: ChatEventSource): boolean {
+  return source === "app";
 }
 
 function requireChat(res: ServerResponse, chatId: unknown): chatId is string {
@@ -276,6 +272,11 @@ async function streamGraphTurn(
 
   const turnStarted = Date.now();
   let finalText = "";
+  // The Live Activity rewrites its streaming line in place, so it tracks the
+  // current paragraph rather than the whole reply: a tool call in the middle of
+  // a turn starts a new line instead of extending the previous one.
+  let streamingParagraph = "";
+  if (tracksLiveActivity(source) && !nested) liveActivities.begin(chatId);
 
   try {
     // Serialized per chatId (see threadLock.ts) so another graph execution
@@ -303,12 +304,21 @@ async function streamGraphTurn(
           const pending = [...pendingToolCalls.values()].find((call) => call.name === toolName);
           if (pending) {
             sseWrite(res, "tool_call", { name: pending.name, summary: summarizeToolCall(pending.name, pending.args) });
-            if (source === "app") publishLiveActivity(chatId, "running", `Outil : ${pending.name} — ${summarizeToolCall(pending.name, pending.args)}`);
+            if (tracksLiveActivity(source)) {
+              streamingParagraph = "";
+              // summarizeToolCall falls back to the bare tool name when a call
+              // has no arguments worth showing; don't print it twice.
+              const summary = summarizeToolCall(pending.name, pending.args);
+              liveActivities.noteTool(chatId, summary === pending.name ? pending.name : `${pending.name} — ${summary}`);
+            }
             const key = [...pendingToolCalls.entries()].find(([, call]) => call === pending)?.[0];
             if (key !== undefined) pendingToolCalls.delete(key);
           }
           sseWrite(res, "tool_result", { name: toolName, content: toolContent });
-          if (source === "app") publishLiveActivity(chatId, "running", `Résultat : ${toolName} — ${toolContent.slice(0, 120)}`);
+          if (tracksLiveActivity(source)) {
+            streamingParagraph = "";
+            liveActivities.noteTool(chatId, `${toolName} → ${toolContent.slice(0, 120)}`);
+          }
           continue;
         }
 
@@ -341,14 +351,17 @@ async function streamGraphTurn(
         generatedChars += text.length;
         finalText += text;
         sseWrite(res, "text", { delta: text });
-        if (source === "app") publishLiveActivity(chatId, "running", `Réponse : ${finalText.slice(-140)}`);
+        if (tracksLiveActivity(source)) {
+          streamingParagraph += text;
+          liveActivities.noteMessage(chatId, streamingParagraph);
+        }
       }
 
       const pendingApproval = await getPendingApproval(graph, chatId);
       if (pendingApproval) {
         debugLog(`approval required chat=${chatId} calls=${JSON.stringify(pendingApproval.calls.map((c) => c.name))}`);
         sseWrite(res, "approval_required", { calls: pendingApproval.calls });
-        if (source === "app") publishLiveActivity(chatId, "waitingForApproval", "Approbation requise", { force: true });
+        if (tracksLiveActivity(source)) liveActivities.awaitApproval(chatId);
       } else {
         // Close the whole plan in the host after the real work is done;
         // never spend one model turn per item changing statuses.
@@ -374,7 +387,7 @@ async function streamGraphTurn(
           contextTokens,
           maxTokens: config.contextWindowTokens,
         });
-        if (source === "app") publishLiveActivity(chatId, "completed", "Terminé", { force: true, end: true });
+        if (tracksLiveActivity(source)) liveActivities.finish(chatId, "completed");
 
         // Passive memory extraction (see userModelExtractor.ts) — never
         // awaited, never blocks the SSE response; only for an actual new
@@ -424,10 +437,10 @@ async function streamGraphTurn(
     debugLog(`turn error chat=${chatId} error=${err instanceof Error ? err.stack ?? err.message : String(err)}`);
     if (abortController.signal.aborted) {
       sseWrite(res, "aborted", {});
-      if (source === "app") publishLiveActivity(chatId, "failed", "Arrêté", { force: true, end: true });
+      if (tracksLiveActivity(source)) liveActivities.finish(chatId, "failed", "Arrêté");
     } else {
       sseWrite(res, "error", { message: err instanceof Error ? err.message : String(err) });
-      if (source === "app") publishLiveActivity(chatId, "failed", "Erreur", { force: true, end: true });
+      if (tracksLiveActivity(source)) liveActivities.finish(chatId, "failed", err instanceof Error ? err.message : "Erreur");
     }
   } finally {
     if (activeAborts.get(chatId) === abortController) activeAborts.delete(chatId);
@@ -712,6 +725,29 @@ async function handleHealthIngest(req: IncomingMessage, res: ServerResponse): Pr
   }
   const { dates } = getHealthRegistry(config.databasePath).ingest(payload);
   sendJson(res, 200, { status: "ok", dates });
+}
+
+// What the mobile app polls when it returns to the foreground
+// (`LiveActivityManager.reconcile`). A suspended app stops receiving its SSE
+// stream, so its Live Activity freezes on a stale "running" state; this is how
+// it finds out the turn actually finished. Returns 204 when the server knows
+// nothing about a turn on that chat, which the client treats as "leave the
+// activity alone".
+function handleLiveActivityState(req: IncomingMessage, res: ServerResponse): void {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const chatId = url.searchParams.get("chatId");
+  if (!requireChat(res, chatId)) return;
+  const state = liveActivities.getState(chatId);
+  if (!state) {
+    res.writeHead(204).end();
+    return;
+  }
+  sendJson(res, 200, {
+    status: state.status,
+    entries: state.entries,
+    startedAt: state.startedAt,
+    running: state.running,
+  });
 }
 
 async function handleLiveActivityRegister(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1267,6 +1303,10 @@ const server = createServer((req, res) => {
   }
   if (req.method === "POST" && path === "/api/live-activities/register") {
     handleLiveActivityRegister(req, res).catch((err) => sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  if (req.method === "GET" && path === "/api/live-activities/state") {
+    handleLiveActivityState(req, res);
     return;
   }
   if (req.method === "GET" && path === "/api/health-data/summary") {
