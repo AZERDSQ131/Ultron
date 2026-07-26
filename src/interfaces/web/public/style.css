@@ -1262,6 +1262,13 @@ footer {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+#composer[data-task="deep_research"] {
+  border-color: var(--good);
+}
+#composer[data-task="deep_research"]:focus-within {
+  border-color: var(--good);
+  box-shadow: 0 0 0 3px var(--good-soft);
+}
 
 .model-picker { position: relative; flex: none; }
 .model-picker-btn {
@@ -1456,6 +1463,9 @@ footer {
 }
 .task-btn[data-mode="plan"] .task-btn-icon {
   color: var(--accent);
+}
+.task-btn[data-mode="deep_research"] .task-btn-icon {
+  color: var(--good);
 }
 
 .task-menu {

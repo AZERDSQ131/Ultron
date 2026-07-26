@@ -40,7 +40,7 @@ const taskBtn = document.getElementById("task-btn");
 const taskBtnLabel = document.getElementById("task-btn-label");
 const taskMenu = document.getElementById("task-menu");
 const taskOptions = [...taskMenu.querySelectorAll(".task-option")];
-const TASK_LABELS = { none: "None", todo: "To-Do", plan: "Plan", goal: "Goal" };
+const TASK_LABELS = { none: "None", todo: "To-Do", plan: "Plan", goal: "Goal", deep_research: "Deep Research" };
 const securityBtn = document.getElementById("security-btn");
 const securityBtnLabel = document.getElementById("security-btn-label");
 const securityMenu = document.getElementById("security-menu");
@@ -88,7 +88,7 @@ export const COMMANDS = [
   { name: "/main", desc: "switch to the main conversation" },
   { name: "/delete", desc: "delete this conversation (memory preserved)" },
   { name: "/think", desc: "set reasoning: on, low or off" },
-  { name: "/task", desc: "set task mode: none, todo, plan or goal" },
+  { name: "/task", desc: "set task mode: none, todo, plan, goal or research" },
   { name: "/security", desc: "set tool approval: bypass, accept_edit or manual" },
   { name: "/permissions", desc: "open the tool-approval mode menu" },
   { name: "/model", desc: "open the model picker" },
@@ -610,7 +610,7 @@ async function runCommand(raw) {
   if (command === "/help") {
     addSystemNote(
       "[ultron] commands: /status · /context · /stop · /retry · /compact · /archive · /resume · " +
-        "/main · /delete · /think on|low|off · /task none|todo|plan|goal · /security bypass|accept_edit|manual · " +
+        "/main · /delete · /think on|low|off · /task none|todo|plan|goal|research · /security bypass|accept_edit|manual · " +
         "/permissions · /provider [nvidia|deepseek|groq|openai] · /login openai · /model · /theme system|dark|light · /verbose on|off · /memory [clear|forget <id>] · " +
         "/health · /tokens · /finance · /export [path|on|off] · /clear · /quit",
     );
@@ -665,13 +665,16 @@ async function runCommand(raw) {
   }
 
   if (command === "/task") {
-    const mode = arg.toLowerCase();
+    const raw = arg.toLowerCase();
+    // Same "research" shorthand the CLIs accept; the wire value stays
+    // deep_research (see TaskMode in graph.ts).
+    const mode = raw === "research" ? "deep_research" : raw;
     if (!mode) {
-      addSystemNote(`[ultron] task mode: ${state.taskMode} (use /task none|todo|plan|goal).`);
+      addSystemNote(`[ultron] task mode: ${state.taskMode} (use /task none|todo|plan|goal|research).`);
       return;
     }
-    if (!["none", "todo", "plan", "goal"].includes(mode)) {
-      addSystemNote("[ultron] use /task none, /task todo, /task plan or /task goal.", true);
+    if (!["none", "todo", "plan", "goal", "deep_research"].includes(mode)) {
+      addSystemNote("[ultron] use /task none, /task todo, /task plan, /task goal or /task research.", true);
       return;
     }
     setTaskMode(mode);
