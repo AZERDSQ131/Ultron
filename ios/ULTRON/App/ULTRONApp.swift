@@ -26,9 +26,15 @@ struct ULTRONApp: App {
                         liveActivityManager.beginBackgroundHold()
                     case .active:
                         liveActivityManager.endBackgroundHold()
-                        // The activity froze on whatever state it had when we
-                        // lost CPU; ask the server what really happened.
-                        Task { await liveActivityManager.reconcile() }
+                        Task {
+                            // The activity froze on whatever state it had when we
+                            // lost CPU; ask the server what really happened, which
+                            // may itself resolve the turn to a check or a cross.
+                            await liveActivityManager.reconcile()
+                            // The user is now looking at the app, so a finished
+                            // turn's outcome has served its purpose.
+                            await liveActivityManager.dismissFinishedActivities()
+                        }
                     @unknown default:
                         break
                     }

@@ -33,7 +33,11 @@ struct ULTRONLiveActivity: Widget {
             } compactLeading: {
                 StatusIndicator(state: state)
             } compactTrailing: {
+                // The region keeps its own inset, which reads as a gap before the
+                // island's edge. Pull back into it — safe here only because
+                // ElapsedLabel's frame is bounded, see the fixedSize warning there.
                 ElapsedLabel(state: state)
+                    .padding(.trailing, -5)
             } minimal: {
                 // Only shown when another app's activity shares the island. With
                 // no running indicator left, falling through to StatusIndicator
@@ -127,16 +131,26 @@ private struct EntryRow: View {
     let isLatest: Bool
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 12)
+                // Keeps the glyph on the first line's baseline while the text
+                // beside it is free to wrap onto a second one.
+                .padding(.top, 1)
             Text(entry.text)
                 .font(.caption2)
                 .foregroundStyle(isLatest ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                .lineLimit(isLatest ? 2 : 1)
+                .lineLimit(entry.kind == .message ? 1 : 2)
+                // A reply is stored as its tail, so head truncation is what keeps
+                // the newest words visible on its single line. Tool lines read
+                // from the start, so they truncate at the end instead.
+                .truncationMode(entry.kind == .message ? .head : .tail)
                 .multilineTextAlignment(.leading)
+                // Without this the text is proposed a narrower width than the row
+                // actually has and wraps early, pushing earlier entries off.
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

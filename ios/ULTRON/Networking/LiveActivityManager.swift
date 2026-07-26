@@ -100,10 +100,32 @@ final class LiveActivityManager {
     func finish(success: Bool) async {
         guard let activity else { return }
         let state = currentState(status: success ? .completed : .failed)
-        // Keep the outcome on screen briefly rather than yanking it away the
-        // instant the turn ends — the green check / red cross is the point.
-        await activity.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .after(.now + 8))
+        // Turn finished with the app on screen: the user is already watching, so
+        // the outcome only needs a moment. Finished while away: keep it up
+        // indefinitely (.default) so it is still there whenever they next look —
+        // dismissFinishedActivities() takes it down when they open the app.
+        let onScreen = UIApplication.shared.applicationState == .active
+        await activity.end(
+            ActivityContent(state: state, staleDate: nil),
+            dismissalPolicy: onScreen ? .after(.now + 4) : .default
+        )
         teardown()
+    }
+
+    /// Ends any activity still showing a finished turn. `finish` deliberately
+    /// leaves the green check / red cross on screen indefinitely, so this is what
+    /// takes it down once the user opens the app and has seen it. Enumerates the
+    /// system's own list because `finish` has already released our handle, and
+    /// skips anything still running so opening the app mid-turn doesn't wipe it.
+    func dismissFinishedActivities() async {
+        for activity in Activity<ULTRONTaskActivityAttributes>.activities {
+            switch activity.content.state.status {
+            case .completed, .failed:
+                await activity.end(nil, dismissalPolicy: .immediate)
+            case .running, .waitingForApproval:
+                continue
+            }
+        }
     }
 
     func end() async {
