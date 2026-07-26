@@ -67,7 +67,7 @@ export const api = {
   modelsGrouped: () => fetch("/api/models/grouped").then(json),
   reasoning: (provider, model) => fetch(`/api/reasoning?provider=${encodeURIComponent(provider)}&model=${encodeURIComponent(model)}`).then(json),
   reasoning: (provider, model) => fetch(`/api/reasoning?provider=${encodeURIComponent(provider)}&model=${encodeURIComponent(model)}`).then(json),
-  setModel: (model) => fetch("/api/model", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) }).then(json),
+  setModel: (model, provider) => fetch("/api/model", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, provider }) }).then(json),
   provider: () => fetch("/api/provider").then(json),
   setProvider: (provider) => fetch("/api/provider", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider }) }).then(json),
   openaiLoginStart: () => fetch("/api/openai/login/start", { method: "POST" }).then(json),

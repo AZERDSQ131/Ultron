@@ -1054,14 +1054,26 @@ async function handleReasoning(url: URL, res: ServerResponse): Promise<void> {
 }
 
 async function handleSetModel(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const payload = await readJson<{ model?: string }>(req);
+  const payload = await readJson<{ model?: string; provider?: string }>(req);
   const model = payload?.model?.trim();
   if (!model) { sendJson(res, 400, { error: "model is required" }); return; }
+  const provider = payload?.provider;
+  if (provider !== undefined && provider !== "nvidia" && provider !== "deepseek" && provider !== "groq" && provider !== "openai") {
+    sendJson(res, 400, { error: "invalid provider" });
+    return;
+  }
+  if (provider && provider !== config.provider) {
+    if (!hasProviderCredentials(provider)) {
+      sendJson(res, 400, { error: provider === "openai" ? "not connected — configure OpenAI first" : `${provider.toUpperCase()}_API_KEY is not set` });
+      return;
+    }
+    setActiveProvider(provider);
+  }
   const selected = await resolveModelContext<ModelInfo>({ id: model });
   setActiveModel(model);
   config.contextWindowTokens = selected.contextWindowTokens ?? fallbackContextWindowTokens;
   graph = buildGraph();
-  sendJson(res, 200, { model });
+  sendJson(res, 200, { provider: config.provider, model });
 }
 
 async function handleProvider(res: ServerResponse): Promise<void> {

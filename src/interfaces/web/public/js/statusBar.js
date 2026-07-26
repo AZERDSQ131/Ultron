@@ -105,8 +105,7 @@ function renderModelOptions(query = "") {
     meta.append(context);
     option.append(check, name, meta);
     option.addEventListener("click", async () => {
-      if (model.provider !== activeProvider) await api.setProvider(model.provider);
-      await api.setModel(model.id);
+      await api.setModel(model.id, model.provider);
       activeModel = model.id;
       activeProvider = model.provider;
       modelMenu.hidden = true;

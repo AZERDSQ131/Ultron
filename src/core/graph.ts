@@ -520,7 +520,7 @@ export function buildGraph() {
         : tools;
       const baseModel = getThinkingModel(thinkingMode);
       const model = availableTools.length ? baseModel.bindTools(availableTools) : baseModel;
-      debugLog(`agent start thread=${String(runConfig.configurable?.thread_id ?? "unknown")} thinking=${thinkingMode} messages=${state.messages.length}`);
+      debugLog(`agent start provider=${appConfig.provider} model=${appConfig.nemotronModel} thread=${String(runConfig.configurable?.thread_id ?? "unknown")} thinking=${thinkingMode} messages=${state.messages.length}`);
 
       // Only the first attempt streams live — runConfig carries the
       // callback manager LangGraph uses to forward per-token chunks to the
