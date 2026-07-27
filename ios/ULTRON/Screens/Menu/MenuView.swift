@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct MenuView: View {
     @Environment(ULTRONClient.self) private var client
+    @Binding var path: NavigationPath
 
     @State private var chats: [Chat] = []
     @State private var projects: [Project] = []
@@ -287,8 +288,9 @@ struct MenuView: View {
 
     private func createChat() async {
         do {
-            _ = try await client.createChat()
+            let chat = try await client.createChat()
             await load()
+            path.append(NavigationTarget.chat(chat.id))
         } catch {
             errorMessage = error.localizedDescription
         }

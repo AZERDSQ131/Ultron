@@ -3,13 +3,14 @@ import SwiftUI
 struct RootView: View {
     @Environment(ULTRONClient.self) private var client
     @State private var showSettings = false
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             if client.serverURLString.isEmpty {
                 onboarding
             } else {
-                MenuView()
+                MenuView(path: $path)
             }
         }
         .sheet(isPresented: $showSettings) {
