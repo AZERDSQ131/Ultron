@@ -212,9 +212,12 @@ struct MenuView: View {
 
     // Chats already filed under a project are only shown inside that
     // project's own view (ProjectView), not duplicated in the flat
-    // recent/folder lists here.
+    // recent/folder lists here. Sub-agent chats (parentChatId set) are never
+    // shown here either — they have nobody to talk to and no reason to be
+    // browsed independently; they're only reachable from the spawn_agent
+    // tool call that created them, via the observe sheet in ChatView.
     private var visibleChats: [Chat] {
-        let unfiled = chats.filter { $0.projectId == nil }
+        let unfiled = chats.filter { $0.projectId == nil && $0.parentChatId == nil }
         guard !searchQuery.isEmpty else { return unfiled }
         return unfiled.filter { $0.title.localizedCaseInsensitiveContains(searchQuery) }
     }

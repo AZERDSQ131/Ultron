@@ -49,7 +49,21 @@ struct SubAgentChatView: View {
             NavigationStack { SubAgentChatView(route: child) }
         }
         .refreshable { await load() }
-        .task { await load() }
+        .task { await pollWhileRunning() }
+    }
+
+    /// Nobody drives this conversation from here, so "live" has to mean
+    /// polling rather than an SSE stream tied to a turn this device started.
+    /// Keeps reloading on a short interval as long as the sub-agent is still
+    /// running, then stops — mirroring the terminal state a real stream
+    /// would deliver once.
+    private func pollWhileRunning() async {
+        await load()
+        while isRunning && !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            await load()
+        }
     }
 
     private var header: some View {
