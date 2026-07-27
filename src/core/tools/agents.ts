@@ -76,6 +76,20 @@ export function abortSubAgents(chatId: string): number {
   return stopped;
 }
 
+// A sub-agent's own run goes through getSubGraph().invoke() (see spawnAgent
+// below), never streamGraphTurn — so activeAborts (server.ts) never gets an
+// entry for a child's own chat id, and GET .../messages was reporting
+// running: false for a sub-agent's own conversation even while it was very
+// much still running. That was the actual reason SubAgentChatView needed a
+// manual close/reopen to update: pollWhileRunning's loop condition (isRunning)
+// was never true past the first load, so it only ever fetched once.
+export function isRunningSubAgent(chatId: string): boolean {
+  for (const children of runningByParent.values()) {
+    if (children.has(chatId)) return true;
+  }
+  return false;
+}
+
 export function activeSubAgentIds(chatId: string): string[] {
   return [...(runningByParent.get(chatId)?.keys() ?? [])];
 }

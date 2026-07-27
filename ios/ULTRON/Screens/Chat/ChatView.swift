@@ -31,6 +31,7 @@ struct ChatView: View {
     @State private var observedSubAgent: SubAgentRoute?
     @State private var pendingApprovalId: String?
     @State private var streamTask: Task<Void, Never>?
+    @State private var subAgentWatchTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -360,6 +361,7 @@ struct ChatView: View {
 
     private func stop() {
         streamTask?.cancel()
+        subAgentWatchTask?.cancel()
         Task { try? await client.stop(chatId: chatId) }
         Task { await liveActivity.end() }
         isSending = false
@@ -371,9 +373,29 @@ struct ChatView: View {
         runStream(client.streamApprove(chatId: chatId, decisions: decisions, thinking: thinkingMode, taskMode: taskMode))
     }
 
+    /// Belt-and-suspenders alongside the subAgentStarted SSE event: polls
+    /// runningSubAgents every 2s for as long as this turn is sending, so a
+    /// sub-agent's widget still appears even if that push event doesn't
+    /// arrive for some reason (dropped frame, reconnect mid-turn). Additive
+    /// only — mergeRunningSubAgents never touches an item that's already
+    /// there, so it can't stomp on live-streamed text.
+    private func watchRunningSubAgents() {
+        subAgentWatchTask?.cancel()
+        subAgentWatchTask = Task {
+            while isSending && !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, isSending else { return }
+                if let response = try? await client.messages(for: chatId) {
+                    timeline.mergeRunningSubAgents(response.runningSubAgents)
+                }
+            }
+        }
+    }
+
     private func runStream(_ stream: AsyncThrowingStream<TurnEvent, Error>) {
         isSending = true
         timeline.beginAssistantTurn()
+        watchRunningSubAgents()
         streamTask = Task {
             var terminalEventReceived = false
             // The Live Activity rewrites its streaming line in place, so it needs
@@ -431,6 +453,7 @@ struct ChatView: View {
             }
             timeline.endTurn()
             isSending = false
+            subAgentWatchTask?.cancel()
         }
     }
 }

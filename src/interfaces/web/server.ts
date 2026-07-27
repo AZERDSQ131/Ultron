@@ -32,7 +32,7 @@ import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../cor
 import { ScheduleRegistry } from "../../core/memory/schedules.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getResearchRegistry } from "../../core/memory/research.js";
-import { abortSubAgents, activeSubAgentIds, parseSubAgentMarker, type SubAgentStartedEvent } from "../../core/tools/agents.js";
+import { abortSubAgents, activeSubAgentIds, isRunningSubAgent, parseSubAgentMarker, type SubAgentStartedEvent } from "../../core/tools/agents.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getHealthRegistry, pickLatestWithData, type HealthExportPayload, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
@@ -277,7 +277,11 @@ function runningSubAgentsOf(chatId: string) {
 async function handleChatMessages(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   const messages = await listChatMessages(graph, chatId);
-  sendJson(res, 200, { messages, running: activeAborts.has(chatId), runningSubAgents: runningSubAgentsOf(chatId) });
+  sendJson(res, 200, {
+    messages,
+    running: activeAborts.has(chatId) || isRunningSubAgent(chatId),
+    runningSubAgents: runningSubAgentsOf(chatId),
+  });
 }
 
 // Backs the web UI's right-side to-do panel — read straight from the todos
