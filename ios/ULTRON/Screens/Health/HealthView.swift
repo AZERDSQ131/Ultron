@@ -52,9 +52,7 @@ struct HealthView: View {
             anomaliesCard(anomalies)
         }
 
-        if days.filter({ metric.value($0) != nil }).count > 1 {
-            trendCard(days)
-        }
+        trendCard(days)
 
         if let latest {
             latestDayCard(latest)
@@ -144,28 +142,36 @@ struct HealthView: View {
             .pickerStyle(.segmented)
             .padding(.bottom, 4)
 
-            Chart(points) { point in
-                if metric.usesBars {
-                    BarMark(x: .value("Jour", point.date, unit: .day), y: .value(metric.label, point.value))
-                        .foregroundStyle(metric.tint)
-                        .cornerRadius(2)
-                } else {
-                    LineMark(x: .value("Jour", point.date, unit: .day), y: .value(metric.label, point.value))
-                        .foregroundStyle(metric.tint)
-                        .interpolationMethod(.monotone)
-                    PointMark(x: .value("Jour", point.date, unit: .day), y: .value(metric.label, point.value))
-                        .foregroundStyle(metric.tint)
-                        .symbolSize(18)
+            if points.count > 1 {
+                Chart(points) { point in
+                    if metric.usesBars {
+                        BarMark(x: .value("Jour", point.date, unit: .day), y: .value(metric.label, point.value))
+                            .foregroundStyle(metric.tint)
+                            .cornerRadius(2)
+                    } else {
+                        LineMark(x: .value("Jour", point.date, unit: .day), y: .value(metric.label, point.value))
+                            .foregroundStyle(metric.tint)
+                            .interpolationMethod(.monotone)
+                        PointMark(x: .value("Jour", point.date, unit: .day), y: .value(metric.label, point.value))
+                            .foregroundStyle(metric.tint)
+                            .symbolSize(18)
+                    }
                 }
-            }
-            .chartYScale(domain: metric.yDomain(for: points.map(\.value)))
-            .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
-            .frame(height: 170)
+                .chartYScale(domain: metric.yDomain(for: points.map(\.value)))
+                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+                .frame(height: 170)
 
-            if let average {
-                Text("\(metric.label) : \(metric.format(average)) en moyenne sur \(points.count) jour\(points.count > 1 ? "s" : "") mesuré\(points.count > 1 ? "s" : "")")
-                    .font(.caption2)
+                if let average {
+                    Text("\(metric.label) : \(metric.format(average)) en moyenne sur \(points.count) jour\(points.count > 1 ? "s" : "") mesuré\(points.count > 1 ? "s" : "")")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Pas assez de données pour tracer une tendance sur « \(metric.label) ».")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
             }
         }
     }
