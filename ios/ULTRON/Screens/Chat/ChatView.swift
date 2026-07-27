@@ -171,11 +171,13 @@ struct ChatView: View {
     }
 
     private func bootstrap() async {
+        var running = false
         do {
             let response = try await client.messages(for: chatId)
             timeline.loadHistory(response.messages)
             let tools = try await client.tools()
             timeline.setToolScopes(tools)
+            running = response.running
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -186,6 +188,33 @@ struct ChatView: View {
             await loadReasoningProfile()
         } catch {
             // Non-fatal: model label just stays empty until picked.
+        }
+        // Reopening a chat that already has a turn in flight (started before
+        // this screen existed, or from another device) used to show a static
+        // snapshot with no Stop button — nothing here ever checked whether the
+        // server still considered the chat "running". There is no way to
+        // rejoin the original SSE connection, so this polls the same way
+        // SubAgentChatView does until the turn actually finishes.
+        if running { reconnectToRunningTurn() }
+    }
+
+    private func reconnectToRunningTurn() {
+        isSending = true
+        streamTask = Task {
+            while isSending && !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled else { return }
+                do {
+                    let response = try await client.messages(for: chatId)
+                    timeline.loadHistory(response.messages)
+                    if !response.running {
+                        isSending = false
+                        timeline.endTurn()
+                    }
+                } catch {
+                    // Transient network hiccup: keep polling rather than giving up.
+                }
+            }
         }
     }
 

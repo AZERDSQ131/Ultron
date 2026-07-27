@@ -265,7 +265,7 @@ async function handleDeleteChat(res: ServerResponse, chatId: string): Promise<vo
 async function handleChatMessages(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   const messages = await listChatMessages(graph, chatId);
-  sendJson(res, 200, { messages, running: false });
+  sendJson(res, 200, { messages, running: activeAborts.has(chatId) });
 }
 
 // Backs the web UI's right-side to-do panel — read straight from the todos
