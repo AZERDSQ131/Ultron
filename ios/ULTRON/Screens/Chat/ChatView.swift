@@ -48,6 +48,7 @@ struct ChatView: View {
                 .onChange(of: timeline.items.count) {
                     withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
+                .scrollDismissesKeyboard(.interactively)
             }
 
             if let errorMessage {

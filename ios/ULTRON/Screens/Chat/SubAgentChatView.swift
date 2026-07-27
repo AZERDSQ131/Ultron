@@ -11,6 +11,7 @@ struct SubAgentChatView: View {
     let route: SubAgentRoute
 
     @Environment(ULTRONClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
     @State private var timeline = ChatTimelineBuilder()
     @State private var isRunning = false
     @State private var isLoading = true
@@ -45,6 +46,13 @@ struct SubAgentChatView: View {
         }
         .navigationTitle(route.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                }
+            }
+        }
         .sheet(item: $nested) { child in
             NavigationStack { SubAgentChatView(route: child) }
         }
@@ -98,7 +106,12 @@ struct SubAgentChatView: View {
     private func isVisible(_ item: ChatTimelineItem) -> Bool {
         switch item {
         case .human: return false
-        case .assistant(_, let text, _): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .assistant(_, let text, _):
+            // Between tool calls the model sometimes emits an assistant turn
+            // whose visible content is empty or a bare `""` (a stringified
+            // empty JSON value) — same filter as ChatView's isVisible.
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !trimmed.isEmpty && trimmed != "\"\"" && trimmed != "\""
         case .toolGroup, .subAgent, .approval: return true
         }
     }
