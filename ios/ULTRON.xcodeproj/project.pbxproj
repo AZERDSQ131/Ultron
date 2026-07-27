@@ -17,6 +17,7 @@
 		33C50FE6D8FE5AF06383C0D3 /* FinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D208BF5036689DC38E4D5D66 /* FinanceView.swift */; };
 		396BE6F555614F20CCDBA264 /* DashboardCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54CAE4F4A37E3AEE15D00E6A /* DashboardCards.swift */; };
 		53A2E23DE9BAE2DBDB04B0EA /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A5BA85C4FFE1BFD76C3A55 /* Color+Hex.swift */; };
+		42F336CCF5285161AED9F4EE /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A3C18B355F72E75ED2F3F5 /* Haptics.swift */; };
 		5665C4CF81E0522F1B769BE9 /* ApprovalCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CC5A83F5B96CA4B171D1FA4 /* ApprovalCardView.swift */; };
 		5B993B28A93DBED0954A5B2C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECBBD24E385B1E6D4D6D6C33 /* Models.swift */; };
 		65D1B812D4EE448BA6E446DB /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3EAEBD27A4DCE4BE000D08 /* LiveActivityManager.swift */; };
@@ -96,6 +97,7 @@
 		D208BF5036689DC38E4D5D66 /* FinanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinanceView.swift; sourceTree = "<group>"; };
 		D31CB21B015ABB8FC21CFB45 /* ULTRON.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ULTRON.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E3A5BA85C4FFE1BFD76C3A55 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
+		E2A3C18B355F72E75ED2F3F5 /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		E8688BB904F427BE4D29CAFE /* ChatListRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListRow.swift; sourceTree = "<group>"; };
 		E8A11F30FD0AC57BB7234030 /* OpenAILoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAILoginSheet.swift; sourceTree = "<group>"; };
 		EA3EAEBD27A4DCE4BE000D08 /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
@@ -253,6 +255,7 @@
 			children = (
 				E3A5BA85C4FFE1BFD76C3A55 /* Color+Hex.swift */,
 				252EBC81E9E4DFDEE56F3ACB /* MarkdownText.swift */,
+				E2A3C18B355F72E75ED2F3F5 /* Haptics.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -386,6 +389,7 @@
 				DBAF552F5921CCFCE5FE7384 /* ChatTimelineItem.swift in Sources */,
 				D0DEC311CE415B15EB9545F0 /* ChatView.swift in Sources */,
 				53A2E23DE9BAE2DBDB04B0EA /* Color+Hex.swift in Sources */,
+				42F336CCF5285161AED9F4EE /* Haptics.swift in Sources */,
 				CC20C09B781D43567E843531 /* ComposerBar.swift in Sources */,
 				17C445D2EB6412B6F8FCF291 /* ComposerPickers.swift in Sources */,
 				396BE6F555614F20CCDBA264 /* DashboardCards.swift in Sources */,

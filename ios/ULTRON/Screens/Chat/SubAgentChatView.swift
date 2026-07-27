@@ -48,7 +48,10 @@ struct SubAgentChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { dismiss() } label: {
+                Button {
+                    Haptics.tap()
+                    dismiss()
+                } label: {
                     Image(systemName: "xmark")
                 }
             }

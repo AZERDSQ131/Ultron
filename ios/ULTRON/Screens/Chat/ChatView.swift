@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import PhotosUI
+import UIKit
 
 struct ChatView: View {
     let chatId: String
@@ -19,9 +20,11 @@ struct ChatView: View {
     @State private var taskMode = "none"
     @State private var securityMode = "bypass"
     @State private var verbose = false
-    @State private var photoItem: PhotosPickerItem?
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var pendingAttachments: [PendingAttachment] = []
     @State private var isRecording = false
     @State private var recorder: AVAudioRecorder?
+    @State private var preparedRecorder: AVAudioRecorder?
 
     @State private var showModelPicker = false
     @State private var showThinkingModePicker = false
@@ -67,7 +70,9 @@ struct ChatView: View {
                 permissionLabel: permissionLabel,
                 verbose: verbose,
                 isSending: isSending,
-                photoItem: $photoItem,
+                photoItems: $photoItems,
+                pendingAttachments: pendingAttachments,
+                onRemoveAttachment: { attachment in pendingAttachments.removeAll { $0.id == attachment.id } },
                 isRecording: isRecording,
                 onSend: { send() },
                 onStop: { stop() },
@@ -107,11 +112,14 @@ struct ChatView: View {
         .sheet(item: $observedSubAgent) { route in
             NavigationStack { SubAgentChatView(route: route) }
         }
-        .task { await bootstrap() }
-        .onChange(of: photoItem) { _, item in
-            guard let item else { return }
-            Task { await attachPhoto(item) }
-            photoItem = nil
+        .task {
+            await bootstrap()
+            prewarmRecorder()
+        }
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
+            photoItems = []
+            Task { await attachPhotos(items) }
         }
     }
 
@@ -239,24 +247,33 @@ struct ChatView: View {
     }
 
     private func send(textOverride: String? = nil) {
-        let text = (textOverride ?? composerText).trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = (textOverride ?? composerText).trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachmentNotes = pendingAttachments.map { "[Attached image]\n- \($0.path)" }.joined(separator: "\n\n")
+        let text = attachmentNotes.isEmpty ? typed : (typed.isEmpty ? attachmentNotes : "\(typed)\n\n\(attachmentNotes)")
         guard !text.isEmpty else { return }
         composerText = ""
+        pendingAttachments = []
         timeline.addHumanMessage(text)
         Task { await liveActivity.start(chatId: chatId, title: "ULTRON") }
         runStream(client.streamTurn(chatId: chatId, text: text, thinking: thinkingMode, taskMode: taskMode))
     }
 
-    private func attachPhoto(_ item: PhotosPickerItem) async {
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self) else { return }
-            let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
-            let extensionName = mimeType.split(separator: "/").last.map(String.init) ?? "jpg"
-            let saved = try await client.uploadFile(chatId: chatId, filename: "photo.\(extensionName)", data: data)
-            let note = "[Attached image]\n- \(saved.path)"
-            composerText = composerText.isEmpty ? note : "\(composerText)\n\n\(note)"
-        } catch {
-            errorMessage = "Impossible d'importer la photo : \(error.localizedDescription)"
+    /// Uploaded and queued as thumbnails above the composer rather than
+    /// folded into the text field immediately — several can be attached
+    /// before sending, and the note referencing each upload path is only
+    /// built into the message at send() time.
+    private func attachPhotos(_ items: [PhotosPickerItem]) async {
+        for item in items {
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else { continue }
+                let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
+                let extensionName = mimeType.split(separator: "/").last.map(String.init) ?? "jpg"
+                let saved = try await client.uploadFile(chatId: chatId, filename: "photo.\(extensionName)", data: data)
+                guard let uiImage = UIImage(data: data) else { continue }
+                pendingAttachments.append(PendingAttachment(path: saved.path, thumbnail: Image(uiImage: uiImage)))
+            } catch {
+                errorMessage = "Impossible d'importer la photo : \(error.localizedDescription)"
+            }
         }
     }
 
@@ -286,43 +303,68 @@ struct ChatView: View {
         }
     }
 
+    /// Building an AVAudioRecorder and calling prepareToRecord() is the
+    /// slowest part of getting audio flowing (buffer + file allocation) —
+    /// Apple's own docs recommend calling it ahead of time specifically to
+    /// cut the lag between tapping record and sound actually being captured.
+    /// Done here instead of inside startRecording() so that cost is already
+    /// paid by the time the user taps the mic. Only sets the session
+    /// category (cheap, no hardware engagement) — setActive(true) still
+    /// happens at record time, since deactivating between recordings (see
+    /// deactivateAudioSession) is deliberate.
+    private func prewarmRecorder() {
+        let session = AVAudioSession.sharedInstance()
+        guard (try? session.setCategory(.record, mode: .default, options: [.allowBluetooth])) != nil else { return }
+        let sampleRate = session.sampleRate > 0 ? session.sampleRate : 44_100
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ultron-voice-\(UUID().uuidString).m4a")
+        guard let recorder = try? AVAudioRecorder(url: url, settings: [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+        ]) else { return }
+        recorder.prepareToRecord()
+        preparedRecorder = recorder
+    }
+
     private func startRecording() {
         let session = AVAudioSession.sharedInstance()
-
-        // `.spokenAudio` is a *playback* mode (long-form spoken content); pairing
-        // it with the `.record` category is rejected as OSStatus -50 (badParam).
-        // `.default` is the correct mode for plain capture.
         do {
-            try session.setCategory(.record, mode: .default, options: [.allowBluetooth])
             try session.setActive(true)
         } catch {
             errorMessage = "Impossible d'activer la session audio : \(Self.audioErrorDetail(error))"
             return
         }
 
-        // Follow the hardware's own rate instead of asking for one it may not
-        // support, and pass it as a Double — AVSampleRateKey expects a
-        // floating-point value, and an integer here is the other way to get -50.
-        let sampleRate = session.sampleRate > 0 ? session.sampleRate : 44_100
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ultron-voice-\(UUID().uuidString).m4a")
-        do {
-            let recorder = try AVAudioRecorder(url: url, settings: [
+        let recorder: AVAudioRecorder
+        if let preparedRecorder {
+            recorder = preparedRecorder
+        } else {
+            // Fallback if prewarming failed or hasn't run yet — same
+            // construction as prewarmRecorder, just not prepared ahead of time.
+            let sampleRate = session.sampleRate > 0 ? session.sampleRate : 44_100
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("ultron-voice-\(UUID().uuidString).m4a")
+            guard let fresh = try? AVAudioRecorder(url: url, settings: [
                 AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
                 AVSampleRateKey: sampleRate,
                 AVNumberOfChannelsKey: 1,
                 AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-            ])
-            guard recorder.record() else {
+            ]) else {
                 deactivateAudioSession()
-                errorMessage = "Le microphone n'a pas démarré l'enregistrement."
+                errorMessage = "Impossible de démarrer le microphone."
                 return
             }
-            self.recorder = recorder
-            isRecording = true
-        } catch {
-            deactivateAudioSession()
-            errorMessage = "Impossible de démarrer le microphone : \(Self.audioErrorDetail(error))"
+            recorder = fresh
         }
+        self.preparedRecorder = nil
+
+        guard recorder.record() else {
+            deactivateAudioSession()
+            errorMessage = "Le microphone n'a pas démarré l'enregistrement."
+            return
+        }
+        self.recorder = recorder
+        isRecording = true
     }
 
     /// Leaving the session active keeps the app in the `.record` category, which
@@ -345,6 +387,7 @@ struct ChatView: View {
         self.recorder = nil
         isRecording = false
         deactivateAudioSession()
+        prewarmRecorder()
         let url = recorder.url
         Task {
             do {

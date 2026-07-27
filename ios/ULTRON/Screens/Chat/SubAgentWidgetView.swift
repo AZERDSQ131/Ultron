@@ -36,7 +36,10 @@ struct SubAgentWidgetView: View {
 
             Spacer(minLength: 8)
 
-            Button(action: onView) {
+            Button {
+                Haptics.tap()
+                onView()
+            } label: {
                 Text("Voir")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 12)

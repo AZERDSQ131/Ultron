@@ -1,6 +1,15 @@
 import SwiftUI
 import PhotosUI
 
+/// An image already uploaded and waiting to be attached to the next message —
+/// shown as a thumbnail above the input rather than folded into the text
+/// field immediately, so several can be queued up before sending.
+struct PendingAttachment: Identifiable {
+    let id = UUID()
+    let path: String
+    let thumbnail: Image
+}
+
 struct ComposerBar: View {
     @Binding var text: String
     let modelLabel: String
@@ -9,7 +18,9 @@ struct ComposerBar: View {
     let permissionLabel: String
     let verbose: Bool
     let isSending: Bool
-    @Binding var photoItem: PhotosPickerItem?
+    @Binding var photoItems: [PhotosPickerItem]
+    let pendingAttachments: [PendingAttachment]
+    let onRemoveAttachment: (PendingAttachment) -> Void
     let isRecording: Bool
     let onSend: () -> Void
     let onStop: () -> Void
@@ -32,14 +43,42 @@ struct ComposerBar: View {
             }
             .scrollableIfNeeded()
 
+            if !pendingAttachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(pendingAttachments) { attachment in
+                            ZStack(alignment: .topTrailing) {
+                                attachment.thumbnail
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 60, height: 60)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                Button {
+                                    Haptics.tap()
+                                    onRemoveAttachment(attachment)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.callout)
+                                        .symbolRenderingMode(.palette)
+                                        .foregroundStyle(.white, .black.opacity(0.55))
+                                }
+                                .offset(x: 5, y: -5)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+            }
+
             HStack(alignment: .bottom, spacing: 8) {
-                PhotosPicker(selection: $photoItem, matching: .images) {
+                PhotosPicker(selection: $photoItems, matching: .images) {
                     Image(systemName: "plus")
                         .font(.body.weight(.semibold))
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)
+                .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
 
                 TextField("Écris à ULTRON...", text: $text, axis: .vertical)
                     .lineLimit(1...6)
@@ -48,7 +87,10 @@ struct ComposerBar: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.22)))
 
-                Button(action: onToggleRecording) {
+                Button {
+                    Haptics.tap()
+                    onToggleRecording()
+                } label: {
                     Image(systemName: isRecording ? "waveform" : "mic.fill")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(isRecording ? .red : .primary)
@@ -58,6 +100,7 @@ struct ComposerBar: View {
                 .accessibilityLabel(isRecording ? "Arrêter la dictée" : "Dicter un message")
 
                 Button {
+                    Haptics.tap()
                     if isSending {
                         onStop()
                     } else {
@@ -68,10 +111,9 @@ struct ComposerBar: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.white)
                         .frame(width: 34, height: 34)
-                        .background(.thinMaterial, in: Circle())
-                        .overlay(Circle().fill(isSending ? Color.red : Color.accentColor).opacity(0.9))
+                        .background(isSending ? Color.red : Color.accentColor, in: Circle())
                 }
-                .disabled(!isSending && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!isSending && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty)
             }
         }
         .padding(.horizontal, 10)
@@ -81,7 +123,10 @@ struct ComposerBar: View {
     }
 
     private func pillButton(_ label: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            Haptics.tap()
+            action()
+        } label: {
             Label(label, systemImage: systemImage)
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 10)

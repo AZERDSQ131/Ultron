@@ -112,6 +112,7 @@ struct MenuView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
+                    Haptics.tap()
                     Task { await createChat() }
                 } label: {
                     Image(systemName: "plus")

@@ -55,9 +55,12 @@ struct ApprovalCardView: View {
             }
 
             if decisions.count == calls.count {
-                Button("Confirmer") { onDecide(decisions) }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
+                Button("Confirmer") {
+                    Haptics.tapMedium()
+                    onDecide(decisions)
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(12)
@@ -65,6 +68,7 @@ struct ApprovalCardView: View {
     }
 
     private func decide(_ id: String, approve: Bool) {
+        Haptics.tap()
         decisions[id] = approve
     }
 }
