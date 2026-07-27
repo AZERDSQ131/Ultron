@@ -161,7 +161,11 @@ struct ChatView: View {
         case .assistant(_, let text, let stats):
             AssistantMessageView(text: text, stats: verbose ? stats : nil)
         case .toolGroup(_, let calls):
-            ToolCallGroupView(calls: calls) { observedSubAgent = $0 }
+            ToolCallGroupView(calls: calls)
+        case .subAgent(_, let chatId, let title, let task, let finished):
+            SubAgentWidgetView(title: title, task: task, finished: finished) {
+                observedSubAgent = SubAgentRoute(chatId: chatId, title: title)
+            }
         case .approval(let id, let calls):
             ApprovalCardView(calls: calls) { decisions in
                 pendingApprovalId = id
@@ -175,6 +179,7 @@ struct ChatView: View {
         do {
             let response = try await client.messages(for: chatId)
             timeline.loadHistory(response.messages)
+            timeline.mergeRunningSubAgents(response.runningSubAgents)
             let tools = try await client.tools()
             timeline.setToolScopes(tools)
             running = response.running
@@ -207,6 +212,7 @@ struct ChatView: View {
                 do {
                     let response = try await client.messages(for: chatId)
                     timeline.loadHistory(response.messages)
+                    timeline.mergeRunningSubAgents(response.runningSubAgents)
                     if !response.running {
                         isSending = false
                         timeline.endTurn()
@@ -384,9 +390,15 @@ struct ChatView: View {
                         assistantText = ""
                         await liveActivity.noteToolCall(name: name, summary: summary)
                     case .toolResult(let name, let content):
-                        timeline.addToolResult(name: name, content: content)
+                        if name == "spawn_agent", let subChatId = parseSubAgentMarker(content) {
+                            timeline.markSubAgentFinished(chatId: subChatId)
+                        } else {
+                            timeline.addToolResult(name: name, content: content)
+                        }
                         assistantText = ""
                         await liveActivity.noteToolResult(name: name, content: content)
+                    case .subAgentStarted(let subChatId, let title, let task):
+                        timeline.addSubAgentStarted(chatId: subChatId, title: title, task: task)
                     case .approvalRequired(let calls):
                         timeline.addApproval(calls)
                         await liveActivity.noteApprovalRequired()

@@ -99,7 +99,7 @@ struct SubAgentChatView: View {
         switch item {
         case .human: return false
         case .assistant(_, let text, _): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .toolGroup, .approval: return true
+        case .toolGroup, .subAgent, .approval: return true
         }
     }
 
@@ -111,8 +111,12 @@ struct SubAgentChatView: View {
         case .assistant(_, let text, _):
             AssistantMessageView(text: text)
         case .toolGroup(_, let calls):
+            ToolCallGroupView(calls: calls)
+        case .subAgent(_, let chatId, let title, let subTask, let finished):
             // A sub-agent can spawn its own, so keep the chain walkable.
-            ToolCallGroupView(calls: calls) { nested = $0 }
+            SubAgentWidgetView(title: title, task: subTask, finished: finished) {
+                nested = SubAgentRoute(chatId: chatId, title: title)
+            }
         case .approval(_, let calls):
             // Observation only, so an approval can't be acted on from here.
             ToolCallGroupView(calls: calls.map { ToolCallEntry(name: $0.name, summary: "en attente d'approbation") })
@@ -124,6 +128,7 @@ struct SubAgentChatView: View {
             let response = try await client.messages(for: route.chatId)
             let fresh = ChatTimelineBuilder()
             fresh.loadHistory(response.messages)
+            fresh.mergeRunningSubAgents(response.runningSubAgents)
             if let tools = try? await client.tools() { fresh.setToolScopes(tools) }
             timeline = fresh
             isRunning = response.running

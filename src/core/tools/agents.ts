@@ -80,6 +80,16 @@ export function activeSubAgentIds(chatId: string): string[] {
   return [...(runningByParent.get(chatId)?.keys() ?? [])];
 }
 
+// Fired the instant a child chat exists, well before the sub-agent's own run
+// (which the tool call awaits in full) finishes — that gap can be minutes,
+// and the chat id is only ever generated here, so this is the one point
+// where a client watching live can learn it early instead of waiting for
+// the tool result's [ultron:subagent chat=...] marker. Passed in via
+// runConfig.configurable rather than a module-level EventEmitter, since a
+// global emitter would leak the event to every concurrently streaming chat
+// instead of just the one that requested it (see streamGraphTurn, server.ts).
+export type SubAgentStartedEvent = { chatId: string; title: string; task: string };
+
 export const spawnAgent = tool(
   async ({ task, label }: { task: string; label?: string | null }, runConfig?: RunnableConfig) => {
     const parentChatId = runConfig?.configurable?.thread_id;
@@ -93,6 +103,8 @@ export const spawnAgent = tool(
 
     const title = (label?.trim() || task.trim()).slice(0, 60);
     const child = chats.createSubAgent(parentChatId, title, task.trim());
+    const onStarted = runConfig?.configurable?.onSubAgentStarted as ((event: SubAgentStartedEvent) => void) | undefined;
+    onStarted?.({ chatId: child.id, title, task: task.trim() });
 
     const controller = new AbortController();
     registerRun(parentChatId, child.id, controller);

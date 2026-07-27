@@ -36,6 +36,11 @@ export function summarizeToolCall(name: string, rawArgs: string): string {
       return "List processes";
     case "kill_process":
       return typeof args.pid === "number" ? `Signal process ${args.pid}` : "Signal process";
+    case "spawn_agent": {
+      const label = typeof args.label === "string" && args.label.trim() ? args.label.trim() : undefined;
+      const task = typeof args.task === "string" ? args.task.trim() : undefined;
+      return (label || task || "Delegate to a sub-agent").slice(0, 80);
+    }
     default:
       return name;
   }

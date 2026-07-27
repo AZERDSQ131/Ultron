@@ -32,7 +32,7 @@ import { defaultExportPath, maybeExportChat, resolveExportPath } from "../../cor
 import { ScheduleRegistry } from "../../core/memory/schedules.js";
 import { getTodoRegistry } from "../../core/memory/todos.js";
 import { getResearchRegistry } from "../../core/memory/research.js";
-import { abortSubAgents, parseSubAgentMarker } from "../../core/tools/agents.js";
+import { abortSubAgents, activeSubAgentIds, parseSubAgentMarker, type SubAgentStartedEvent } from "../../core/tools/agents.js";
 import { getGoalRegistry } from "../../core/memory/goals.js";
 import { getHealthRegistry, pickLatestWithData, type HealthExportPayload, type HealthMetric } from "../../core/memory/health.js";
 import { computeActivityScore, computeRecoveryScore } from "../../core/health/scoring.js";
@@ -262,10 +262,22 @@ async function handleDeleteChat(res: ServerResponse, chatId: string): Promise<vo
   sendJson(res, 200, { deleted: true });
 }
 
+// spawn_agent awaits its sub-agent's entire run before returning anything, so
+// a still-running one has no tool_result yet in `messages` and therefore no
+// child chat id a client could reconstruct from history alone (that id only
+// ever exists in the DB row created at spawn time). activeSubAgentIds is the
+// one place that id is tracked while the run is in flight.
+function runningSubAgentsOf(chatId: string) {
+  return activeSubAgentIds(chatId).map((id) => {
+    const chat = chats.get(id);
+    return { chatId: id, title: chat?.title ?? "Sous-agent", task: chat?.subagentTask ?? "" };
+  });
+}
+
 async function handleChatMessages(res: ServerResponse, chatId: string): Promise<void> {
   if (!requireChat(res, chatId)) return;
   const messages = await listChatMessages(graph, chatId);
-  sendJson(res, 200, { messages, running: activeAborts.has(chatId) });
+  sendJson(res, 200, { messages, running: activeAborts.has(chatId), runningSubAgents: runningSubAgentsOf(chatId) });
 }
 
 // Backs the web UI's right-side to-do panel — read straight from the todos
@@ -331,8 +343,15 @@ async function streamGraphTurn(
     // Serialized per chatId (see threadLock.ts) so another graph execution
     // cannot land on the same chat mid-stream and corrupt the live reply.
     await withThreadLock(chatId, async () => {
+      const onSubAgentStarted = (event: SubAgentStartedEvent) => {
+        sseWrite(res, "subagent_started", event);
+        if (tracksLiveActivity(source)) {
+          streamingParagraph = "";
+          liveActivities.noteTool(chatId, `spawn_agent — ${event.title}`);
+        }
+      };
       const stream = await graph.stream(input, {
-        configurable: { thread_id: chatId, thinking: thinkingMode, taskMode },
+        configurable: { thread_id: chatId, thinking: thinkingMode, taskMode, onSubAgentStarted },
         signal: abortController.signal,
         streamMode: "messages",
         recursionLimit: config.graphRecursionLimit,

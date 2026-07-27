@@ -161,7 +161,7 @@ final class ULTRONClient {
         let _: ChatResponse = try await request("PATCH", "/api/chats/\(chatId)/project", body: SetChatProjectBody(projectId: projectId))
     }
 
-    struct MessagesResponse: Codable { let messages: [ChatMessage]; let running: Bool }
+    struct MessagesResponse: Codable { let messages: [ChatMessage]; let running: Bool; let runningSubAgents: [RunningSubAgent] }
     func messages(for chatId: String) async throws -> MessagesResponse {
         try await requestNoBody("GET", "/api/chats/\(chatId)/messages")
     }
@@ -525,6 +525,10 @@ final class ULTRONClient {
             struct Payload: Codable { let name: String; let content: String }
             guard let payload = try? decoder.decode(Payload.self, from: data) else { return nil }
             return .toolResult(name: payload.name, content: payload.content)
+        case "subagent_started":
+            struct Payload: Codable { let chatId: String; let title: String; let task: String }
+            guard let payload = try? decoder.decode(Payload.self, from: data) else { return nil }
+            return .subAgentStarted(chatId: payload.chatId, title: payload.title, task: payload.task)
         case "approval_required":
             struct Payload: Codable { let calls: [PendingToolCall] }
             guard let payload = try? decoder.decode(Payload.self, from: data) else { return nil }

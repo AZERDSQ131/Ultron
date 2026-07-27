@@ -148,11 +148,28 @@ enum TurnEvent {
     case text(String)
     case toolCall(name: String, summary: String)
     case toolResult(name: String, content: String)
+    // Fired the instant spawn_agent creates its child chat, well before the
+    // tool call itself returns (it awaits the sub-agent's entire run) — the
+    // only way a live client learns the child's chat id early instead of
+    // waiting for the marker buried in the eventual tool_result.
+    case subAgentStarted(chatId: String, title: String, task: String)
     case approvalRequired([PendingToolCall])
     case done(TurnDoneStats)
     case goal(status: String, reason: String)
     case aborted
     case error(String)
+}
+
+/// A sub-agent chat spawn_agent already created and is still running, as seen
+/// from GET /api/chats/:id/messages — the one case a message-history replay
+/// can't reconstruct on its own, since the child's id only exists in the DB
+/// row created at spawn time, not in the parent's persisted messages until
+/// the (still pending) tool call eventually returns.
+struct RunningSubAgent: Codable, Identifiable {
+    let chatId: String
+    let title: String
+    let task: String
+    var id: String { chatId }
 }
 
 // MARK: - Finance
